@@ -53,6 +53,26 @@ _REDACTIONS = (
 _QUOTA = re.compile(r"RESOURCE_EXHAUSTED|quota|rate.?limit|too many requests|\b429\b", re.I)
 _AUTH = re.compile(r"unauthorized|not logged in|authenticat|login required|\b401\b|api key", re.I)
 
+# Cross-platform process-tree control. POSIX: new session + killpg(group). Windows: new
+# process group + taskkill /T (whole tree). Without this, timeout/cancel cleanup crashes on
+# Windows (os.killpg / os.getpgid don't exist there).
+_IS_WINDOWS = os.name == "nt"
+
+
+def _spawn_kwargs() -> dict:
+    if _IS_WINDOWS:
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
+def _kill_tree(pid: int, sig: int) -> None:
+    """Kill the whole process tree so a CLI's children don't survive as orphans."""
+    if _IS_WINDOWS:
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
+                       capture_output=True, check=False)
+    else:
+        os.killpg(os.getpgid(pid), sig)
+
 
 def redact(text: str) -> str:
     for pattern, repl in _REDACTIONS:
@@ -97,7 +117,7 @@ def run(argv: list[str], timeout_s: int, cwd: str | None = None,
         proc = subprocess.Popen(
             argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, errors="replace", stdin=subprocess.DEVNULL,
-            cwd=cwd or None, env=env, start_new_session=True,
+            cwd=cwd or None, env=env, **_spawn_kwargs(),
         )
     except FileNotFoundError:
         return RunResult(False, f"`{argv[0]}` not found on PATH", "not_found")
@@ -130,9 +150,9 @@ def run(argv: list[str], timeout_s: int, cwd: str | None = None,
 
 
 def _kill_group(proc: subprocess.Popen) -> None:
-    """Kill the whole process group so the CLI's children don't survive as orphans."""
+    """Kill the whole process tree so the CLI's children don't survive as orphans."""
     try:
-        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        _kill_tree(proc.pid, signal.SIGTERM)
     except (ProcessLookupError, PermissionError, OSError):
         proc.kill()
         return
@@ -140,7 +160,7 @@ def _kill_group(proc: subprocess.Popen) -> None:
         proc.wait(timeout=3)
     except subprocess.TimeoutExpired:
         try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            _kill_tree(proc.pid, signal.SIGKILL)
         except (ProcessLookupError, PermissionError, OSError):
             proc.kill()
 
@@ -172,7 +192,7 @@ async def arun(argv: list[str], timeout_s: int, cwd: str | None = None,
         proc = await asyncio.create_subprocess_exec(
             *argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             stdin=asyncio.subprocess.DEVNULL, cwd=cwd or None, env=env,
-            start_new_session=True,
+            **_spawn_kwargs(),
         )
     except FileNotFoundError:
         log.error("%s not found on PATH", argv[0])
@@ -183,7 +203,7 @@ async def arun(argv: list[str], timeout_s: int, cwd: str | None = None,
 
     async def _terminate():
         try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            _kill_tree(proc.pid, signal.SIGTERM)
         except (ProcessLookupError, PermissionError, OSError):
             try:
                 proc.kill()
@@ -193,7 +213,7 @@ async def arun(argv: list[str], timeout_s: int, cwd: str | None = None,
             await asyncio.wait_for(proc.wait(), timeout=3)
         except (asyncio.TimeoutError, ProcessLookupError):
             try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                _kill_tree(proc.pid, signal.SIGKILL)
             except (ProcessLookupError, PermissionError, OSError):
                 pass
 

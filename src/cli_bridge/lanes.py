@@ -8,8 +8,8 @@ bridges.
 Per-lane runtime overrides (so people configure to THEIR subscriptions, no code edits):
   CLI_BRIDGE_<KEY>_BIN      -> binary name/path (e.g. point `gemini` at Antigravity's `agy`)
   CLI_BRIDGE_<KEY>_MODEL    -> default model when the caller doesn't pass one
-  CLI_BRIDGE_<KEY>_COST     -> "free" or "paid" — declare whether THIS lane costs YOU money
-                              (depends on your plan). Drives ask_all's free-only default.
+  CLI_BRIDGE_<KEY>_COST     -> "free", "limited", or "paid" — declare whether THIS lane costs YOU
+                              money or scarce quota. Drives ask_all's default targets.
   CLI_BRIDGE_<KEY>_ENABLED  -> "false" to hide a lane even if its CLI is installed
 """
 from __future__ import annotations
@@ -36,7 +36,8 @@ class LaneSpec:
     display: str                          # human name in tool descriptions
     bin_default: str                      # default binary (env-overridable)
     build_ask: Callable[..., list[str]]   # (task, model, effort, agent) -> argv after bin
-    paid: bool = False                    # DEFAULT cost stance (user-overridable via env)
+    paid: bool = False                    # DEPRECATED shorthand for cost_default="paid"
+    cost_default: str = "free"            # "free" | "limited" | "paid" (user-overridable via env)
     default_model: str = ""               # used when caller omits model (env-overridable)
     models_args: list[str] | None = None  # argv to list models, or None
     help_args: list[str] | None = None    # argv to print CLI help, or None
@@ -44,10 +45,14 @@ class LaneSpec:
     client_ids: frozenset[str] = field(default_factory=frozenset)  # MCP clientInfo.name == host
     bin_alts: tuple[str, ...] = ()        # fallback binaries if the default isn't on PATH
     experimental: bool = False            # flags not verified live — caller is warned
+    install_hint: str = ""                # shown by doctor when the CLI isn't installed
     note: str = ""
 
     def _env(self, suffix: str) -> str:
-        return os.environ.get(f"CLI_BRIDGE_{self.key.upper()}_{suffix}", "").strip()
+        # Env vars can't contain '-', but tool keys can; map so a 'my-lane' key still reads
+        # CLI_BRIDGE_MY_LANE_COST. (Underscore is the only safe word separator in shells.)
+        env_key = self.key.upper().replace("-", "_")
+        return os.environ.get(f"CLI_BRIDGE_{env_key}_{suffix}", "").strip()
 
     @property
     def bin(self) -> str:
@@ -66,14 +71,30 @@ class LaneSpec:
         return self._env("ENABLED").lower() not in {"0", "false", "no", "off"}
 
     @property
-    def is_paid(self) -> bool:
-        """Whether THIS lane costs the user money — they declare it per their plan."""
+    def _cost(self) -> str:
+        """Resolved cost tier: user's env override wins, else the lane's realistic default."""
         cost = self._env("COST").lower()
         if cost in {"paid", "credits", "$"}:
-            return True
+            return "paid"
+        if cost in {"limited", "quota", "metered"}:
+            return "limited"
         if cost in {"free", "0"}:
-            return False
-        return self.paid
+            return "free"
+        return "paid" if self.paid else self.cost_default
+
+    @property
+    def is_paid(self) -> bool:
+        """Whether THIS lane costs the user money — they declare it per their plan."""
+        return self._cost == "paid"
+
+    @property
+    def is_limited(self) -> bool:
+        """Free money-wise but on scarce quota — kept out of broad fan-out by default."""
+        return self._cost == "limited"
+
+    @property
+    def cost_label(self) -> str:
+        return self._cost
 
     def model_for(self, model: str) -> str:
         explicit = (model or "").strip()
@@ -179,41 +200,58 @@ def _current_opencode_free_model(bin_name: str) -> str:
     return free[0] if free else ""
 
 
+# Cost defaults reflect a typical plan, so out-of-the-box `ask_all` builds a real free council
+# (gemini+mistral+opencode) and never burns subscription quota or money unasked. Subscription
+# CLIs default to "limited" (direct asks still work; skipped by broad fan-out). The user
+# overrides any of these per their own plan with CLI_BRIDGE_<LANE>_COST / _PROFILE=max.
 BUILTIN_LANES: list[LaneSpec] = [
     LaneSpec("claude", "Claude (Claude Code CLI)", "claude", _claude_ask,
+             cost_default="limited",
              models_args=None, help_args=["--help"], caps=frozenset({"model"}),
              client_ids=frozenset({"claude-code", "claude", "claude-desktop"}),
+             install_hint="npm i -g @anthropic-ai/claude-code  (then `claude` to log in)",
              note="Anthropic. Strong all-round reasoning. (--print --permission-mode plan, verified.)"),
     LaneSpec("gpt", "GPT (OpenAI Codex CLI)", "codex", _codex_ask,
+             cost_default="limited",
              help_args=["exec", "--help"], caps=frozenset({"model", "effort"}),
              client_ids=frozenset({"codex", "codex-mcp-client", "codex-cli"}),
+             install_hint="npm i -g @openai/codex  (then `codex` to log in)",
              note="OpenAI. effort=high for hard reasoning, low/empty for quick."),
     LaneSpec("gemini", "Gemini (Google Gemini CLI / Antigravity)", "gemini", _gemini_ask,
+             cost_default="free",
              help_args=["--help"], caps=frozenset({"model"}), bin_alts=("agy",),
              client_ids=frozenset({"gemini-cli-mcp-client", "gemini", "antigravity"}),
+             install_hint="npm i -g @google/gemini-cli  (free tier; then log in)",
              note="Google. Fast, broad, multimodal/web. Uses `gemini`, or falls back to `agy` "
                   "(Antigravity) if that's what's installed."),
     LaneSpec("mistral", "Mistral (Vibe CLI)", "vibe", _mistral_ask,
+             cost_default="free",
              help_args=["--help"], caps=frozenset(),
              client_ids=frozenset({"vibe", "mistral"}),
+             install_hint="see Mistral Vibe CLI docs (`vibe`)",
              note="Mistral free tier. Lightweight quick takes."),
     LaneSpec("opencode", "OpenCode (gateway to many models)", "opencode", _opencode_ask,
-             paid=False, default_model=_OPENCODE_FREE_DEFAULT,
+             cost_default="free", default_model=_OPENCODE_FREE_DEFAULT,
              models_args=["models"], help_args=["run", "--help"],
              caps=frozenset({"model", "effort", "agent"}),
              client_ids=frozenset({"opencode"}),
+             install_hint="curl -fsSL https://opencode.ai/install | bash",
              note=("Gateway to deepseek/qwen/glm/kimi/minimax/... Empty model = a FREE default "
                    "(never costs credits). Pass a paid 'opencode-go/*' model only when the task "
                    "earns it. agent='build' lets it EDIT files directly (default 'plan' is read-only).")),
     LaneSpec("qwen", "Qwen (Qwen Code CLI)", "qwen", _qwen_ask,
+             cost_default="free",
              help_args=["--help"], caps=frozenset({"model"}),
              client_ids=frozenset({"qwen", "qwen-code"}),
              experimental=True,
+             install_hint="npm i -g @qwen-code/qwen-code",
              note="Alibaba Qwen. Large context, strong code. (Flags assume a gemini-cli fork.)"),
     LaneSpec("copilot", "GitHub Copilot CLI", "copilot", _copilot_ask,
+             cost_default="limited",
              help_args=["--help"], caps=frozenset({"model"}),
              client_ids=frozenset({"copilot", "github-copilot"}),
              experimental=True,
+             install_hint="gh extension install github/gh-copilot  (subscription)",
              note="GitHub Copilot. Flags unverified; if your install is `gh copilot`, set "
                   "CLI_BRIDGE_COPILOT_BIN and a custom lane instead."),
 ]
@@ -253,42 +291,73 @@ def _template_builder(ask_tmpl: list[str], model_flag: str):
     return build
 
 
+# Last custom-lanes load status, so `doctor` can surface a broken file instead of staying silent.
+LANES_LOAD_STATUS: dict = {"path": "", "loaded": 0, "skipped": 0, "error": ""}
+
+_RESERVED_KEYS = {"all", "doctor", "setup"}
+
+
+def _str_list(value) -> list[str] | None:
+    """Accept only a real list of strings (a bare string would become a list of chars)."""
+    if isinstance(value, list) and all(isinstance(p, str) for p in value) and value:
+        return list(value)
+    return None
+
+
+def _valid_key(key: str) -> bool:
+    return bool(key) and key not in _RESERVED_KEYS and key.replace("_", "").replace("-", "").isalnum()
+
+
 def load_custom_lanes(path: str | None = None) -> list[LaneSpec]:
     path = path or os.environ.get("CLI_BRIDGE_LANES_FILE", "").strip()
-    if not path or not os.path.isfile(path):
+    LANES_LOAD_STATUS.update({"path": path, "loaded": 0, "skipped": 0, "error": ""})
+    if not path:
+        return []
+    if not os.path.isfile(path):
+        LANES_LOAD_STATUS["error"] = "file not found"
         return []
     try:
         with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
-    except (OSError, ValueError):
+    except OSError as e:
+        LANES_LOAD_STATUS["error"] = f"cannot read file: {e}"
         return []
+    except ValueError as e:
+        LANES_LOAD_STATUS["error"] = f"invalid JSON: {e}"
+        return []
+    if not isinstance(data, list):
+        LANES_LOAD_STATUS["error"] = "top-level JSON must be a list of lane objects"
+        return []
+
     lanes: list[LaneSpec] = []
-    reserved = {"all", "doctor"}
-    for item in data if isinstance(data, list) else []:
-        if not isinstance(item, dict):
+    skipped = 0
+    for item in data:
+        key = str(item.get("key", "")).strip() if isinstance(item, dict) else ""
+        ask = _str_list(item.get("ask")) if isinstance(item, dict) else None
+        if not isinstance(item, dict) or not _valid_key(key) or ask is None:
+            skipped += 1
             continue
-        key = str(item.get("key", "")).strip()
-        ask = item.get("ask")
-        # ask must be a list of strings (a bare string would become a list of characters)
-        if (not key or key in reserved or not key.replace("_", "").replace("-", "").isalnum()
-                or not isinstance(ask, list) or not all(isinstance(p, str) for p in ask) or not ask):
-            continue
-        ask_tmpl = list(ask)
+        # cost: explicit field, else legacy paid bool
+        cost = str(item.get("cost", "")).strip().lower()
+        if cost not in {"free", "limited", "paid"}:
+            cost = "paid" if bool(item.get("paid", False)) else "free"
         model_flag = str(item.get("model_flag", "")).strip()
         lanes.append(LaneSpec(
             key=key,
             display=str(item.get("display", key)),
             bin_default=str(item.get("bin", key)),
-            build_ask=_template_builder(ask_tmpl, model_flag),
-            paid=bool(item.get("paid", False)),
+            build_ask=_template_builder(ask, model_flag),
+            cost_default=cost,
             default_model=str(item.get("default_model", "")),
-            models_args=list(item["models"]) if item.get("models") else None,
-            help_args=list(item["help"]) if item.get("help") else None,
+            models_args=_str_list(item.get("models")),
+            help_args=_str_list(item.get("help")),
             caps=frozenset({"model"}) if model_flag else frozenset(),
-            client_ids=frozenset(item.get("client_ids", [])),
+            client_ids=frozenset(c for c in item.get("client_ids", []) if isinstance(c, str)),
             experimental=bool(item.get("experimental", False)),
+            install_hint=str(item.get("install_hint", "")),
             note=str(item.get("note", "user-defined lane")),
         ))
+    LANES_LOAD_STATUS.update({"loaded": len(lanes), "skipped": skipped})
     return lanes
 
 
