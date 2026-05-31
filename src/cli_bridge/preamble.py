@@ -44,8 +44,11 @@ _PREFIX = "[response style] "
 
 
 def level() -> str:
+    # Default 'lite': trims filler/pleasantries for real token savings but keeps full
+    # sentences and never compresses reasoning — quality-safe for a broad audience. Power
+    # users opt into 'full'/'ultra'; 'off' disables.
     v = os.environ.get("CLI_BRIDGE_TERSE", "").strip().lower()
-    return v if v in _LEVELS else "full"
+    return v if v in _LEVELS else "lite"
 
 
 def preamble(lvl: str | None = None) -> str:

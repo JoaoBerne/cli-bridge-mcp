@@ -2,9 +2,9 @@
 from cli_bridge import preamble
 
 
-def test_default_is_full(monkeypatch):
+def test_default_is_lite(monkeypatch):
     monkeypatch.delenv("CLI_BRIDGE_TERSE", raising=False)
-    assert preamble.level() == "full"
+    assert preamble.level() == "lite"
 
 
 def test_off_is_noop(monkeypatch):
