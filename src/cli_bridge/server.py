@@ -19,7 +19,7 @@ from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
-from . import runner
+from . import router, runner, telemetry
 from .detect import is_installed, installed_lanes
 from .lanes import LANES_LOAD_STATUS as _LANES_LOAD_STATUS, LaneSpec, all_lanes
 
@@ -359,7 +359,7 @@ def _ask_all_targets(lanes: list[LaneSpec], include_paid: bool,
     return out
 
 
-async def _run_lane(lane: LaneSpec, args: dict) -> runner.RunResult:
+async def _run_lane(lane: LaneSpec, args: dict, *, tool: str = "ask") -> runner.RunResult:
     task = _str(args, "task")
     if not task:
         return runner.RunResult(False, "task is required", "failed")
@@ -372,7 +372,10 @@ async def _run_lane(lane: LaneSpec, args: dict) -> runner.RunResult:
     expanded = os.path.expanduser(cwd) if cwd else None
     if expanded and not os.path.isdir(expanded):
         return runner.RunResult(False, f"cwd `{cwd}` is not an existing directory", "failed")
-    return await runner.arun(argv, _timeout(args.get("timeout_s")), expanded)
+    rec = telemetry.start(tool, lane.key, model, task)
+    res = await runner.arun(argv, _timeout(args.get("timeout_s")), expanded)
+    telemetry.record(rec, res.ok, res.kind, len(res.output))
+    return res
 
 
 def _lane_by_key(key: str, lanes: list[LaneSpec]) -> LaneSpec | None:
