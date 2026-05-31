@@ -254,6 +254,29 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
         inputSchema={"type": "object", "properties": {}},
         annotations={"readOnlyHint": True, "destructiveHint": False},
     ))
+    tools.append(Tool(
+        name="usage_report",
+        description="Local usage stats (this machine only): total runs, per-lane counts/success/"
+                    "avg latency, and the most recent calls. Helps see what your council spent.",
+        inputSchema={"type": "object", "properties": {}},
+        annotations={"readOnlyHint": True, "destructiveHint": False},
+    ))
+    tools.append(Tool(
+        name="lane_stats",
+        description="Per-lane health: total runs, failures, consecutive failures/timeouts, and "
+                    "any active cooldown (a lane in cooldown is skipped by ask_all until it clears).",
+        inputSchema={"type": "object", "properties": {}},
+        annotations={"readOnlyHint": True, "destructiveHint": False},
+    ))
+    tools.append(Tool(
+        name="reset_lane_state",
+        description="Clear a lane's cooldown + failure counters (e.g. after you re-logged in or "
+                    "your quota reset). Pass the lane key, e.g. 'gemini'.",
+        inputSchema={"type": "object", "properties": {
+            "lane": {"type": "string", "description": "Lane key to reset (e.g. gemini, gpt)."}},
+            "required": ["lane"]},
+        annotations={"readOnlyHint": False, "destructiveHint": False},
+    ))
     return tools
 
 
@@ -299,8 +322,12 @@ def _ask_all_include_paid(args: dict) -> bool:
     return _profile() == "max"
 
 
-def _ask_all_targets(lanes: list[LaneSpec], include_paid: bool) -> list[LaneSpec]:
-    return [ln for ln in lanes if include_paid or (not ln.is_paid and not ln.is_limited)]
+def _ask_all_targets(lanes: list[LaneSpec], include_paid: bool,
+                     skip_cooled: bool = True) -> list[LaneSpec]:
+    out = [ln for ln in lanes if include_paid or (not ln.is_paid and not ln.is_limited)]
+    if skip_cooled:
+        out = [ln for ln in out if telemetry.cooldown_remaining(ln.key) == 0]
+    return out
 
 
 async def _run_lane(lane: LaneSpec, args: dict) -> runner.RunResult:
@@ -336,6 +363,19 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
     if name == "doctor":
         text = await _doctor_deep(host, lanes) if bool(args.get("deep")) else _doctor(host)
         return [_emit(text, label="doctor")]
+
+    if name == "usage_report":
+        return [_emit(_render_usage(), label="usage_report")]
+
+    if name == "lane_stats":
+        return [_emit(_render_lane_stats(), label="lane_stats")]
+
+    if name == "reset_lane_state":
+        lane = _str(args, "lane")
+        ok = telemetry.reset_lane(lane) if lane else False
+        msg = (f"Lane '{lane}' cooldown/failure counters cleared." if ok
+               else f"No state to clear for lane '{lane}' (already clean or unknown).")
+        return [TextContent(type="text", text=msg)]
 
     if name == "ask_all":
         return await _ask_all(lanes, args)
@@ -429,6 +469,35 @@ async def _doctor_deep(host: str, lanes: list[LaneSpec]) -> str:
         return f"- **{ln.key}**: {mark}"
     results = await asyncio.gather(*[_probe(ln) for ln in probes])
     return base + "\n\n## Deep probe (live auth check, free lanes)\n\n" + "\n".join(results)
+
+
+def _render_usage() -> str:
+    rep = telemetry.usage_report()
+    if not rep.get("enabled"):
+        return ("Telemetry is off or unavailable (set CLI_BRIDGE_TELEMETRY=on, or it couldn't "
+                "open its local DB). No usage to report.")
+    lines = [f"# cli-bridge usage — {rep['total_runs']} total runs (local only)", ""]
+    lines.append("## By lane")
+    for r in rep["by_lane"]:
+        lines.append(f"- **{r['lane']}**: {r['runs']} runs, {r['ok']} ok, ~{r['avg_ms']}ms avg")
+    lines.append("\n## Recent")
+    for r in rep["recent"]:
+        lines.append(f"- {r['lane'] or r['tool']} [{r['status']}/{r['kind']}] "
+                     f"{r['duration_ms']}ms — {r['task']}")
+    return "\n".join(lines)
+
+
+def _render_lane_stats() -> str:
+    stats = telemetry.lane_stats()
+    if not stats:
+        return "No lane stats yet (telemetry off, or no runs recorded)."
+    lines = ["# Lane health", ""]
+    for s in stats:
+        cd = f", cooldown {s['cooldown_remaining_s']}s" if s["cooldown_remaining_s"] else ""
+        lines.append(
+            f"- **{s['lane']}**: {s['total_runs']} runs, {s['total_failures']} failed, "
+            f"{s['consecutive_failures']} consecutive fail, last={s['last_kind']}{cd}")
+    return "\n".join(lines)
 
 
 def _doctor(host: str) -> str:
