@@ -277,6 +277,35 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             "required": ["lane"]},
         annotations={"readOnlyHint": False, "destructiveHint": False},
     ))
+    if lanes:
+        tools.append(Tool(
+            name="ask_cascade",
+            description="Ask ONE model but with automatic fallback: tries lanes cheapest→strongest, "
+                        "skipping cooled ones, and moves to the next on quota/auth/timeout/failure. "
+                        "Returns the first success (and a note of what was tried). Free/non-limited "
+                        "by default; include_paid to widen.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "task": {"type": "string", "description": "The prompt."},
+                    "include_paid": {"type": "boolean",
+                                     "description": "Allow limited/paid lanes in the chain. "
+                                                    "Default false (except CLI_BRIDGE_PROFILE=max)."},
+                    "cwd": {"type": "string", "description": "Directory the CLI runs in."},
+                    "timeout_s": {"type": "integer", "description": f"Per-attempt timeout (max {MAX_TIMEOUT_S})."},
+                },
+                "required": ["task"],
+            },
+            annotations={"readOnlyHint": True, "openWorldHint": True, "destructiveHint": False},
+        ))
+        tools.append(Tool(
+            name="route_plan",
+            description="Explain (without running anything) the order ask_cascade would try lanes "
+                        "in, given current cost profile and lane cooldowns.",
+            inputSchema={"type": "object", "properties": {
+                "include_paid": {"type": "boolean", "description": "Include limited/paid lanes."}}},
+            annotations={"readOnlyHint": True, "destructiveHint": False},
+        ))
     return tools
 
 
@@ -377,6 +406,15 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
                else f"No state to clear for lane '{lane}' (already clean or unknown).")
         return [TextContent(type="text", text=msg)]
 
+    if name == "ask_cascade":
+        return await _ask_cascade(lanes, args)
+
+    if name == "route_plan":
+        include_paid = (bool(args["include_paid"]) if args.get("include_paid") is not None
+                        else _profile() == "max")
+        return [TextContent(type="text", text=router.explain(
+            lanes, telemetry.cooldown_remaining, include_paid))]
+
     if name == "ask_all":
         return await _ask_all(lanes, args)
 
@@ -395,6 +433,31 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
         return [_emit(res.render(), label=f"list_{lane.key}_models")]
 
     return [TextContent(type="text", text=f"[error] unknown tool: {name}")]
+
+
+async def _ask_cascade(lanes: list[LaneSpec], args: dict) -> list[TextContent]:
+    task = _str(args, "task")
+    if not task:
+        return [TextContent(type="text", text="[error] task is required")]
+    include_paid = (bool(args["include_paid"]) if args.get("include_paid") is not None
+                    else _profile() == "max")
+    ordered = router.order_lanes(lanes, telemetry.cooldown_remaining, include_paid)
+    if not ordered:
+        return [TextContent(type="text", text=(
+            "[error] no lanes eligible for cascade. Install/login a CLI, or set include_paid=true "
+            "/ CLI_BRIDGE_PROFILE=max to allow limited/paid lanes."))]
+    sub = {"task": task, "cwd": _str(args, "cwd"), "timeout_s": args.get("timeout_s")}
+    tried = []
+    for lane in ordered:
+        res = await _run_lane(lane, sub, tool="ask_cascade")
+        if res.ok:
+            note = (f"_(cascade: {lane.display} answered"
+                    + (f"; skipped {', '.join(tried)})_" if tried else ")_"))
+            return [_emit(f"{res.output}\n\n{note}", label="ask_cascade")]
+        tried.append(f"{lane.key}={res.kind}")
+    return [TextContent(type="text", text=(
+        "[error] all lanes failed in cascade: " + ", ".join(tried)
+        + ". Try again later or check `doctor`."))]
 
 
 async def _ask_all(lanes: list[LaneSpec], args: dict) -> list[TextContent]:
