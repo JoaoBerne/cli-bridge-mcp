@@ -1,0 +1,34 @@
+[project]
+name = "cli-bridge-mcp"
+version = "0.1.0"
+description = "Consult a council of AI CLIs (Gemini, GPT, Claude, Mistral, Qwen, Copilot, OpenCode…) from inside any MCP client — free and ban-safe."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [{ name = "JoaoBtt" }]
+keywords = ["mcp", "claude", "claude-code", "ai", "cli", "gemini", "codex", "gpt",
+            "mistral", "qwen", "copilot", "opencode", "multi-model", "second-opinion"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+]
+dependencies = ["mcp>=1.2.0"]
+
+[project.urls]
+Homepage = "https://github.com/JoaoBtt/cli-bridge-mcp"
+Issues = "https://github.com/JoaoBtt/cli-bridge-mcp/issues"
+
+[project.scripts]
+cli-bridge-mcp = "cli_bridge.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cli_bridge"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
