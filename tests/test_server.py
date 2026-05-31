@@ -24,6 +24,14 @@ def test_timeout_guard():
     assert server._timeout(0) == 1
 
 
+def test_ask_all_timeout_guard():
+    assert server._ask_all_timeout("abc") == server.ASK_ALL_DEFAULT_TIMEOUT_S
+    assert server._ask_all_timeout(None) == server.ASK_ALL_DEFAULT_TIMEOUT_S
+    assert server._ask_all_timeout(10) == 10
+    assert server._ask_all_timeout(99999) == server.ASK_ALL_MAX_TIMEOUT_S
+    assert server._ask_all_timeout(0) == 1
+
+
 def test_is_host_matches_via_slug():
     from cli_bridge.lanes import LaneSpec
     lane = LaneSpec("x", "X", "x", lambda *a: [], client_ids=frozenset({"claude-code"}))

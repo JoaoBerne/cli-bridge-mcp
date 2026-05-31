@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 
 from cli_bridge import lanes
 
@@ -19,12 +20,57 @@ def test_gpt_no_model_no_flag():
     assert "-m" not in argv
 
 
-def test_opencode_free_default_applied():
+def test_opencode_free_default_applied(monkeypatch):
+    lanes._current_opencode_free_model.cache_clear()
+    monkeypatch.setattr(lanes.subprocess, "run", lambda *a, **k: SimpleNamespace(
+        returncode=0,
+        stdout="opencode/deepseek-v4-flash-free\n",
+    ))
     lane = _lane("opencode")
-    model = lane.model_for("")                      # caller omitted model
-    argv = lane.build_ask("hi", model, "", "plan")
-    assert "opencode/deepseek-v4-flash-free" in argv      # never a paid default
-    assert "--dangerously-skip-permissions" not in argv   # plan = read-only
+    assert lane.is_paid is False                         # ask_all includes the free default
+    try:
+        model = lane.model_for("")                      # caller omitted model
+        argv = lane.build_ask("hi", model, "", "plan")
+        assert "opencode/deepseek-v4-flash-free" in argv      # never a paid default
+        assert "--dangerously-skip-permissions" not in argv   # plan = read-only
+    finally:
+        lanes._current_opencode_free_model.cache_clear()
+
+
+def test_opencode_default_prefers_current_free_model_list(monkeypatch):
+    lanes._current_opencode_free_model.cache_clear()
+    monkeypatch.setattr(lanes.subprocess, "run", lambda *a, **k: SimpleNamespace(
+        returncode=0,
+        stdout="opencode/big-pickle\nopencode/mimo-v2.5-free\nopencode-go/paid-model\n",
+    ))
+    try:
+        assert _lane("opencode").model_for("") == "opencode/mimo-v2.5-free"
+    finally:
+        lanes._current_opencode_free_model.cache_clear()
+
+
+def test_opencode_default_keeps_preferred_free_model_when_listed(monkeypatch):
+    lanes._current_opencode_free_model.cache_clear()
+    monkeypatch.setattr(lanes.subprocess, "run", lambda *a, **k: SimpleNamespace(
+        returncode=0,
+        stdout="opencode/mimo-v2.5-free\nopencode/deepseek-v4-flash-free\n",
+    ))
+    try:
+        assert _lane("opencode").model_for("") == "opencode/deepseek-v4-flash-free"
+    finally:
+        lanes._current_opencode_free_model.cache_clear()
+
+
+def test_opencode_default_falls_back_when_model_list_fails(monkeypatch):
+    lanes._current_opencode_free_model.cache_clear()
+    monkeypatch.setattr(lanes.subprocess, "run", lambda *a, **k: SimpleNamespace(
+        returncode=1,
+        stdout="",
+    ))
+    try:
+        assert _lane("opencode").model_for("") == "opencode/deepseek-v4-flash-free"
+    finally:
+        lanes._current_opencode_free_model.cache_clear()
 
 
 def test_opencode_build_agent_writes():
