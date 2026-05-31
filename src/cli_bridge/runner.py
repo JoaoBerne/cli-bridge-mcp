@@ -13,11 +13,26 @@ Hardening (learned running these CLIs headless):
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 import signal
 import subprocess
 from dataclasses import dataclass
+
+# Opt-in logging: silent by default (a library shouldn't spam). Set CLI_BRIDGE_LOG=debug|info
+# to a file (CLI_BRIDGE_LOG_FILE, default stderr) for "which CLI ran, how long, what failed".
+log = logging.getLogger("cli_bridge")
+if not log.handlers:
+    _level = os.environ.get("CLI_BRIDGE_LOG", "").strip().upper()
+    if _level in {"DEBUG", "INFO", "WARNING", "ERROR"}:
+        _path = os.environ.get("CLI_BRIDGE_LOG_FILE", "").strip()
+        _h = logging.FileHandler(_path) if _path else logging.StreamHandler()
+        _h.setFormatter(logging.Formatter("%(asctime)s cli-bridge %(levelname)s %(message)s"))
+        log.addHandler(_h)
+        log.setLevel(_level)
+    else:
+        log.addHandler(logging.NullHandler())
 
 # Output ceiling (~50k tokens). Real answers pass through whole; only a runaway dump
 # is clipped. NOT a "make it short" truncation — the ceiling sits far above any answer.
@@ -25,11 +40,12 @@ MAX_OUTPUT_CHARS = 200_000
 
 # Best-effort secret scrubbing for anything we echo back (errors, output).
 _REDACTIONS = (
-    (re.compile(r"(Authorization:\s*Bearer\s+)[^\s'\"]+", re.I), r"\1[redacted]"),
-    (re.compile(r"(X-API-Key:\s*)[^\s'\"]+", re.I), r"\1[redacted]"),
-    (re.compile(r"(sk-[A-Za-z0-9_-]{8})[A-Za-z0-9_-]+"), r"\1[redacted]"),
-    (re.compile(r"(gh[pousr]_[A-Za-z0-9]{6})[A-Za-z0-9]+"), r"\1[redacted]"),
-    (re.compile(r"(\"?(?:api[_-]?key|token|secret|password)\"?\s*[:=]\s*\"?)[^\s\"',]+", re.I),
+    (re.compile(r"(Authorization:\s*Bearer\s+)\S+", re.I), r"\1[redacted]"),
+    (re.compile(r"(X-API-Key:\s*)\S+", re.I), r"\1[redacted]"),
+    (re.compile(r"\bsk-[A-Za-z0-9_-]{6,}"), "[redacted]"),          # OpenAI / Anthropic
+    (re.compile(r"\bgh[pousr]_[A-Za-z0-9]{6,}"), "[redacted]"),     # GitHub tokens
+    (re.compile(r"\bAIza[A-Za-z0-9_-]{6,}"), "[redacted]"),         # Google API keys
+    (re.compile(r"(\"?(?:api[_-]?key|token|secret|password)\"?\s*[:=]\s*\"?)[^\s\"']+", re.I),
      r"\1[redacted]"),
 )
 
@@ -92,7 +108,10 @@ def run(argv: list[str], timeout_s: int, cwd: str | None = None,
         out, err = proc.communicate(timeout=timeout_s)
     except subprocess.TimeoutExpired:
         _kill_group(proc)
-        proc.communicate()  # reap, free pipes
+        try:
+            proc.communicate(timeout=5)  # reap, free pipes — bounded so a zombie can't hang us
+        except subprocess.TimeoutExpired:
+            pass
         return RunResult(False, f"`{argv[0]}` timed out after {timeout_s}s", "timeout")
 
     out = redact((out or "").strip())
@@ -124,3 +143,71 @@ def _kill_group(proc: subprocess.Popen) -> None:
             os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
         except (ProcessLookupError, PermissionError, OSError):
             proc.kill()
+
+
+def _finish(returncode, out, err, argv) -> RunResult:
+    out = redact((out or "").strip())
+    err = redact((err or "").strip())
+    if returncode == 0:
+        # stdout only on success; stderr here is banner/progress noise. Fall back to stderr
+        # if stdout is empty (a few CLIs put a short answer there).
+        return RunResult(True, _clip(out or err or "(empty response)"), "ok", 0)
+    blob = f"{err}\n{out}"
+    kind = "quota" if _QUOTA.search(blob) else "auth" if _AUTH.search(blob) else "failed"
+    detail = err or out or "(no output)"
+    return RunResult(False, _clip(f"{argv[0]} exit {returncode}: {detail}"), kind, returncode)
+
+
+async def arun(argv: list[str], timeout_s: int, cwd: str | None = None,
+               env: dict | None = None) -> RunResult:
+    """Async runner used by the server. Unlike the threaded `run`, if the MCP host CANCELS
+    the call (disconnect, client timeout), the CancelledError propagates here and we kill the
+    whole process group — so the CLI can't keep burning quota/credits after the host gave up.
+    """
+    if not argv:
+        return RunResult(False, "empty command", "spawn")
+    import asyncio  # local import keeps `run` usable without an event loop
+    log.info("spawn %s (timeout=%ss, cwd=%s)", argv[0], timeout_s, cwd or ".")
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            stdin=asyncio.subprocess.DEVNULL, cwd=cwd or None, env=env,
+            start_new_session=True,
+        )
+    except FileNotFoundError:
+        log.error("%s not found on PATH", argv[0])
+        return RunResult(False, f"`{argv[0]}` not found on PATH", "not_found")
+    except (PermissionError, OSError) as e:
+        log.error("%s could not start: %s", argv[0], e)
+        return RunResult(False, f"`{argv[0]}` could not start: {e}", "spawn")
+
+    async def _terminate():
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        except (ProcessLookupError, PermissionError, OSError):
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                return
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=3)
+        except (asyncio.TimeoutError, ProcessLookupError):
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+
+    try:
+        out_b, err_b = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
+    except asyncio.TimeoutError:
+        await _terminate()
+        log.error("%s timed out after %ss (process group killed)", argv[0], timeout_s)
+        return RunResult(False, f"`{argv[0]}` timed out after {timeout_s}s", "timeout")
+    except asyncio.CancelledError:
+        await _terminate()              # host gave up — don't leave the CLI running
+        log.info("%s cancelled by host (process group killed)", argv[0])
+        raise
+    res = _finish(proc.returncode,
+                  out_b.decode("utf-8", "replace"), err_b.decode("utf-8", "replace"), argv)
+    log.info("%s exit=%s kind=%s out=%dch", argv[0], proc.returncode, res.kind, len(res.output))
+    return res

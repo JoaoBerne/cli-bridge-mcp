@@ -11,4 +11,5 @@ def is_installed(lane: LaneSpec) -> bool:
 
 
 def installed_lanes(lanes: list[LaneSpec]) -> list[LaneSpec]:
-    return [lane for lane in lanes if is_installed(lane)]
+    """Lanes whose binary is on PATH AND that the user hasn't disabled via env."""
+    return [lane for lane in lanes if lane.enabled and is_installed(lane)]
