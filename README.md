@@ -68,7 +68,7 @@ live-checks each login).
 | `ask_mistral`  | Mistral Vibe | free tier |
 | `ask_qwen` ⚗️  | Qwen Code | free / subscription |
 | `ask_copilot` ⚗️ | GitHub Copilot CLI | subscription |
-| `ask_opencode` | [opencode](https://opencode.ai) gateway (deepseek, qwen, glm, kimi…) | **credits** (free model by default) |
+| `ask_opencode` | [opencode](https://opencode.ai) gateway (deepseek, qwen, glm, kimi…) | free by default; some models use credits |
 
 ⚗️ = experimental (flags not yet verified live — please report breakage).
 
@@ -118,6 +118,14 @@ Just talk to your assistant:
 Every lane is **read-only by default** — the delegate analyses and answers; your host applies any
 edits. The one exception is opencode's `agent: "build"`, which you opt into explicitly to let it
 edit files directly (and it's annotated non-read-only accordingly).
+
+For opencode, an empty `model` asks `opencode models` for the current `opencode/*-free` model list
+and uses a free Zen model. If that lookup fails, cli-bridge falls back to
+`opencode/deepseek-v4-flash-free`. Set `CLI_BRIDGE_OPENCODE_MODEL` to pin a different default.
+
+`ask_all` keeps per-lane calls short (45s default, 60s max) so the MCP host gets a response before
+its own tool-call deadline. For a slow/deep answer, call that lane directly with a longer
+`timeout_s`.
 
 ---
 

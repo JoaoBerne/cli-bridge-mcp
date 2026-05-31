@@ -17,7 +17,9 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Callable
 
 _EFFORT = {"": "", "minimal": "minimal", "low": "low", "medium": "medium",
@@ -74,7 +76,15 @@ class LaneSpec:
         return self.paid
 
     def model_for(self, model: str) -> str:
-        return (model or "").strip() or self._env("MODEL") or self.default_model
+        explicit = (model or "").strip()
+        if explicit:
+            return explicit
+        env_model = self._env("MODEL")
+        if env_model:
+            return env_model
+        if self.key == "opencode":
+            return _opencode_default_model(self.bin)
+        return self.default_model
 
 
 # ─────────────────────────────── built-in lane builders ───────────────────────────────
@@ -138,9 +148,35 @@ def _copilot_ask(task, model, effort, agent):      # GitHub Copilot CLI (best-ef
     return cmd + ["-p", task]
 
 
-# opencode's bare default resolves to a PAID model; force a free one unless the caller
-# explicitly asks for a paid 'opencode-go/*'. Env-overridable.
+# opencode's bare default can resolve to a PAID model; prefer a currently listed free Zen
+# model unless the caller explicitly asks for a model. Env-overridable.
 _OPENCODE_FREE_DEFAULT = "opencode/deepseek-v4-flash-free"
+_OPENCODE_MODELS_TIMEOUT_S = 5
+
+
+def _opencode_default_model(bin_name: str) -> str:
+    return _current_opencode_free_model(bin_name) or _OPENCODE_FREE_DEFAULT
+
+
+@lru_cache(maxsize=8)
+def _current_opencode_free_model(bin_name: str) -> str:
+    try:
+        timeout = int(os.environ.get("CLI_BRIDGE_OPENCODE_MODELS_TIMEOUT", "").strip()
+                      or _OPENCODE_MODELS_TIMEOUT_S)
+    except ValueError:
+        timeout = _OPENCODE_MODELS_TIMEOUT_S
+    try:
+        proc = subprocess.run([bin_name, "models"], capture_output=True, text=True,
+                              timeout=max(1, timeout), check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    if proc.returncode != 0:
+        return ""
+    models = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+    free = [m for m in models if m.startswith("opencode/") and m.endswith("-free")]
+    if _OPENCODE_FREE_DEFAULT in free:
+        return _OPENCODE_FREE_DEFAULT
+    return free[0] if free else ""
 
 
 BUILTIN_LANES: list[LaneSpec] = [
@@ -162,7 +198,7 @@ BUILTIN_LANES: list[LaneSpec] = [
              client_ids=frozenset({"vibe", "mistral"}),
              note="Mistral free tier. Lightweight quick takes."),
     LaneSpec("opencode", "OpenCode (gateway to many models)", "opencode", _opencode_ask,
-             paid=True, default_model=_OPENCODE_FREE_DEFAULT,
+             paid=False, default_model=_OPENCODE_FREE_DEFAULT,
              models_args=["models"], help_args=["run", "--help"],
              caps=frozenset({"model", "effort", "agent"}),
              client_ids=frozenset({"opencode"}),
