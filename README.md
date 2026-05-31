@@ -1,5 +1,11 @@
 # cli-bridge
 
+![license](https://img.shields.io/badge/license-MIT-green)
+![python](https://img.shields.io/badge/python-3.10%2B-blue)
+![tests](https://img.shields.io/badge/tests-pytest-brightgreen)
+![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-server-purple)
+![ban--safe](https://img.shields.io/badge/ban--safe-no%20token%20extraction-orange)
+
 **Your AI assistant, but it can phone a friend.**
 
 `cli-bridge` is a [Model Context Protocol](https://modelcontextprotocol.io) server that lets
@@ -40,9 +46,26 @@ There are other "call other models" MCPs. Here's what makes cli-bridge different
   *disagree* — turn three opinions into one decision.
 - 🪶 **Subagent-style returns.** A delegate works in its own context and hands back a digest; huge
   outputs spill to a file and only a preview comes back, so your assistant's context stays lean.
+- 🔁 **Automatic fallback.** `ask_cascade` tries lanes cheapest→strongest and moves on when
+  one hits quota/auth/timeout — so a dead lane degrades gracefully instead of failing you.
+- 🩺 **Self-aware.** Local telemetry tracks each lane's health and puts a lane in cooldown
+  after repeated quota/auth/timeout failures, so `ask_all`/`ask_cascade` route around it.
 - 🧱 **Hardened.** Timeouts kill the whole process tree (no orphans burning quota), host
   cancellation kills the delegate, secrets are redacted, errors are classified
-  (`quota` / `auth` / `timeout`) so your assistant knows what to do next.
+  (`quota` / `auth` / `timeout`) so your assistant knows what to do next. Works on
+  macOS / Linux / Windows.
+
+### vs. other multi-model MCPs
+
+| | cli-bridge | API-key gateways | token-reuse bridges |
+|---|:---:|:---:|:---:|
+| Ban-safe (spawns official CLI) | ✅ | ➖ (your keys) | ❌ (ToS risk) |
+| No API keys to manage | ✅ | ❌ | ✅ |
+| Uses your existing subscriptions | ✅ | ❌ | ✅ |
+| Per-plan cost tiers + cooldown | ✅ | ➖ | ❌ |
+| Automatic fallback (cascade) | ✅ | some | ❌ |
+| Add any CLI / your own API, no fork | ✅ | ➖ | ❌ |
+| Self-hides the calling host | ✅ | n/a | ➖ |
 
 ---
 
@@ -114,8 +137,14 @@ Just talk to your assistant:
 |------|--------------|
 | `ask_<lane>` | Ask one model. Params: `task`, optional `model`, `effort`, `agent`, `cwd`, `timeout_s`. |
 | `ask_all` | Fan-out the same question to every free, non-limited lane in parallel. `synthesize: true` adds an agreement/disagreement summary. `include_paid: true` to also query limited/paid lanes. |
+| `ask_cascade` | Ask one model **with automatic fallback** — tries lanes cheapest→strongest, skipping cooled ones, moving on at quota/auth/timeout. Returns the first success. |
+| `route_plan` | Show the order `ask_cascade` would try, given your profile + current cooldowns (read-only, runs nothing). |
 | `list_<lane>_models` | List the models that lane can reach (where supported). |
-| `doctor` | Health check: installed CLIs, detected host, cost/quota stance, defaults. `deep: true` live-probes each free, non-limited lane's auth. |
+| `doctor` | Health check: installed CLIs, detected host, cost/quota stance, cooldowns, defaults. `deep: true` live-probes each free, non-limited lane's auth. |
+| `usage_report` | Local-only stats: total runs, per-lane counts/success/latency, recent calls. |
+| `lane_stats` | Per-lane health: runs, failures, consecutive failures/timeouts, active cooldown. |
+| `reset_lane_state` | Clear a lane's cooldown/failure counters (after re-login or quota reset). |
+| `setup` | Walk the user through configuring cost preferences to their own subscriptions. |
 
 Every lane is **read-only by default** — the delegate analyses and answers; your host applies any
 edits. The one exception is opencode's `agent: "build"`, which you opt into explicitly to let it
@@ -144,7 +173,11 @@ Everything is environment variables — no code edits. Tune it to **your** subsc
 | `CLI_BRIDGE_PROFILE` | `saver`, `balanced`, or `max`. `max` includes limited/paid lanes in `ask_all` unless the caller overrides `include_paid`. |
 | `CLI_BRIDGE_HOST` | Force the host identity (which lane to hide). Normally auto-detected. |
 | `CLI_BRIDGE_LANES_FILE` | Path to a JSON file adding **your own** CLIs/APIs as lanes. |
+| `CLI_BRIDGE_<LANE>_PRIORITY` | Lower runs earlier in `ask_cascade` (default 50). Pin your preferred order. |
 | `CLI_BRIDGE_INLINE_MAX_CHARS` | Above this, an answer spills to a file instead of flooding context (default 12000). |
+| `CLI_BRIDGE_TELEMETRY` | `off` to disable the local run log / cooldown tracking (default on, machine-local only). |
+| `CLI_BRIDGE_STATE_DB` | Path to the local sqlite state DB (default `~/.local/share/cli-bridge/state.sqlite`). |
+| `CLI_BRIDGE_STORE_TRANSCRIPTS` | `true` to keep a longer task preview in telemetry (default: hash + 60-char preview only). |
 | `CLI_BRIDGE_LOG` / `_LOG_FILE` | `debug`/`info` to log what ran where (default: silent). |
 
 ### Add your own CLI (no fork)
