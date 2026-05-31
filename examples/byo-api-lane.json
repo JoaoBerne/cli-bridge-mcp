@@ -1,0 +1,25 @@
+[
+  {
+    "//": "Bring Your Own API — no CLI needed, the council just spawns curl.",
+    "//1": "Works with any OpenAI-compatible endpoint: OpenAI, Groq, Together, OpenRouter,",
+    "//2": "DeepSeek, a local llama.cpp/vLLM server, or your own gateway.",
+    "//3": "Put your key in an env var (here MY_API_KEY) — never write it in this file.",
+    "//4": "{task_json} = your prompt, JSON-escaped.  ${MY_API_KEY} = expanded from the env.",
+
+    "key": "myapi",
+    "display": "My API (OpenAI-compatible)",
+    "bin": "curl",
+    "default_model": "gpt-4o-mini",
+    "model_flag": "",
+    "paid": true,
+    "client_ids": [],
+    "note": "Custom OpenAI-compatible endpoint via curl. Returns raw JSON; the host parses it.",
+    "ask": [
+      "-sS",
+      "https://api.openai.com/v1/chat/completions",
+      "-H", "Content-Type: application/json",
+      "-H", "Authorization: Bearer ${MY_API_KEY}",
+      "-d", "{\"model\":\"{model}\",\"messages\":[{\"role\":\"user\",\"content\":\"{task_json}\"}]}"
+    ]
+  }
+]

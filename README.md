@@ -6,14 +6,14 @@
 whatever AI you're already talking to — Claude Code, Codex, Gemini CLI, opencode, anything that
 speaks MCP — **consult a council of other AI CLIs** and bring back their answers.
 
-Stuck on a gnarly bug? Have Claude ask GPT *and* Gemini in parallel and compare. Need a 1M-token
-read of a huge file? Hand it to Gemini. Want a cheap second opinion? Fire it at a free model.
-One question, every model, side by side — without leaving your terminal.
+Stuck on a gnarly bug? Have your assistant ask GPT *and* Gemini in parallel and compare. Need a
+1M-token read of a huge file? Hand it to Gemini. Want a cheap second opinion? Fire it at a free
+model. One question, every model, side by side — without leaving your terminal.
 
 ```
 You → Claude:  "ask the council whether this auth logic is safe"
 Claude → cli-bridge → [ Gemini ] [ GPT ] [ Mistral ] [ Qwen ] … in parallel
-            ← three independent reviews, side by side
+            ← three independent reviews + a synthesis of where they agree & disagree
 ```
 
 ---
@@ -22,19 +22,25 @@ Claude → cli-bridge → [ Gemini ] [ GPT ] [ Mistral ] [ Qwen ] … in paralle
 
 There are other "call other models" MCPs. Here's what makes cli-bridge different:
 
-- 🛡️ **Ban-safe by design.** It spawns the **official CLI** of each model — exactly as you'd run
-  it by hand. No OAuth-token extraction, no API-key reuse, nothing that gets accounts flagged.
-  Each CLI handles its own auth and billing.
-- 💸 **Free by default.** Most lanes run on subscription/free-tier logins (your ChatGPT, Gemini,
-  Mistral accounts) — quota, not pay-per-token. The one paid lane (opencode credits) **defaults to
-  a free model** and warns you before spending.
-- 🔌 **Works from any host.** Driving Claude Code? It hides the Claude lane (no asking yourself) and
-  exposes the rest. Driving Codex or opencode instead? Same deal, automatically.
-- 🧩 **Add any CLI without forking.** Built-in lanes for Claude, GPT, Gemini, Mistral, Qwen, Copilot
-  and opencode — and you can register **your own CLI from a JSON file**, zero code.
-- 🧱 **Hardened.** Timeouts kill the whole process tree (no orphans burning quota), secrets are
-  redacted from output, runaway dumps are capped, errors are classified (`quota` / `auth` / `timeout`)
-  so your assistant knows what to do next.
+- 🛡️ **Ban-safe by design.** It spawns each model's **official CLI** — exactly as you'd run it by
+  hand. No OAuth-token extraction, no API-key reuse, nothing that gets accounts flagged. Each CLI
+  handles its own auth and billing.
+- 💸 **Free by default, and *you* decide what's paid.** Most lanes run on subscription/free-tier
+  logins (your ChatGPT, Gemini, Mistral accounts) — quota, not pay-per-token. You declare which
+  lanes cost *you* money (`CLI_BRIDGE_<LANE>_COST=paid`), and fan-out skips them automatically.
+- 🔌 **Works from any host.** Driving Claude Code? It hides the Claude lane (no asking yourself)
+  and exposes the rest. Driving Codex or opencode instead? Same deal, detected automatically from
+  the MCP handshake.
+- 🧩 **Add any CLI — or your own API — without forking.** Built-in lanes for Claude, GPT, Gemini,
+  Mistral, Qwen, Copilot and opencode. Register **your own CLI from a JSON file**, or wrap **your
+  own API** by spawning `curl`. Zero code.
+- 🧠 **Council synthesis.** `ask_all` can have a free model summarize where the others *agree* and
+  *disagree* — turn three opinions into one decision.
+- 🪶 **Subagent-style returns.** A delegate works in its own context and hands back a digest; huge
+  outputs spill to a file and only a preview comes back, so your assistant's context stays lean.
+- 🧱 **Hardened.** Timeouts kill the whole process tree (no orphans burning quota), host
+  cancellation kills the delegate, secrets are redacted, errors are classified
+  (`quota` / `auth` / `timeout`) so your assistant knows what to do next.
 
 ---
 
@@ -51,17 +57,20 @@ uv tool install cli-bridge-mcp     # or: pipx install cli-bridge-mcp
 ```
 
 You only get a lane for a CLI you've **already installed and logged into**. cli-bridge auto-detects
-what's on your `PATH`. Run the `doctor` tool any time to see what's wired up.
+what's on your `PATH`. Run the `doctor` tool any time to see what's wired up (`doctor deep` even
+live-checks each login).
 
-| Lane | CLI | Cost |
+| Lane | CLI | Cost (typical) |
 |------|-----|------|
 | `ask_claude`   | [Claude Code](https://docs.claude.com/claude-code) | subscription |
 | `ask_gpt`      | [OpenAI Codex](https://github.com/openai/codex) | subscription |
-| `ask_gemini`   | Gemini CLI / Antigravity | free / subscription |
+| `ask_gemini`   | Gemini CLI (or `agy` / Antigravity) | free / subscription |
 | `ask_mistral`  | Mistral Vibe | free tier |
-| `ask_qwen`     | Qwen Code | free / subscription |
-| `ask_copilot`  | GitHub Copilot CLI | subscription |
+| `ask_qwen` ⚗️  | Qwen Code | free / subscription |
+| `ask_copilot` ⚗️ | GitHub Copilot CLI | subscription |
 | `ask_opencode` | [opencode](https://opencode.ai) gateway (deepseek, qwen, glm, kimi…) | **credits** (free model by default) |
+
+⚗️ = experimental (flags not yet verified live — please report breakage).
 
 ### 2. Register it with your host
 
@@ -92,7 +101,7 @@ Point your client's MCP config at the command `uvx cli-bridge-mcp` over stdio. S
 Just talk to your assistant:
 
 > *"Ask Gemini for a second opinion on this function."*
-> *"Have the whole council review my diff and tell me where they disagree."*
+> *"Have the whole council review my diff and synthesize where they disagree."*
 > *"Get GPT to think hard about this race condition."* (→ `effort: high`)
 
 ---
@@ -101,48 +110,68 @@ Just talk to your assistant:
 
 | Tool | What it does |
 |------|--------------|
-| `ask_<lane>` | Ask one model. Params: `task`, optional `model`, `effort`, `cwd`, `timeout_s`. |
-| `ask_all` | Fan-out the same question to **every** available lane in parallel. Free lanes only unless `include_paid: true`. |
+| `ask_<lane>` | Ask one model. Params: `task`, optional `model`, `effort`, `agent`, `cwd`, `timeout_s`. |
+| `ask_all` | Fan-out the same question to **every** free lane in parallel. `synthesize: true` adds an agreement/disagreement summary. `include_paid: true` to also query paid lanes. |
 | `list_<lane>_models` | List the models that lane can reach (where supported). |
-| `doctor` | Health check: installed CLIs, which host is detected, paid lanes, default models. |
+| `doctor` | Health check: installed CLIs, detected host, paid lanes, defaults. `deep: true` live-probes each free lane's auth. |
 
 Every lane is **read-only by default** — the delegate analyses and answers; your host applies any
-edits. (The one exception is opencode's `agent: "build"`, which you opt into explicitly to let it
-edit files directly.)
+edits. The one exception is opencode's `agent: "build"`, which you opt into explicitly to let it
+edit files directly (and it's annotated non-read-only accordingly).
 
 ---
 
 ## Configuration
 
-Everything is environment variables — no code edits.
+Everything is environment variables — no code edits. Tune it to **your** subscriptions:
 
 | Variable | Effect |
 |----------|--------|
-| `CLI_BRIDGE_<LANE>_BIN` | Point a lane at a different binary. e.g. `CLI_BRIDGE_GEMINI_BIN=agy` to use Antigravity. |
+| `CLI_BRIDGE_<LANE>_COST` | `free` or `paid` — declare whether a lane costs *you* money. Drives `ask_all`'s free-only default. |
+| `CLI_BRIDGE_<LANE>_ENABLED` | `false` to hide a lane even if its CLI is installed. |
+| `CLI_BRIDGE_<LANE>_BIN` | Point a lane at a different binary (e.g. `CLI_BRIDGE_GEMINI_BIN=agy`). |
 | `CLI_BRIDGE_<LANE>_MODEL` | Default model for a lane when the caller doesn't pass one. |
-| `CLI_BRIDGE_HOST` | Force the host identity (which lane to hide). Normally auto-detected from MCP. |
-| `CLI_BRIDGE_LANES_FILE` | Path to a JSON file adding **your own** CLIs as lanes. |
+| `CLI_BRIDGE_HOST` | Force the host identity (which lane to hide). Normally auto-detected. |
+| `CLI_BRIDGE_LANES_FILE` | Path to a JSON file adding **your own** CLIs/APIs as lanes. |
+| `CLI_BRIDGE_INLINE_MAX_CHARS` | Above this, an answer spills to a file instead of flooding context (default 12000). |
+| `CLI_BRIDGE_LOG` / `_LOG_FILE` | `debug`/`info` to log what ran where (default: silent). |
 
 ### Add your own CLI (no fork)
 
-Create `my-lanes.json` and point `CLI_BRIDGE_LANES_FILE` at it:
+`my-lanes.json`, then `CLI_BRIDGE_LANES_FILE=/path/to/my-lanes.json`:
 
 ```json
 [
   {
-    "key": "grok",
-    "display": "Grok (xAI CLI)",
-    "bin": "grok",
-    "ask": ["chat", "{task}"],
-    "model_flag": "-m",
-    "default_model": "grok-beta",
-    "client_ids": ["grok-cli"],
-    "note": "xAI Grok via its official CLI."
+    "key": "grok", "display": "Grok (xAI CLI)", "bin": "grok",
+    "ask": ["chat", "{task}"], "model_flag": "-m", "default_model": "grok-beta",
+    "client_ids": ["grok-cli"], "note": "xAI Grok via its official CLI."
   }
 ]
 ```
 
-You now have an `ask_grok` tool. That's it.
+You now have an `ask_grok` tool.
+
+### Bring your own API (no CLI needed)
+
+Wrap any OpenAI-compatible endpoint by spawning `curl`. Your key stays in an env var, never in the
+file. `{task_json}` is the prompt, JSON-escaped:
+
+```json
+[
+  {
+    "key": "myapi", "display": "My API", "bin": "curl", "default_model": "gpt-4o-mini",
+    "paid": true,
+    "ask": [
+      "-sS", "https://api.openai.com/v1/chat/completions",
+      "-H", "Authorization: Bearer ${MY_API_KEY}",
+      "-d", "{\"model\":\"{model}\",\"messages\":[{\"role\":\"user\",\"content\":\"{task_json}\"}]}"
+    ]
+  }
+]
+```
+
+(See `examples/` for both, ready to copy.)
 
 ---
 
@@ -151,16 +180,30 @@ You now have an `ask_grok` tool. That's it.
 ```
 host (Claude/Codex/…) ──MCP──> cli-bridge ──spawn──> official CLI ──> model
                                     │
-              hides the host's own lane · only shows installed CLIs
-              kills the whole process tree on timeout · redacts secrets
-              classifies errors (quota/auth/timeout) · caps runaway output
+              hides the host's own lane · only shows installed, enabled CLIs
+              kills the whole process tree on timeout / cancellation
+              redacts secrets · classifies errors · spills huge output to a file
 ```
 
 No network calls of its own. No keys stored. It runs the same binaries you already trust, in your
 working directory, and hands the answer back.
 
+### Limitation
+
+If your **host** runs the MCP server inside a strict sandbox (e.g. a read-only filesystem / no
+network), the delegate CLIs it spawns inherit that sandbox and may fail to reach their providers.
+In a normal terminal session this isn't an issue. cli-bridge surfaces the failure as an `auth` or
+`failed` error rather than hanging.
+
 ---
+
+## Development
+
+```bash
+uv venv && uv pip install -e . pytest pytest-asyncio
+pytest -q          # unit + integration (cross-host) tests
+```
 
 ## License
 
-MIT © JoaoBtt
+MIT
