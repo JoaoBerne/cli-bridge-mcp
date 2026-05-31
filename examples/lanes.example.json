@@ -1,0 +1,20 @@
+[
+  {
+    "key": "grok",
+    "display": "Grok (xAI CLI)",
+    "bin": "grok",
+    "ask": ["chat", "{task}"],
+    "model_flag": "-m",
+    "default_model": "grok-beta",
+    "client_ids": ["grok-cli"],
+    "note": "xAI Grok via its official CLI."
+  },
+  {
+    "key": "ollama",
+    "display": "Ollama (local models)",
+    "bin": "ollama",
+    "ask": ["run", "{model}", "{task}"],
+    "default_model": "llama3.2",
+    "note": "Local models via Ollama. Fully offline, no quota."
+  }
+]

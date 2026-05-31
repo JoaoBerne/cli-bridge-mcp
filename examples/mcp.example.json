@@ -1,0 +1,14 @@
+{
+  "//": "Drop this into your MCP client config (e.g. Claude Code's .mcp.json or ~/.claude.json).",
+  "mcpServers": {
+    "cli-bridge": {
+      "command": "uvx",
+      "args": ["cli-bridge-mcp"],
+      "env": {
+        "//": "All optional. Examples:",
+        "CLI_BRIDGE_GEMINI_BIN": "agy",
+        "CLI_BRIDGE_LANES_FILE": "/path/to/my-lanes.json"
+      }
+    }
+  }
+}
