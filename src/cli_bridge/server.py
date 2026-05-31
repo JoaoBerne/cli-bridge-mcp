@@ -21,7 +21,11 @@ from mcp.types import TextContent, Tool
 
 from . import runner
 from .detect import is_installed, installed_lanes
-from .lanes import LaneSpec, all_lanes
+from .lanes import LANES_LOAD_STATUS as _LANES_LOAD_STATUS, LaneSpec, all_lanes
+
+
+def lanes_load_status() -> dict:
+    return dict(_LANES_LOAD_STATUS)
 
 DEFAULT_TIMEOUT_S = 120
 MAX_TIMEOUT_S = 900
@@ -33,7 +37,15 @@ ASK_ALL_SYNTH_TIMEOUT_S = 45
 # not its whole transcript. Anything longer than this is spilled to a file and only a head
 # preview + path comes back — so a 50k-token answer never floods the host's context. The
 # host re-reads the file selectively (grep, or a dedicated subagent) when it needs the rest.
-INLINE_MAX_CHARS = int(os.environ.get("CLI_BRIDGE_INLINE_MAX_CHARS", "12000") or "12000")
+def _int_env(name: str, default: int, lo: int, hi: int) -> int:
+    """Parse an int env var without ever crashing the server at import on a bad value."""
+    try:
+        return max(lo, min(int(os.environ.get(name, "").strip() or default), hi))
+    except (TypeError, ValueError):
+        return default
+
+
+INLINE_MAX_CHARS = _int_env("CLI_BRIDGE_INLINE_MAX_CHARS", 12000, 500, 1_000_000)
 OVERFLOW_DIR = os.environ.get("CLI_BRIDGE_OVERFLOW_DIR", "").strip() \
     or os.path.join(tempfile.gettempdir(), "cli-bridge-overflow")
 
@@ -41,9 +53,9 @@ OVERFLOW_DIR = os.environ.get("CLI_BRIDGE_OVERFLOW_DIR", "").strip() \
 # CLI_BRIDGE_PROFILE; there is no universal "free is best" — someone on a big plan may not
 # care about tokens and want top models by default. Unset => balanced, but the server's
 # `instructions` tell the host assistant to ASK the user on first use (see SETUP_TEXT).
-#   saver    = free lanes only; never spend credits unless explicitly told per-call.
-#   balanced = free by default, but reach for a paid/better model when the task earns it.
-#   max      = quality first; use the best model by default, ask_all includes paid lanes.
+#   saver    = free lanes only; never spend credits or scarce quota unless explicitly told.
+#   balanced = free by default; limited/paid lanes need explicit include_paid.
+#   max      = quality first; ask_all includes free, limited, and paid lanes.
 _VALID_PROFILES = ("saver", "balanced", "max")
 
 
@@ -56,6 +68,14 @@ def _profile_is_set() -> bool:
     return os.environ.get("CLI_BRIDGE_PROFILE", "").strip().lower() in _VALID_PROFILES
 
 
+def _cost_config_is_set() -> bool:
+    """The user has expressed cost intent if they set a profile OR any per-lane COST."""
+    if _profile_is_set():
+        return True
+    return any(k.startswith("CLI_BRIDGE_") and k.endswith("_COST") and v.strip()
+               for k, v in os.environ.items())
+
+
 SETUP_TEXT = (
     "Help the user configure cli-bridge to THEIR situation. Don't impose a preset — every "
     "person's plans differ (one may have unlimited Gemini but metered opencode credits, "
@@ -66,7 +86,9 @@ SETUP_TEXT = (
     "on big tasks?\". Listen to their actual answer; don't assume free=best.\n"
     "3. Translate their answers into config (env vars on the MCP server entry, or just honour "
     "them for this session):\n"
-    "     CLI_BRIDGE_<LANE>_COST = free | paid   (per-lane: does it cost THEM money)\n"
+    "     CLI_BRIDGE_<LANE>_COST = free | limited | paid\n"
+    "          free=use freely in ask_all; limited=scarce quota, direct calls OK but skip "
+    "ask_all by default; paid=money/credits\n"
     "     CLI_BRIDGE_<LANE>_ENABLED = false       (hide a lane they don't want used)\n"
     "     CLI_BRIDGE_<LANE>_MODEL = <id>          (their preferred default model for a lane)\n"
     "     CLI_BRIDGE_PROFILE = saver|balanced|max (optional shorthand if they'd rather not "
@@ -85,7 +107,7 @@ INSTRUCTIONS = (
     "— someone on a big plan may want top models by default; someone on metered credits won't. "
     "Configure to their actual answer.\n\n"
     "Then: `ask_<lane>` for one model, `ask_all` to poll several in parallel, `doctor` to see "
-    "what's installed and the current cost stance."
+    "what's installed and the current cost/quota stance."
 )
 
 server: Server = Server("cli-bridge", instructions=INSTRUCTIONS)
@@ -173,12 +195,14 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
     tools: list[Tool] = []
     for lane in lanes:
         paid = " [paid lane - spends credits/money on your plan]" if lane.is_paid else ""
+        limited = " [limited lane - scarce quota; skipped by ask_all unless requested]" \
+            if lane.is_limited else ""
         exp = " [experimental: flags not verified live — report breakage]" if lane.experimental else ""
         # A lane that can WRITE (opencode build) must not advertise read-only.
         can_write = "agent" in lane.caps
         tools.append(Tool(
             name=f"ask_{lane.key}",
-            description=f"Consult {lane.display}. {lane.note}{paid}{exp}",
+            description=f"Consult {lane.display}. {lane.note}{paid}{limited}{exp}",
             inputSchema=_ask_schema(lane),
             annotations={"readOnlyHint": not can_write, "openWorldHint": True,
                          "destructiveHint": can_write},
@@ -194,13 +218,14 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
         tools.append(Tool(
             name="ask_all",
             description=("Fan-out: ask the SAME question to every available lane in parallel and "
-                         "get all answers side by side. Free lanes only by default (no credits)."),
+                         "get all answers side by side. Free, non-limited lanes only by default."),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "task": {"type": "string", "description": "Prompt sent to every lane."},
                     "include_paid": {"type": "boolean",
-                                     "description": "Also query paid lanes (spends credits). Default false."},
+                                     "description": "Also query limited/paid lanes. Default false, "
+                                                    "except CLI_BRIDGE_PROFILE=max."},
                     "cwd": {"type": "string", "description": "Directory the CLIs run in."},
                     "timeout_s": {"type": "integer",
                                   "description": f"Per-lane timeout (max {MAX_TIMEOUT_S})."},
@@ -268,6 +293,16 @@ def _ask_all_timeout(raw) -> int:
     return max(1, min(t, ASK_ALL_MAX_TIMEOUT_S))
 
 
+def _ask_all_include_paid(args: dict) -> bool:
+    if "include_paid" in args and args["include_paid"] is not None:
+        return bool(args["include_paid"])
+    return _profile() == "max"
+
+
+def _ask_all_targets(lanes: list[LaneSpec], include_paid: bool) -> list[LaneSpec]:
+    return [ln for ln in lanes if include_paid or (not ln.is_paid and not ln.is_limited)]
+
+
 async def _run_lane(lane: LaneSpec, args: dict) -> runner.RunResult:
     task = _str(args, "task")
     if not task:
@@ -325,13 +360,18 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
 async def _ask_all(lanes: list[LaneSpec], args: dict) -> list[TextContent]:
     # Explicit arg wins. Otherwise the cost profile decides: 'max' polls paid lanes too,
     # saver/balanced stay free-only by default (the caller can still pass include_paid).
-    if "include_paid" in args and args["include_paid"] is not None:
-        include_paid = bool(args["include_paid"])
-    else:
-        include_paid = _profile() == "max"
-    targets = [ln for ln in lanes if include_paid or not ln.is_paid]
+    include_paid = _ask_all_include_paid(args)
+    targets = _ask_all_targets(lanes, include_paid)
     if not targets:
-        return [TextContent(type="text", text="[error] no lanes available to query")]
+        held = [ln.display for ln in lanes if ln.is_paid or ln.is_limited]
+        if held:
+            msg = ("[error] no FREE lanes to fan out to. Limited/paid lanes available: "
+                   f"{', '.join(held)}. Call ask_all with include_paid=true, or mark a lane "
+                   "free for your plan via CLI_BRIDGE_<LANE>_COST=free.")
+        else:
+            msg = ("[error] no delegate CLIs installed. Run `doctor` to see install hints, "
+                   "then install/log into at least one CLI (e.g. gemini, mistral, opencode).")
+        return [TextContent(type="text", text=msg)]
     sub = {"task": _str(args, "task"), "cwd": _str(args, "cwd"),
            "timeout_s": _ask_all_timeout(args.get("timeout_s"))}
     # return_exceptions: one broken lane must not sink the whole fan-out.
@@ -344,8 +384,9 @@ async def _ask_all(lanes: list[LaneSpec], args: dict) -> list[TextContent]:
         else:
             status = "OK" if res.ok else f"FAILED ({res.kind})"
             blocks.append(f"## {lane.display} - {status}\n\n{res.render()}")
-    skipped = [ln.display for ln in lanes if ln.is_paid and not include_paid]
-    footer = (f"\n\n---\n_Skipped paid lanes: {', '.join(skipped)} (set include_paid=true)._"
+    skipped = [ln.display for ln in lanes if (ln.is_paid or ln.is_limited) and not include_paid]
+    footer = (f"\n\n---\n_Skipped limited/paid lanes: {', '.join(skipped)} "
+              f"(set include_paid=true)._"
               if skipped else "")
     body = "\n\n".join(blocks) + footer
 
@@ -363,7 +404,8 @@ async def _synthesize(question, answered, targets) -> str:
     cheapest free non-paid lane available; returns '' if none can do it."""
     if len(answered) < 2:
         return ""
-    judge = next((ln for ln in targets if not ln.is_paid and not ln.experimental), None)
+    judge = next((ln for ln in targets
+                  if not ln.is_paid and not ln.is_limited and not ln.experimental), None)
     if judge is None:
         return ""
     transcript = "\n\n".join(f"### {lane.display}\n{res.output}" for lane, res in answered)
@@ -378,7 +420,7 @@ async def _synthesize(question, answered, targets) -> str:
 async def _doctor_deep(host: str, lanes: list[LaneSpec]) -> str:
     """doctor + a tiny live probe of each free, exposed lane to check auth/quota for real."""
     base = _doctor(host)
-    probes = [ln for ln in lanes if not ln.is_paid]
+    probes = [ln for ln in lanes if not ln.is_paid and not ln.is_limited]
     if not probes:
         return base + "\n\n_(deep probe: no free lanes to test)_"
     async def _probe(ln):
@@ -400,12 +442,12 @@ def _doctor(host: str) -> str:
         if not lane.enabled:
             mark += " (disabled by env)"
         hidden = " - hidden (this is the host)" if _is_host(lane, host) else ""
-        paid = " - paid" if lane.is_paid else " - free"
+        paid = f" - {lane.cost_label}"
         exp = " - experimental" if lane.experimental else ""
         model = lane.model_for("")
         default = f" - default model: {model}" if model else ""
         lines.append(f"- **{lane.key}** ({lane.bin}) - {mark}{paid}{exp}{hidden}{default}")
-    lines.append("\nPer-lane config (your plan): CLI_BRIDGE_<LANE>_COST=free|paid, "
+    lines.append("\nPer-lane config (your plan): CLI_BRIDGE_<LANE>_COST=free|limited|paid, "
                  "_ENABLED=false, _BIN=<path>, _MODEL=<id>.")
     lines.append("Add your own CLI via a JSON file in CLI_BRIDGE_LANES_FILE - no code changes.")
     return "\n".join(lines)

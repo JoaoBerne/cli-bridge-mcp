@@ -32,6 +32,27 @@ def test_ask_all_timeout_guard():
     assert server._ask_all_timeout(0) == 1
 
 
+def test_ask_all_targets_skip_limited_and_paid_by_default(monkeypatch):
+    from cli_bridge.lanes import LaneSpec
+    free = LaneSpec("free", "Free", "echo", lambda *a: [])
+    limited = LaneSpec("limited", "Limited", "echo", lambda *a: [])
+    paid = LaneSpec("paid", "Paid", "echo", lambda *a: [], paid=True)
+    monkeypatch.setenv("CLI_BRIDGE_LIMITED_COST", "limited")
+
+    targets = server._ask_all_targets([free, limited, paid], include_paid=False)
+    assert targets == [free]
+    assert server._ask_all_targets([free, limited, paid], include_paid=True) == [
+        free, limited, paid]
+
+
+def test_ask_all_include_paid_profile(monkeypatch):
+    monkeypatch.delenv("CLI_BRIDGE_PROFILE", raising=False)
+    assert server._ask_all_include_paid({}) is False
+    monkeypatch.setenv("CLI_BRIDGE_PROFILE", "max")
+    assert server._ask_all_include_paid({}) is True
+    assert server._ask_all_include_paid({"include_paid": False}) is False
+
+
 def test_is_host_matches_via_slug():
     from cli_bridge.lanes import LaneSpec
     lane = LaneSpec("x", "X", "x", lambda *a: [], client_ids=frozenset({"claude-code"}))

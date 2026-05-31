@@ -26,6 +26,7 @@ def test_setup_text_is_conversational_not_a_locked_menu():
     assert "doctor" in server.SETUP_TEXT
     assert "EACH installed lane" in server.SETUP_TEXT
     assert "CLI_BRIDGE_<LANE>_COST" in server.SETUP_TEXT
+    assert "limited" in server.SETUP_TEXT
 
 
 def test_instructions_tell_host_to_ask():

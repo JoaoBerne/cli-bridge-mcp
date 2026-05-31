@@ -25,9 +25,11 @@ There are other "call other models" MCPs. Here's what makes cli-bridge different
 - 🛡️ **Ban-safe by design.** It spawns each model's **official CLI** — exactly as you'd run it by
   hand. No OAuth-token extraction, no API-key reuse, nothing that gets accounts flagged. Each CLI
   handles its own auth and billing.
-- 💸 **Free by default, and *you* decide what's paid.** Most lanes run on subscription/free-tier
-  logins (your ChatGPT, Gemini, Mistral accounts) — quota, not pay-per-token. You declare which
-  lanes cost *you* money (`CLI_BRIDGE_<LANE>_COST=paid`), and fan-out skips them automatically.
+- 💸 **Sensible cost defaults, then *you* tune to your plan.** Out of the box `ask_all` builds a
+  free council (Gemini + Mistral + opencode) and never touches subscription quota (Claude, GPT) or
+  paid credits unless you ask. Each lane ships a realistic tier
+  (`CLI_BRIDGE_<LANE>_COST=free|limited|paid`) that you override per your own subscriptions — on a
+  big plan, mark them all `free`, or set `CLI_BRIDGE_PROFILE=max`.
 - 🔌 **Works from any host.** Driving Claude Code? It hides the Claude lane (no asking yourself)
   and exposes the rest. Driving Codex or opencode instead? Same deal, detected automatically from
   the MCP handshake.
@@ -111,9 +113,9 @@ Just talk to your assistant:
 | Tool | What it does |
 |------|--------------|
 | `ask_<lane>` | Ask one model. Params: `task`, optional `model`, `effort`, `agent`, `cwd`, `timeout_s`. |
-| `ask_all` | Fan-out the same question to **every** free lane in parallel. `synthesize: true` adds an agreement/disagreement summary. `include_paid: true` to also query paid lanes. |
+| `ask_all` | Fan-out the same question to every free, non-limited lane in parallel. `synthesize: true` adds an agreement/disagreement summary. `include_paid: true` to also query limited/paid lanes. |
 | `list_<lane>_models` | List the models that lane can reach (where supported). |
-| `doctor` | Health check: installed CLIs, detected host, paid lanes, defaults. `deep: true` live-probes each free lane's auth. |
+| `doctor` | Health check: installed CLIs, detected host, cost/quota stance, defaults. `deep: true` live-probes each free, non-limited lane's auth. |
 
 Every lane is **read-only by default** — the delegate analyses and answers; your host applies any
 edits. The one exception is opencode's `agent: "build"`, which you opt into explicitly to let it
@@ -135,10 +137,11 @@ Everything is environment variables — no code edits. Tune it to **your** subsc
 
 | Variable | Effect |
 |----------|--------|
-| `CLI_BRIDGE_<LANE>_COST` | `free` or `paid` — declare whether a lane costs *you* money. Drives `ask_all`'s free-only default. |
+| `CLI_BRIDGE_<LANE>_COST` | `free`, `limited`, or `paid`. `free` joins `ask_all`; `limited` is quota-sensitive and skipped by broad fan-out; `paid` spends money/credits and is skipped by default. |
 | `CLI_BRIDGE_<LANE>_ENABLED` | `false` to hide a lane even if its CLI is installed. |
 | `CLI_BRIDGE_<LANE>_BIN` | Point a lane at a different binary (e.g. `CLI_BRIDGE_GEMINI_BIN=agy`). |
 | `CLI_BRIDGE_<LANE>_MODEL` | Default model for a lane when the caller doesn't pass one. |
+| `CLI_BRIDGE_PROFILE` | `saver`, `balanced`, or `max`. `max` includes limited/paid lanes in `ask_all` unless the caller overrides `include_paid`. |
 | `CLI_BRIDGE_HOST` | Force the host identity (which lane to hide). Normally auto-detected. |
 | `CLI_BRIDGE_LANES_FILE` | Path to a JSON file adding **your own** CLIs/APIs as lanes. |
 | `CLI_BRIDGE_INLINE_MAX_CHARS` | Above this, an answer spills to a file instead of flooding context (default 12000). |

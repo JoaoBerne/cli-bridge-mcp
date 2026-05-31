@@ -117,8 +117,15 @@ def test_all_lanes_includes_builtins():
 def test_cost_env_override(monkeypatch):
     lane = _lane("gemini")
     assert lane.is_paid is False                      # free by default
+    assert lane.is_limited is False
+    assert lane.cost_label == "free"
     monkeypatch.setenv("CLI_BRIDGE_GEMINI_COST", "paid")
     assert lane.is_paid is True                       # user declares it paid on their plan
+    assert lane.cost_label == "paid"
+    monkeypatch.setenv("CLI_BRIDGE_GEMINI_COST", "limited")
+    assert lane.is_paid is False                      # quota-sensitive but not money
+    assert lane.is_limited is True
+    assert lane.cost_label == "limited"
     monkeypatch.setenv("CLI_BRIDGE_OPENCODE_COST", "free")
     assert _lane("opencode").is_paid is False         # user declares opencode free for them
 
