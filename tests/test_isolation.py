@@ -42,7 +42,7 @@ def test_delegate_run_does_not_touch_cli_config_dirs(monkeypatch, tmp_path):
 
     # fake lane backed by `echo` (always installed) — exercises the full _run_lane path,
     # including the terse preamble, without needing a real AI CLI.
-    fake = lanes.LaneSpec("xtest", "X", "echo", lambda task, m, e, a: [task])
+    fake = lanes.LaneSpec("xtest", "X", "echo", lambda task, m, e, a, b="": [task])
     res = asyncio.run(server._run_lane(fake, {"task": "hello world"}))
     assert res.ok
 

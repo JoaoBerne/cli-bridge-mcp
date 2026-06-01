@@ -351,7 +351,7 @@ async def _run_lane(lane: LaneSpec, args: dict, *, tool: str = "ask",
     # structured-output tools (terse=False) so JSON stays intact. Telemetry keys on the raw
     # task, not the prefixed prompt.
     prompt = preamble.apply(task) if terse else task
-    argv = [lane.bin] + lane.build_ask(prompt, model, _str(args, "effort"), agent)
+    argv = [lane.bin] + lane.build_ask(prompt, model, _str(args, "effort"), agent, lane.bin)
     cwd = _str(args, "cwd")
     expanded = os.path.expanduser(cwd) if cwd else None
     if expanded and not os.path.isdir(expanded):

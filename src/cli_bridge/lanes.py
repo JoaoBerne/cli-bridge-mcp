@@ -109,15 +109,24 @@ class LaneSpec:
 
 # ─────────────────────────────── built-in lane builders ───────────────────────────────
 
-def _claude_ask(task, model, effort, agent):
-    cmd = ["--print", "--permission-mode", "plan"]
+def _is_build(agent) -> bool:
+    return (agent or "").strip().lower() == "build"
+
+
+def _claude_ask(task, model, effort, agent, bin=""):
+    # plan = read-only; build = acceptEdits (auto-applies file edits, no per-edit prompt).
+    mode = "acceptEdits" if _is_build(agent) else "plan"
+    cmd = ["--print", "--permission-mode", mode]
     if model:
         cmd += ["--model", model]
     return cmd + [task]
 
 
-def _codex_ask(task, model, effort, agent):
-    cmd = ["exec", "--sandbox", "read-only", "--skip-git-repo-check"]
+def _codex_ask(task, model, effort, agent, bin=""):
+    # `codex exec` is non-interactive by design; the sandbox alone gates writes — read-only
+    # for plan, workspace-write (edit files in the cwd) for build. No approval flag needed.
+    sandbox = "workspace-write" if _is_build(agent) else "read-only"
+    cmd = ["exec", "--sandbox", sandbox, "--skip-git-repo-check"]
     eff = {"minimal": "low", "low": "low", "medium": "medium",
            "high": "high", "max": "high"}.get(_effort(effort), "")
     if eff:
@@ -127,22 +136,27 @@ def _codex_ask(task, model, effort, agent):
     return cmd + [task]
 
 
-def _gemini_ask(task, model, effort, agent):
-    # `gemini` accepts -m; Antigravity's `agy` does not (only -p). The builder doesn't know
-    # which binary will run, so it emits -m only for a model; callers using agy should leave
-    # model empty (its default is empty, so the common path stays -p only).
+def _gemini_ask(task, model, effort, agent, bin=""):
+    # Same lane serves Google `gemini` and Antigravity `agy` — they DIFFER: gemini takes -m
+    # and auto-approves with --yolo; agy takes no -m and uses --dangerously-skip-permissions.
+    # Now that the builder knows the bin, it emits the right flags for whichever is installed.
+    is_agy = "agy" in (bin or "")
     cmd = []
-    if model:
+    if model and not is_agy:
         cmd += ["-m", model]
+    if _is_build(agent):
+        cmd.append("--dangerously-skip-permissions" if is_agy else "--yolo")
     return cmd + ["-p", task]
 
 
-def _mistral_ask(task, model, effort, agent):
-    # vibe: prompt must come before --agent; --trust skips the per-dir trust prompt.
-    return ["-p", task, "--agent", "plan", "--trust"]
+def _mistral_ask(task, model, effort, agent, bin=""):
+    # vibe: prompt before --agent; --trust skips the per-dir trust prompt. accept-edits agent
+    # auto-applies edits for build; plan stays read-only.
+    ag = "accept-edits" if _is_build(agent) else "plan"
+    return ["-p", task, "--agent", ag, "--trust"]
 
 
-def _opencode_ask(task, model, effort, agent):
+def _opencode_ask(task, model, effort, agent, bin=""):
     ag = (agent or "plan").strip() or "plan"
     cmd = ["run", "--agent", ag, "-m", model]      # model always set (free default upstream)
     var = {"minimal": "minimal", "low": "minimal", "medium": "high",
@@ -154,17 +168,21 @@ def _opencode_ask(task, model, effort, agent):
     return cmd + [task]
 
 
-def _qwen_ask(task, model, effort, agent):         # Qwen Code is a gemini-cli fork
+def _qwen_ask(task, model, effort, agent, bin=""):  # Qwen Code is a gemini-cli fork (--yolo)
     cmd = []
     if model:
         cmd += ["-m", model]
+    if _is_build(agent):
+        cmd.append("--yolo")
     return cmd + ["-p", task]
 
 
-def _copilot_ask(task, model, effort, agent):      # GitHub Copilot CLI (best-effort flags)
+def _copilot_ask(task, model, effort, agent, bin=""):  # GitHub Copilot CLI (best-effort flags)
     cmd = []
     if model:
         cmd += ["--model", model]
+    if _is_build(agent):
+        cmd.append("--allow-all-tools")
     return cmd + ["-p", task]
 
 
@@ -217,29 +235,33 @@ def _current_opencode_free_model(bin_name: str) -> str:
 BUILTIN_LANES: list[LaneSpec] = [
     LaneSpec("claude", "Claude (Claude Code CLI)", "claude", _claude_ask,
              cost_default="limited",
-             models_args=None, help_args=["--help"], caps=frozenset({"model"}),
+             models_args=None, help_args=["--help"], caps=frozenset({"model", "agent"}),
              client_ids=frozenset({"claude-code", "claude", "claude-desktop"}),
              install_hint="npm i -g @anthropic-ai/claude-code  (then `claude` to log in)",
-             note="Anthropic. Strong all-round reasoning. (--print --permission-mode plan, verified.)"),
+             note="Anthropic. Strong all-round reasoning. model=claude-opus-4-6/claude-sonnet-4-6 "
+                  "etc; agent='build' EDITS files (acceptEdits). Default plan = read-only."),
     LaneSpec("gpt", "GPT (OpenAI Codex CLI)", "codex", _codex_ask,
              cost_default="limited",
-             help_args=["exec", "--help"], caps=frozenset({"model", "effort"}),
+             help_args=["exec", "--help"], caps=frozenset({"model", "effort", "agent"}),
              client_ids=frozenset({"codex", "codex-mcp-client", "codex-cli"}),
              install_hint="npm i -g @openai/codex  (then `codex` to log in)",
-             note="OpenAI. effort=high for hard reasoning, low/empty for quick."),
+             note="OpenAI. effort=high for hard reasoning, low/empty for quick; agent='build' "
+                  "EDITS files (sandbox workspace-write). Default plan = read-only."),
     LaneSpec("gemini", "Gemini (Google Gemini CLI / Antigravity)", "gemini", _gemini_ask,
              cost_default="free",
-             help_args=["--help"], caps=frozenset({"model"}), bin_alts=("agy",),
+             help_args=["--help"], caps=frozenset({"model", "agent"}), bin_alts=("agy",),
              client_ids=frozenset({"gemini-cli-mcp-client", "gemini", "antigravity"}),
              install_hint="npm i -g @google/gemini-cli  (free tier; then log in)",
              note="Google. Fast, broad, multimodal/web. Uses `gemini`, or falls back to `agy` "
-                  "(Antigravity) if that's what's installed."),
+                  "(Antigravity) if installed. agent='build' EDITS files (--yolo / agy "
+                  "--dangerously-skip-permissions). Note: `agy` ignores model (uses its own)."),
     LaneSpec("mistral", "Mistral (Vibe CLI)", "vibe", _mistral_ask,
              cost_default="free",
-             help_args=["--help"], caps=frozenset(),
+             help_args=["--help"], caps=frozenset({"agent"}),
              client_ids=frozenset({"vibe", "mistral"}),
              install_hint="see Mistral Vibe CLI docs (`vibe`)",
-             note="Mistral free tier. Lightweight quick takes."),
+             note="Mistral free tier. Lightweight quick takes. agent='build' EDITS files "
+                  "(--agent accept-edits). Default plan = read-only."),
     LaneSpec("opencode", "OpenCode (gateway to many models)", "opencode", _opencode_ask,
              cost_default="free", default_model=_OPENCODE_FREE_DEFAULT,
              models_args=["models"], help_args=["run", "--help"],
@@ -251,19 +273,20 @@ BUILTIN_LANES: list[LaneSpec] = [
                    "earns it. agent='build' lets it EDIT files directly (default 'plan' is read-only).")),
     LaneSpec("qwen", "Qwen (Qwen Code CLI)", "qwen", _qwen_ask,
              cost_default="free",
-             help_args=["--help"], caps=frozenset({"model"}),
+             help_args=["--help"], caps=frozenset({"model", "agent"}),
              client_ids=frozenset({"qwen", "qwen-code"}),
              experimental=True,
              install_hint="npm i -g @qwen-code/qwen-code",
-             note="Alibaba Qwen. Large context, strong code. (Flags assume a gemini-cli fork.)"),
+             note="Alibaba Qwen. Large context, strong code. agent='build' EDITS files (--yolo). "
+                  "Flags assume a gemini-cli fork."),
     LaneSpec("copilot", "GitHub Copilot CLI", "copilot", _copilot_ask,
              cost_default="limited",
-             help_args=["--help"], caps=frozenset({"model"}),
+             help_args=["--help"], caps=frozenset({"model", "agent"}),
              client_ids=frozenset({"copilot", "github-copilot"}),
              experimental=True,
              install_hint="gh extension install github/gh-copilot  (subscription)",
-             note="GitHub Copilot. Flags unverified; if your install is `gh copilot`, set "
-                  "CLI_BRIDGE_COPILOT_BIN and a custom lane instead."),
+             note="GitHub Copilot. agent='build' EDITS files (--allow-all-tools). Flags unverified; "
+                  "if your install is `gh copilot`, set CLI_BRIDGE_COPILOT_BIN and a custom lane."),
 ]
 
 
@@ -291,7 +314,7 @@ def _template_builder(ask_tmpl: list[str], model_flag: str):
     binary to `curl` and use `{task_json}` + `${YOUR_API_KEY}` in the body/headers — the
     council calls your endpoint exactly like any other lane, ban-safe by the same logic
     (we just spawn curl)."""
-    def build(task, model, effort, agent):
+    def build(task, model, effort, agent, bin=""):
         out: list[str] = []
         if model_flag and model:
             out += [model_flag, model]
