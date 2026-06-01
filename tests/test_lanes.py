@@ -84,6 +84,47 @@ def test_mistral_arg_order():
     assert argv == ["-p", "hi", "--agent", "plan", "--trust"]
 
 
+# ── build (write) mode: read-only stays the default; build flips the verified write flag ──
+
+def test_claude_plan_is_readonly_build_edits():
+    plan = _lane("claude").build_ask("t", "", "", "")
+    assert "--permission-mode" in plan and "plan" in plan and "acceptEdits" not in plan
+    build = _lane("claude").build_ask("t", "", "", "build")
+    assert "acceptEdits" in build and "plan" not in build
+
+
+def test_claude_model_selects_sibling():
+    argv = _lane("claude").build_ask("t", "claude-opus-4-6", "", "")
+    assert "--model" in argv and "claude-opus-4-6" in argv
+
+
+def test_gpt_build_uses_workspace_write():
+    plan = _lane("gpt").build_ask("t", "", "", "")
+    assert "read-only" in plan and "workspace-write" not in plan
+    build = _lane("gpt").build_ask("t", "", "", "build")
+    assert "workspace-write" in build and "read-only" not in build
+
+
+def test_gemini_build_flag_depends_on_bin():
+    # gemini -> --yolo ; agy -> --dangerously-skip-permissions (and agy ignores model)
+    g = _lane("gemini").build_ask("t", "m", "", "build", "gemini")
+    assert "--yolo" in g and "-m" in g
+    a = _lane("gemini").build_ask("t", "m", "", "build", "agy")
+    assert "--dangerously-skip-permissions" in a and "-m" not in a
+    # plan mode: no write flag either way
+    assert "--yolo" not in _lane("gemini").build_ask("t", "", "", "", "gemini")
+
+
+def test_mistral_build_accept_edits():
+    argv = _lane("mistral").build_ask("hi", "", "", "build")
+    assert argv == ["-p", "hi", "--agent", "accept-edits", "--trust"]
+
+
+def test_qwen_and_copilot_build_flags():
+    assert "--yolo" in _lane("qwen").build_ask("t", "", "", "build")
+    assert "--allow-all-tools" in _lane("copilot").build_ask("t", "", "", "build")
+
+
 def test_env_bin_override(monkeypatch):
     monkeypatch.setenv("CLI_BRIDGE_GEMINI_BIN", "agy")
     assert _lane("gemini").bin == "agy"
