@@ -44,10 +44,15 @@ def test_git_diff_failure(monkeypatch):
     assert text == "" and "128" in err and "not a git repository" in err
 
 
-def _fake_run_lane(record, *, ok=True, output="finding: bug", kind="ok"):
+# reviewers now return a JSON array of findings (M3 structured output)
+_JSON_FINDING = ('[{"severity":"high","title":"Bug X","file":"f.py","line":3,'
+                 '"evidence":"oops","recommendation":"fix it"}]')
+
+
+def _fake_run_lane(record, *, ok=True, output=_JSON_FINDING, kind="ok", latency_ms=5):
     async def run_lane(lane, args, *, tool="ask", terse=True):
         record.append({"lane": lane.key, "tool": tool, "terse": terse, "task": args["task"]})
-        return runner.RunResult(ok, output, kind)
+        return runner.RunResult(ok, output, kind, latency_ms=latency_ms)
     return run_lane
 
 
@@ -58,18 +63,36 @@ def test_review_diff_end_to_end():
     report = asyncio.run(workflows.review_diff(targets, args, _fake_run_lane(rec)))
 
     assert "# Code review (multi-model)" in report
-    assert "## Merged findings" in report
+    assert "**Bug X**" in report and "`f.py:3`" in report
+    assert "consensus" in report                 # both lanes raised the identical finding
     assert "## Trace" in report
-    # 4 role reviews + 1 merge pass
-    assert len(rec) == len(workflows.REVIEW_ROLES) + 1
+    # 4 role reviews, NO separate LLM merge pass (merge is deterministic now)
+    assert len(rec) == len(workflows.REVIEW_ROLES)
     # structured workflow must NOT compress with the terse preamble
     assert all(c["terse"] is False for c in rec)
     assert all(c["tool"] == "review_diff" for c in rec)
-    # trace is valid JSON and lists every reviewer
     trace = json.loads(report.split("```json\n", 1)[1].split("\n```", 1)[0])
     assert trace["base"] == "HEAD"
     assert len(trace["reviewers"]) == len(workflows.REVIEW_ROLES)
-    assert trace["merge_lane"] == "LaneA"
+    assert "merge_lane" not in trace             # deterministic merge has no judge lane
+
+
+def test_review_diff_json_output():
+    rec = []
+    report = asyncio.run(workflows.review_diff(
+        [_lane("a", "LaneA")], {"diff": "diff\n+oops\n", "output_format": "json"},
+        _fake_run_lane(rec)))
+    data = json.loads(report)                    # whole body is JSON
+    assert data["tool"] == "review_diff" and data["status"] == "ok"
+    assert data["findings"][0]["title"] == "Bug X"
+    assert data["findings"][0]["id"] == "F001"
+
+
+def test_review_diff_unparsed_reply_is_wrapped_not_dropped():
+    rec = []
+    rl = _fake_run_lane(rec, output="I think there's a bug somewhere, trust me")
+    report = asyncio.run(workflows.review_diff([_lane("a")], {"diff": "x\n+y\n"}, rl))
+    assert "Unparsed" in report                  # free-text reply preserved as a finding
 
 
 def test_review_diff_empty_diff():
@@ -87,29 +110,33 @@ def test_review_diff_git_error_propagates(monkeypatch):
 def test_review_diff_all_reviewers_fail():
     rec = []
     rl = _fake_run_lane(rec, ok=False, output="rate limited", kind="quota")
-    report = asyncio.run(workflows.review_diff([_lane("a")], {"diff": "x\n"}, rl))
+    report = asyncio.run(workflows.review_diff([_lane("a")], {"diff": "x\n+benign\n"}, rl))
     assert report.startswith("[error] all reviewers failed")
     assert "quota" in report
 
 
-def test_review_diff_single_reviewer_no_merge():
-    # one lane wears all roles, but if only ONE review comes back ok there's no merge pass.
+def test_review_diff_precheck_catches_secret_even_if_reviewers_blank():
+    rec = []
+    rl = _fake_run_lane(rec, output="[]")        # reviewers find nothing
+    diff = 'diff --git a/c.py b/c.py\n+++ b/c.py\n+api_key = "sk-abcdef123456789"\n'
+    report = asyncio.run(workflows.review_diff([_lane("a")], {"diff": diff}, rl))
+    assert "secret" in report.lower()            # deterministic precheck caught it
+    assert "sk-abcdef123456789" not in report    # ...and redacted the value
+
+
+def test_review_diff_single_reviewer_confidence_single():
     rec = []
     calls = {"n": 0}
 
     async def run_lane(lane, args, *, tool="ask", terse=True):
         calls["n"] += 1
-        # first review ok, the rest fail -> only one usable review -> skip merge
-        ok = calls["n"] == 1
-        return runner.RunResult(ok, "the one finding" if ok else "boom",
-                                "ok" if ok else "failed")
+        ok = calls["n"] == 1                      # only the first role returns
+        return runner.RunResult(ok, '[{"severity":"high","title":"Solo bug"}]' if ok else "boom",
+                                "ok" if ok else "failed", latency_ms=1)
 
-    report = asyncio.run(workflows.review_diff([_lane("solo")], {"diff": "x\n"}, run_lane))
-    trace = json.loads(report.split("```json\n", 1)[1].split("\n```", 1)[0])
-    assert trace["merge_lane"] == "n/a (single reviewer)"
-    assert "the one finding" in report
-    # 4 role attempts, NO 5th merge call
-    assert calls["n"] == len(workflows.REVIEW_ROLES)
+    report = asyncio.run(workflows.review_diff([_lane("solo")], {"diff": "x\n+y\n"}, run_lane))
+    assert "Solo bug" in report and "single" in report
+    assert calls["n"] == len(workflows.REVIEW_ROLES)   # all role attempts, no merge call
 
 
 def test_review_diff_truncates_large_diff(monkeypatch):
@@ -123,16 +150,17 @@ def test_review_diff_truncates_large_diff(monkeypatch):
 
 # ── security_review (shares the diff-review engine, security-only roles) ──
 
-def test_security_review_uses_owasp_roles_and_heading():
+def test_security_review_uses_owasp_roles_heading_and_residual():
     rec = []
     targets = [_lane("a", "LaneA"), _lane("b", "LaneB")]
     report = asyncio.run(workflows.security_review(
-        targets, {"diff": "diff --git a/f b/f\n+os.system(x)\n"}, _fake_run_lane(rec)))
+        targets, {"diff": "diff --git a/f b/f\n+++ b/f\n+os.system(x)\n"}, _fake_run_lane(rec)))
     assert "# Security review (OWASP-aware)" in report
     assert all(c["tool"] == "security_review" and c["terse"] is False for c in rec)
-    # OWASP framing reaches the reviewer prompt
     assert any("OWASP-aware" in c["task"] for c in rec)
-    assert len(rec) == len(workflows.SECURITY_ROLES) + 1   # roles + merge
+    assert len(rec) == len(workflows.SECURITY_ROLES)   # roles only, no merge pass
+    assert "## Residual risk" in report                # security report carries residual risk
+    assert "os.system" in report                       # precheck flagged the dangerous call
 
 
 def test_security_review_empty_diff():

@@ -345,6 +345,9 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                     "include_paid": {"type": "boolean",
                                      "description": "Allow limited/paid lanes as reviewers. "
                                                     "Default false (except CLI_BRIDGE_PROFILE=max)."},
+                    "output_format": {"type": "string", "enum": ["markdown", "json"],
+                                      "description": "markdown (default, PR-friendly) or json "
+                                                     "(structured findings)."},
                     "timeout_s": {"type": "integer",
                                   "description": f"Per-reviewer timeout (max {MAX_TIMEOUT_S}, "
                                                  f"default {config.REVIEW_DEFAULT_TIMEOUT_S})."},
@@ -367,6 +370,8 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                     "base": {"type": "string", "description": "git ref/range. Default HEAD."},
                     "diff": {"type": "string", "description": "Review this diff text directly."},
                     "include_paid": {"type": "boolean", "description": "Allow limited/paid lanes."},
+                    "output_format": {"type": "string", "enum": ["markdown", "json"],
+                                      "description": "markdown (default) or json."},
                     "timeout_s": {"type": "integer",
                                   "description": f"Per-reviewer timeout (max {MAX_TIMEOUT_S})."},
                 },

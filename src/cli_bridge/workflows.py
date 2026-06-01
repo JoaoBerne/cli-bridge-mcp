@@ -1,25 +1,26 @@
 """Multi-model workflow tools built on the lane council.
 
 `review_diff` is the first: a git diff is reviewed by several lanes wearing DIFFERENT hats
-(correctness / security / tests / maintainability), then one lane merges and de-duplicates the
-findings into a single ranked report. Diverse roles beat N identical reviewers — each lens
-catches issues the others miss.
+(correctness / security / tests / maintainability), each returning a JSON array of findings,
+which are then merged DETERMINISTICALLY by file/line/title (see findings.py) — no second LLM
+merge pass, so it's cheaper, reproducible, and can't fabricate findings. Diverse roles beat N
+identical reviewers — each lens catches issues the others miss. Deterministic prechecks
+(secrets, dangerous shell) run first as a model-independent safety net.
 
 Decoupled from server.py on purpose: the orchestration takes a `run_lane` coroutine and an
 already-filtered list of target lanes, so it can be unit-tested with fakes (no real CLI, no
 network) and the cost/cooldown policy stays in one place (server._ask_all_targets).
 
-Output is for HUMANS to act on, so the reviewer/merge passes run with terse=False (full
-reasoning, full sentences). The only machine-readable part is a deterministic trace block we
-build ourselves — we never try to parse findings back out of free-text model output.
+Reviewers run with terse=False — they must emit clean JSON, not a compressed prose answer.
 """
 from __future__ import annotations
 
 import asyncio
 import json
+import re
 import subprocess
 
-from . import config
+from . import config, findings, runner
 from .lanes import LaneSpec
 
 # (role, what this reviewer should look for). Order also sets round-robin priority when there
@@ -107,52 +108,22 @@ def assign_roles(lanes: list[LaneSpec]) -> list[tuple[str, str, LaneSpec]]:
     return _assign(REVIEW_ROLES, lanes)
 
 
+_JSON_RULES = (
+    "Return ONLY a JSON array of findings — no prose, no markdown fences. Each finding is an "
+    'object: {"severity": "blocker|high|medium|low", "title": "<short label>", "file": '
+    '"<path>" or null, "line": <int> or null, "evidence": "<what and why it is a problem>", '
+    '"recommendation": "<concrete fix>"}. Use null for file/line when the exact location is '
+    "not visible in the diff. If there are no genuine issues, return []."
+)
+
+
 def review_prompt(role: str, desc: str, diff: str, truncated: bool) -> str:
     trunc = ("\n\n[NOTE: diff truncated to fit context — review only what is shown above]"
              if truncated else "")
     return (
         f"You are a senior code reviewer. Review ONLY the **{role}** dimension: {desc}\n\n"
-        "For each real issue give: severity (critical/high/medium/low), the file:line if "
-        "visible in the diff, the problem, and a concrete fix. Report only genuine issues in "
-        f"your dimension — if there are none, reply exactly 'No {role} issues found.' "
-        "Do not restate the diff or review other dimensions.\n\n"
-        f"```diff\n{diff}{trunc}\n```")
-
-
-def merge_prompt(reviews: list[tuple[str, str, str]]) -> str:
-    body = "\n\n".join(f"### {role} reviewer ({lane})\n{text}" for role, lane, text in reviews)
-    return (
-        "Merge these role-specific code-review findings into ONE deduplicated report. "
-        "Group findings by severity (critical first, then high/medium/low). When several "
-        "reviewers flag the same thing, keep ONE entry and note the agreement (it is more "
-        "likely real). For each finding give: severity, location (file:line), the issue, and "
-        "a concrete fix. Finish with a single-line overall risk verdict. Be precise; no "
-        f"padding, no restating the diff.\n\n{body}")
-
-
-def _assemble_report(merged: str, reviews: list[tuple[str, str, str]], meta: dict,
-                     heading: str = "Code review (multi-model)") -> str:
-    lines = [f"# {heading}", ""]
-    flags = []
-    if meta.get("truncated"):
-        flags.append("diff truncated")
-    flags.append("read-only")
-    lines.append(f"_Base: `{meta['base']}` · reviewers: {meta['reviewers']} · "
-                 f"{' · '.join(flags)}_\n")
-    recap_rows = [(f"{role} ({lane})", True, 0, text) for role, lane, text in reviews]
-    recap_rows += [(f, False, 0, "failed") for f in meta.get("roles_failed", [])]
-    lines.append(council_recap(recap_rows, title="Reviewers"))
-    lines.append("")
-    lines.append("## Merged findings\n")
-    lines.append(merged.strip() or "_(merge step produced no output)_")
-    if len(reviews) > 1 or not merged.strip():
-        lines.append("\n## Per-reviewer detail\n")
-        for role, lane, text in reviews:
-            lines.append(f"<details><summary>{role} — {lane}</summary>\n\n"
-                         f"{text.strip()}\n\n</details>")
-    lines.append("\n## Trace\n")
-    lines.append("```json\n" + json.dumps(meta, indent=2) + "\n```")
-    return "\n".join(lines)
+        f"{_JSON_RULES} Report only real {role} issues; do not restate the diff or review "
+        f"other dimensions.\n\n```diff\n{diff}{trunc}\n```")
 
 
 def _timeout(raw) -> int:
@@ -184,29 +155,86 @@ def security_prompt(role: str, desc: str, diff: str, truncated: bool) -> str:
              if truncated else "")
     return (
         f"You are an application security reviewer (OWASP-aware). Focus ONLY on **{role}**: "
-        f"{desc}\n\nReport each vulnerability with: severity (critical/high/medium/low), the "
-        "file:line if visible, the attack/impact, and a concrete remediation. Flag only real "
-        f"security issues in your area — if none, reply exactly 'No {role} issues found.' "
-        "Do not restate the diff.\n\n"
-        f"```diff\n{diff}{trunc}\n```")
+        f"{desc}\n\n{_JSON_RULES} (Put the attack/impact in 'evidence' and the remediation in "
+        f"'recommendation'.) Flag only real security issues in your area; do not restate the "
+        f"diff.\n\n```diff\n{diff}{trunc}\n```")
 
 
-def security_merge_prompt(reviews: list[tuple[str, str, str]]) -> str:
-    body = "\n\n".join(f"### {role} reviewer ({lane})\n{text}" for role, lane, text in reviews)
-    return (
-        "Merge these security findings into ONE deduplicated report, OWASP-style. Group by "
-        "severity (critical first). Dedupe (same issue from several reviewers = one entry, note "
-        "the agreement). For each: severity, location, attack/impact, remediation. End with a "
-        f"one-line overall security verdict (ship / fix-first / block). No padding.\n\n{body}")
+# ── deterministic prechecks: a model-independent safety net run BEFORE the LLM reviewers ──
+# Each match becomes a finding from the synthetic STATIC_SOURCE; if a model also flags it,
+# the merge raises its confidence. Line numbers are left null (honest — we track only the file).
+_DANGEROUS = [
+    (re.compile(r"\brm\s+-rf\b"), "high", "Destructive `rm -rf`",
+     "Verify the path can't be empty or attacker-controlled before forcing a recursive delete."),
+    (re.compile(r"\|\s*(?:sudo\s+)?(?:ba)?sh\b"), "high", "Piping a download into a shell",
+     "`curl … | sh` runs unverified remote code; download, verify, then run."),
+    (re.compile(r"\beval\s*\("), "high", "Use of eval()",
+     "eval on untrusted input is arbitrary code execution; parse explicitly instead."),
+    (re.compile(r"\bos\.system\s*\("), "high", "os.system() shell-out",
+     "Shells out without arg isolation; use subprocess with an argv list and shell=False."),
+    (re.compile(r"shell\s*=\s*True"), "medium", "subprocess with shell=True",
+     "shell=True invites command injection; pass an argv list with shell=False."),
+    (re.compile(r"\b(?:c?pickle)\.loads?\b"), "high", "Unsafe deserialization (pickle)",
+     "pickle executes arbitrary code on load; use a safe format for untrusted data."),
+    (re.compile(r"\byaml\.load\s*\((?![^)]*Loader)"), "medium", "yaml.load without SafeLoader",
+     "Use yaml.safe_load to avoid arbitrary object construction from untrusted YAML."),
+]
 
 
-async def _diff_review(targets, args, run_lane, *, roles_def, prompt_fn, merge_fn, heading,
-                       tool) -> str:
-    """Shared engine for review_diff / security_review: fetch a diff, fan role-diverse reviewers
-    across lanes in parallel, then merge+dedupe into one report. `run_lane` is injected so this
-    is testable without a real CLI."""
+def prechecks(diff: str) -> list[findings.Finding]:
+    """Scan ADDED diff lines for secrets (reusing runner's redaction patterns) and dangerous
+    constructs. Pure + deterministic — catches issues even if every LLM reviewer misses them."""
+    out: list[findings.Finding] = []
+    current: str | None = None
+    for line in diff.splitlines():
+        if line.startswith("+++ "):
+            path = line[4:].strip()
+            current = (path[2:] if path.startswith("b/") else path) or None
+            continue
+        if not line.startswith("+") or line.startswith("+++"):
+            continue
+        added = line[1:]
+        for pattern, _repl in runner._REDACTIONS:
+            if pattern.search(added):
+                out.append(findings.Finding(
+                    severity="high", title="Possible secret committed in diff", file=current,
+                    evidence=runner.redact(added.strip())[:120],
+                    recommendation="Remove the secret, rotate it, and load it from an env var "
+                                   "or secret store.",
+                    models=[findings.STATIC_SOURCE], roles=["precheck"]))
+                break
+        for pattern, sev, title, rec in _DANGEROUS:
+            if pattern.search(added):
+                out.append(findings.Finding(
+                    severity=sev, title=title, file=current,
+                    evidence=f"`{added.strip()[:120]}`", recommendation=rec,
+                    models=[findings.STATIC_SOURCE], roles=["precheck"]))
+    return out
+
+
+def _residual_risk(meta: dict) -> str:
+    bits = ["this is a static review of the shown diff only — no runtime, dependency, or "
+            "deployment/secrets-config analysis was performed"]
+    if meta.get("truncated"):
+        bits.insert(0, "the diff was truncated, so code past the cutoff was NOT reviewed")
+    if meta.get("roles_failed"):
+        bits.insert(0, f"reviewer role(s) failed ({', '.join(meta['roles_failed'])}); their "
+                       "categories are unassessed")
+    return "Treat with care — " + "; ".join(bits) + "."
+
+
+async def _diff_review(targets, args, run_lane, *, roles_def, prompt_fn, heading, tool,
+                       residual: bool = False) -> str:
+    """Shared engine for review_diff / security_review: fetch a diff, run deterministic
+    prechecks, fan role-diverse reviewers across lanes in parallel (each returns JSON), then
+    merge findings deterministically by file/line/title. `run_lane` is injected for tests.
+
+    output_format=json returns the structured result; default 'markdown' renders a PR-friendly
+    report. No second LLM merge pass — the merge is pure code (cheaper, reproducible, and it
+    can't fabricate findings)."""
     cwd = (args.get("cwd") or "").strip()
     base = (args.get("base") or "").strip() or "HEAD"
+    output_format = (args.get("output_format") or "markdown").strip().lower()
     diff = args.get("diff") or ""
     if not diff:
         diff, err = git_diff(cwd, base)
@@ -232,55 +260,68 @@ async def _diff_review(targets, args, run_lane, *, roles_def, prompt_fn, merge_f
 
     raw = await asyncio.gather(*[_review(r, d, l) for r, d, l in roles],
                                return_exceptions=True)
-    reviews: list[tuple[str, str, str]] = []
+    all_findings: list[findings.Finding] = list(prechecks(diff_in))
+    recap_rows: list[tuple[str, bool, int, str]] = []
+    reviewer_displays: set[str] = set()
+    reviewers: list[str] = []
     failures: list[str] = []
     for item in raw:
         if isinstance(item, BaseException):
             failures.append(f"crash:{item}")
+            recap_rows.append(("crashed reviewer", False, 0, str(item)))
             continue
         role, lane, res = item
         if res.ok:
-            reviews.append((role, lane.display, res.output))
+            fs, parsed_ok = findings.parse_findings(res.output, role=role, lane=lane.display)
+            all_findings.extend(fs)
+            reviewer_displays.add(lane.display)
+            reviewers.append(f"{role} ({lane.display})")
+            note = "" if parsed_ok else " [unparsed → wrapped]"
+            recap_rows.append((f"{role} ({lane.display})", True, res.latency_ms,
+                               f"{len(fs)} finding(s){note}"))
         else:
             failures.append(f"{role}={res.kind}")
+            recap_rows.append((f"{role} ({lane.display})", False, res.latency_ms, res.kind))
 
-    if not reviews:
+    if not reviewer_displays and not [f for f in all_findings if f.roles == ["precheck"]]:
         return "[error] all reviewers failed: " + ", ".join(failures) + ". Check `doctor`."
 
+    merged = findings.merge_findings(all_findings)
+    total_reviewers = len(reviewer_displays)
     meta = {
         "base": base,
-        "reviewers": [f"{role} ({lane})" for role, lane, _ in reviews],
+        "reviewers": reviewers,
         "roles_failed": failures,
         "truncated": truncated,
         "diff_chars": len(diff),
+        "prechecks": sum(1 for f in all_findings if "precheck" in f.roles),
     }
+    residual_risk = _residual_risk(meta) if residual else ""
 
-    # Merge pass only earns its cost with ≥2 reviews; a single review is already the report.
-    if len(reviews) >= 2:
-        judge = targets[0]
-        merged = await run_lane(judge, {"task": merge_fn(reviews), "timeout_s": timeout},
-                                tool=tool, terse=False)
-        merged_text = merged.output if merged.ok else ""
-        meta["merge_lane"] = judge.display if merged.ok else f"FAILED ({merged.kind})"
-    else:
-        merged_text = reviews[0][2]
-        meta["merge_lane"] = "n/a (single reviewer)"
+    if output_format == "json":
+        summary = f"{len(merged)} finding(s); {findings.verdict(merged)}"
+        return json.dumps(findings.result_json(
+            merged, total_reviewers=total_reviewers, tool=tool, summary=summary,
+            meta=meta, residual_risk=residual_risk), indent=2)
 
-    return _assemble_report(merged_text, reviews, meta, heading=heading)
+    recap = council_recap(recap_rows, title="Reviewers")
+    return findings.render_markdown(merged, total_reviewers=total_reviewers, heading=heading,
+                                    meta=meta, recap=recap, residual_risk=residual_risk)
 
 
 async def review_diff(targets: list[LaneSpec], args: dict, run_lane) -> str:
     """Multi-model code review of a git diff (correctness/security/tests/maintainability)."""
     return await _diff_review(targets, args, run_lane, roles_def=REVIEW_ROLES,
-                              prompt_fn=review_prompt, merge_fn=merge_prompt,
+                              prompt_fn=review_prompt,
                               heading="Code review (multi-model)", tool="review_diff")
 
 
 async def security_review(targets: list[LaneSpec], args: dict, run_lane) -> str:
     """OWASP-aware security review of a git diff — security-only role-diverse reviewers."""
     return await _diff_review(targets, args, run_lane, roles_def=SECURITY_ROLES,
-                              prompt_fn=security_prompt, merge_fn=security_merge_prompt,
-                              heading="Security review (OWASP-aware)", tool="security_review")
+                              prompt_fn=security_prompt,
+                              heading="Security review (OWASP-aware)", tool="security_review",
+                              residual=True)
 
 
 # ── debate: lanes answer, see each other, revise over bounded rounds, a judge concludes ──
