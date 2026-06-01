@@ -63,16 +63,20 @@ def git_diff(cwd: str, base: str) -> tuple[str, str]:
     return proc.stdout, ""
 
 
-def assign_roles(lanes: list[LaneSpec]) -> list[tuple[str, str, LaneSpec]]:
-    """Round-robin the review roles over the available lanes.
+def _assign(roles_def: list[tuple[str, str]],
+            lanes: list[LaneSpec]) -> list[tuple[str, str, LaneSpec]]:
+    """Round-robin a set of roles over the available lanes.
 
     Fewer lanes than roles → a lane wears several hats (every role still gets reviewed).
-    More lanes than roles → only the first len(ROLES) lanes are used (one role each).
+    More lanes than roles → only the first len(roles) lanes are used (one role each).
     """
     if not lanes:
         return []
-    return [(role, desc, lanes[i % len(lanes)])
-            for i, (role, desc) in enumerate(REVIEW_ROLES)]
+    return [(role, desc, lanes[i % len(lanes)]) for i, (role, desc) in enumerate(roles_def)]
+
+
+def assign_roles(lanes: list[LaneSpec]) -> list[tuple[str, str, LaneSpec]]:
+    return _assign(REVIEW_ROLES, lanes)
 
 
 def review_prompt(role: str, desc: str, diff: str, truncated: bool) -> str:
@@ -98,8 +102,9 @@ def merge_prompt(reviews: list[tuple[str, str, str]]) -> str:
         f"padding, no restating the diff.\n\n{body}")
 
 
-def _assemble_report(merged: str, reviews: list[tuple[str, str, str]], meta: dict) -> str:
-    lines = ["# Code review (multi-model)", ""]
+def _assemble_report(merged: str, reviews: list[tuple[str, str, str]], meta: dict,
+                     heading: str = "Code review (multi-model)") -> str:
+    lines = [f"# {heading}", ""]
     flags = []
     if meta.get("truncated"):
         flags.append("diff truncated")
@@ -125,10 +130,49 @@ def _timeout(raw) -> int:
         return config.REVIEW_DEFAULT_TIMEOUT_S
 
 
-async def review_diff(targets: list[LaneSpec], args: dict, run_lane) -> str:
-    """Multi-model review of a git diff. `targets` are pre-filtered eligible lanes (free /
-    non-cooled, paid only if the caller widened). `run_lane(lane, args, *, tool, terse)` is the
-    server's lane runner, injected so this stays testable without a real CLI."""
+# ── security_review: OWASP-aware, security-only roles (deeper than review_diff's one lens) ──
+SECURITY_ROLES: list[tuple[str, str]] = [
+    ("injection",
+     "SQL/NoSQL/command/template injection, XSS, and any place untrusted input reaches an "
+     "interpreter, query, or shell without parameterization/escaping."),
+    ("auth & access control",
+     "Broken authentication, missing/incorrect authorization checks, IDOR, privilege "
+     "escalation, session/token handling, and insecure defaults."),
+    ("secrets & crypto",
+     "Hardcoded secrets/keys, weak or misused crypto, predictable randomness, secrets in "
+     "logs, and insecure storage/transport."),
+    ("data exposure & SSRF",
+     "Path traversal, SSRF, unsafe deserialization, sensitive data leaks, and unvalidated "
+     "redirects/file access."),
+]
+
+
+def security_prompt(role: str, desc: str, diff: str, truncated: bool) -> str:
+    trunc = ("\n\n[NOTE: diff truncated to fit context — review only what is shown above]"
+             if truncated else "")
+    return (
+        f"You are an application security reviewer (OWASP-aware). Focus ONLY on **{role}**: "
+        f"{desc}\n\nReport each vulnerability with: severity (critical/high/medium/low), the "
+        "file:line if visible, the attack/impact, and a concrete remediation. Flag only real "
+        f"security issues in your area — if none, reply exactly 'No {role} issues found.' "
+        "Do not restate the diff.\n\n"
+        f"```diff\n{diff}{trunc}\n```")
+
+
+def security_merge_prompt(reviews: list[tuple[str, str, str]]) -> str:
+    body = "\n\n".join(f"### {role} reviewer ({lane})\n{text}" for role, lane, text in reviews)
+    return (
+        "Merge these security findings into ONE deduplicated report, OWASP-style. Group by "
+        "severity (critical first). Dedupe (same issue from several reviewers = one entry, note "
+        "the agreement). For each: severity, location, attack/impact, remediation. End with a "
+        f"one-line overall security verdict (ship / fix-first / block). No padding.\n\n{body}")
+
+
+async def _diff_review(targets, args, run_lane, *, roles_def, prompt_fn, merge_fn, heading,
+                       tool) -> str:
+    """Shared engine for review_diff / security_review: fetch a diff, fan role-diverse reviewers
+    across lanes in parallel, then merge+dedupe into one report. `run_lane` is injected so this
+    is testable without a real CLI."""
     cwd = (args.get("cwd") or "").strip()
     base = (args.get("base") or "").strip() or "HEAD"
     diff = args.get("diff") or ""
@@ -137,7 +181,7 @@ async def review_diff(targets: list[LaneSpec], args: dict, run_lane) -> str:
         if err:
             return f"[error] {err}"
     if not diff.strip():
-        return (f"[review_diff] empty diff (base={base}). Nothing to review. "
+        return (f"[{tool}] empty diff (base={base}). Nothing to review. "
                 "Make changes first, or pass a different `base` / a `diff` directly.")
     if not targets:
         return ("[error] no lanes available for review. Install/login a CLI, or set "
@@ -146,12 +190,12 @@ async def review_diff(targets: list[LaneSpec], args: dict, run_lane) -> str:
     truncated = len(diff) > config.REVIEW_DIFF_MAX_CHARS
     diff_in = diff[:config.REVIEW_DIFF_MAX_CHARS] if truncated else diff
     timeout = _timeout(args.get("timeout_s"))
-    roles = assign_roles(targets)
+    roles = _assign(roles_def, targets)
 
     async def _review(role: str, desc: str, lane: LaneSpec):
-        sub = {"task": review_prompt(role, desc, diff_in, truncated),
+        sub = {"task": prompt_fn(role, desc, diff_in, truncated),
                "cwd": cwd, "timeout_s": timeout}
-        res = await run_lane(lane, sub, tool="review_diff", terse=False)
+        res = await run_lane(lane, sub, tool=tool, terse=False)
         return role, lane, res
 
     raw = await asyncio.gather(*[_review(r, d, l) for r, d, l in roles],
@@ -182,12 +226,137 @@ async def review_diff(targets: list[LaneSpec], args: dict, run_lane) -> str:
     # Merge pass only earns its cost with ≥2 reviews; a single review is already the report.
     if len(reviews) >= 2:
         judge = targets[0]
-        merged = await run_lane(judge, {"task": merge_prompt(reviews), "timeout_s": timeout},
-                                tool="review_diff", terse=False)
+        merged = await run_lane(judge, {"task": merge_fn(reviews), "timeout_s": timeout},
+                                tool=tool, terse=False)
         merged_text = merged.output if merged.ok else ""
         meta["merge_lane"] = judge.display if merged.ok else f"FAILED ({merged.kind})"
     else:
         merged_text = reviews[0][2]
         meta["merge_lane"] = "n/a (single reviewer)"
 
-    return _assemble_report(merged_text, reviews, meta)
+    return _assemble_report(merged_text, reviews, meta, heading=heading)
+
+
+async def review_diff(targets: list[LaneSpec], args: dict, run_lane) -> str:
+    """Multi-model code review of a git diff (correctness/security/tests/maintainability)."""
+    return await _diff_review(targets, args, run_lane, roles_def=REVIEW_ROLES,
+                              prompt_fn=review_prompt, merge_fn=merge_prompt,
+                              heading="Code review (multi-model)", tool="review_diff")
+
+
+async def security_review(targets: list[LaneSpec], args: dict, run_lane) -> str:
+    """OWASP-aware security review of a git diff — security-only role-diverse reviewers."""
+    return await _diff_review(targets, args, run_lane, roles_def=SECURITY_ROLES,
+                              prompt_fn=security_prompt, merge_fn=security_merge_prompt,
+                              heading="Security review (OWASP-aware)", tool="security_review")
+
+
+# ── debate: lanes answer, see each other, revise over bounded rounds, a judge concludes ──
+DEBATE_DEFAULT_ROUNDS = 1
+DEBATE_MAX_ROUNDS = 3
+DEBATE_MAX_DEBATERS = 4   # bound the call count: debaters × (1 + rounds) + 1 judge
+
+
+def debate_open_prompt(question: str) -> str:
+    return f"Answer this question and argue your reasoning concisely:\n\n{question}"
+
+
+def debate_revise_prompt(question: str, transcript: str) -> str:
+    return (
+        "Several AIs answered the same question. Read all answers below, then give your "
+        "REVISED answer: keep what holds up, correct what others rightly challenged, and state "
+        "where you still disagree and why. Be concise.\n\n"
+        f"QUESTION:\n{question}\n\nALL ANSWERS SO FAR:\n{transcript}")
+
+
+def debate_judge_prompt(question: str, transcript: str) -> str:
+    return (
+        "Several AIs debated the question below. Produce the best FINAL answer: state the "
+        "consensus, flag any remaining disagreement (name who held what), and give the most "
+        f"reliable conclusion. Be precise.\n\nQUESTION:\n{question}\n\nDEBATE:\n{transcript}")
+
+
+def _debate_transcript(positions: list[tuple[str, str]]) -> str:
+    return "\n\n".join(f"### {display}\n{text}" for display, text in positions)
+
+
+async def debate(targets: list[LaneSpec], args: dict, run_lane) -> str:
+    """Multi-lane debate: each lane answers, then sees the others and revises over a bounded
+    number of rounds, then a judge writes the final conclusion. `run_lane` injected for tests."""
+    question = (args.get("task") or args.get("question") or "").strip()
+    if not question:
+        return "[error] task (the debate question) is required"
+    if not targets:
+        return ("[error] no lanes available to debate. Install/login a CLI, or set "
+                "include_paid=true / CLI_BRIDGE_PROFILE=max to allow limited/paid lanes.")
+    try:
+        rounds = max(0, min(int(args.get("rounds")), DEBATE_MAX_ROUNDS))
+    except (TypeError, ValueError):
+        rounds = DEBATE_DEFAULT_ROUNDS
+    timeout = _timeout(args.get("timeout_s"))
+    debaters = targets[:DEBATE_MAX_DEBATERS]
+
+    async def _ask(lane: LaneSpec, prompt: str):
+        res = await run_lane(lane, {"task": prompt, "timeout_s": timeout}, tool="debate")
+        return lane, res
+
+    # Round 0: independent answers.
+    raw = await asyncio.gather(*[_ask(l, debate_open_prompt(question)) for l in debaters],
+                               return_exceptions=True)
+    positions: dict[str, tuple[str, str]] = {}   # lane.key -> (display, latest answer)
+    for item in raw:
+        if isinstance(item, BaseException):
+            continue
+        lane, res = item
+        if res.ok:
+            positions[lane.key] = (lane.display, res.output)
+    if not positions:
+        return "[error] no lane produced an opening answer. Check `doctor`."
+
+    # Revision rounds: each lane sees the full transcript and revises.
+    rounds_run = 0
+    for _ in range(rounds):
+        if len(positions) < 2:
+            break                         # nothing to debate against
+        transcript = _debate_transcript(list(positions.values()))
+        live = [l for l in debaters if l.key in positions]
+        raw = await asyncio.gather(
+            *[_ask(l, debate_revise_prompt(question, transcript)) for l in live],
+            return_exceptions=True)
+        for item in raw:
+            if isinstance(item, BaseException):
+                continue
+            lane, res = item
+            if res.ok:
+                positions[lane.key] = (lane.display, res.output)
+        rounds_run += 1
+
+    final_positions = list(positions.values())
+    transcript = _debate_transcript(final_positions)
+    meta = {
+        "question": question[:200],
+        "debaters": [d for d, _ in final_positions],
+        "rounds": rounds_run,
+    }
+    # Judge: prefer a free non-experimental lane; fall back to the first debater.
+    judge = next((l for l in targets
+                  if not l.is_paid and not l.is_limited and not l.experimental), debaters[0])
+    if len(final_positions) >= 2:
+        jr = await run_lane(judge, {"task": debate_judge_prompt(question, transcript),
+                                    "timeout_s": timeout}, tool="debate")
+        final = jr.output if jr.ok else transcript
+        meta["judge"] = judge.display if jr.ok else f"FAILED ({jr.kind}) — showing raw positions"
+    else:
+        final = final_positions[0][1]
+        meta["judge"] = "n/a (single debater)"
+
+    lines = ["# Debate", ""]
+    lines.append(f"_Debaters: {', '.join(meta['debaters'])} · rounds: {rounds_run} · "
+                 f"judge: {meta['judge']}_\n")
+    lines.append("## Final answer\n")
+    lines.append(final.strip() or "_(judge produced no output)_")
+    lines.append("\n## Final positions\n")
+    for display, text in final_positions:
+        lines.append(f"<details><summary>{display}</summary>\n\n{text.strip()}\n\n</details>")
+    lines.append("\n## Trace\n```json\n" + json.dumps(meta, indent=2) + "\n```")
+    return "\n".join(lines)

@@ -119,3 +119,63 @@ def test_review_diff_truncates_large_diff(monkeypatch):
     asyncio.run(workflows.review_diff([_lane("a")], {"diff": big}, _fake_run_lane(rec)))
     # the prompt the reviewer received must carry the truncation note and be clipped
     assert "truncated to fit context" in rec[0]["task"]
+
+
+# ── security_review (shares the diff-review engine, security-only roles) ──
+
+def test_security_review_uses_owasp_roles_and_heading():
+    rec = []
+    targets = [_lane("a", "LaneA"), _lane("b", "LaneB")]
+    report = asyncio.run(workflows.security_review(
+        targets, {"diff": "diff --git a/f b/f\n+os.system(x)\n"}, _fake_run_lane(rec)))
+    assert "# Security review (OWASP-aware)" in report
+    assert all(c["tool"] == "security_review" and c["terse"] is False for c in rec)
+    # OWASP framing reaches the reviewer prompt
+    assert any("OWASP-aware" in c["task"] for c in rec)
+    assert len(rec) == len(workflows.SECURITY_ROLES) + 1   # roles + merge
+
+
+def test_security_review_empty_diff():
+    out = asyncio.run(workflows.security_review([_lane("a")], {"diff": "  "}, _fake_run_lane([])))
+    assert "empty diff" in out
+
+
+# ── debate ──
+
+def test_debate_rounds_and_report():
+    rec = []
+    targets = [_lane("a", "LaneA"), _lane("b", "LaneB")]
+    report = asyncio.run(workflows.debate(targets, {"task": "Best sort?", "rounds": 1},
+                                          _fake_run_lane(rec)))
+    assert "# Debate" in report and "## Final answer" in report and "## Final positions" in report
+    assert "rounds: 1" in report
+    # 2 openers + 2 revisions + 1 judge
+    assert len(rec) == 5
+    assert all(c["tool"] == "debate" for c in rec)
+
+
+def test_debate_zero_rounds_skips_revision():
+    rec = []
+    targets = [_lane("a"), _lane("b")]
+    asyncio.run(workflows.debate(targets, {"task": "q", "rounds": 0}, _fake_run_lane(rec)))
+    assert len(rec) == 3            # 2 openers + judge, no revision round
+
+
+def test_debate_single_debater_no_judge():
+    rec = []
+    report = asyncio.run(workflows.debate([_lane("solo", "Solo")], {"task": "q", "rounds": 2},
+                                          _fake_run_lane(rec)))
+    assert "n/a (single debater)" in report
+    assert len(rec) == 1           # one opener; nothing to debate, no judge
+
+
+def test_debate_requires_question():
+    out = asyncio.run(workflows.debate([_lane("a")], {"task": "  "}, _fake_run_lane([])))
+    assert out.startswith("[error]")
+
+
+def test_debate_caps_debaters():
+    rec = []
+    targets = [_lane(f"l{i}") for i in range(8)]   # 8 lanes, cap is 4
+    asyncio.run(workflows.debate(targets, {"task": "q", "rounds": 0}, _fake_run_lane(rec)))
+    assert len(rec) == workflows.DEBATE_MAX_DEBATERS + 1   # 4 openers + judge
