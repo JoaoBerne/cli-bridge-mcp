@@ -29,7 +29,8 @@ host (Claude/Codex/…) ──MCP/stdio──▶ cli-bridge ──spawn subproce
 | `config.py` | All env parsing, timeouts, cost profile, onboarding text. **Single source of truth** for settings. | Need a new env var? It goes here. |
 | `telemetry.py` | Local sqlite: a run log + per-lane health/cooldown + the opt-in response cache. | **Best-effort: must never raise into a delegation.** |
 | `router.py` | Pure functions that order lanes cheapest→strongest for `ask_cascade`, skipping cooled ones. | No side effects — pure, easy to test. |
-| `workflows.py` | The multi-model workflows: `review_diff`, `security_review`, `debate` + the `council_recap` digest. Orchestrates several lanes + a merge/judge step. | Takes an injected `run_lane`, so it's testable with fakes. |
+| `workflows.py` | The multi-model workflows: `review_diff`, `security_review`, `debate` + the `council_recap` digest + deterministic `prechecks` (secrets / dangerous shell). Orchestrates several lanes. | Takes an injected `run_lane`, so it's testable with fakes. |
+| `findings.py` | Pure: parse each reviewer's JSON tolerantly, merge by file/line/title, derive confidence from agreement, render Markdown or a JSON result. | No I/O — deterministic merge replaces an LLM merge pass (can't fabricate findings). |
 | `jobs.py` | In-process async jobs (`ask_all_async`): wrap a coroutine in `asyncio.create_task`, return a job id, poll/fetch/cancel later. Live registry + best-effort sqlite row. | No cross-restart resume in v1 — stale `running` rows become `interrupted`. |
 | `preamble.py` | The terse response-style preamble prepended to delegate prompts. | Prose only — never applied to structured (JSON) workflows. |
 | `detect.py` | Which CLIs are actually installed (PATH lookup). | — |
@@ -63,8 +64,11 @@ host (Claude/Codex/…) ──MCP/stdio──▶ cli-bridge ──spawn subproce
 - **`ask_cascade`** — one answer with automatic fallback (cheapest→strongest, skips cooled lanes).
   For **reliability/automation**, not comparison.
 - **`route_plan`** — explains the order cascade would try (runs nothing).
-- **`review_diff` / `security_review`** — role-diverse multi-model review of a git diff → merged,
-  severity-ranked report.
+- **`review_diff` / `security_review`** — role-diverse multi-model review of a git diff. Each
+  reviewer returns JSON findings; deterministic prechecks (secrets, dangerous shell) seed the
+  set; findings merge by file/line/title with agreement-based confidence (single/majority/
+  consensus). `output_format: markdown` (default, PR-friendly) or `json`. `security_review`
+  adds a `residual_risk` section.
 - **`debate`** — models answer, see each other, revise over bounded rounds, a judge concludes.
 - **`doctor`** — health check (installed CLIs, host, cost profile, cooldowns). `deep: true` live-probes auth.
 - **`usage_report` / `lane_stats` / `reset_lane_state`** — local telemetry + cooldown management.
