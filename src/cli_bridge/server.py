@@ -109,10 +109,21 @@ def _is_host(lane: LaneSpec, host: str) -> bool:
 
 
 def _active_lanes() -> tuple[list[LaneSpec], str]:
-    """Installed lanes minus the caller's own lane."""
+    """Installed lanes minus the caller's own lane — the delegates used for fan-out/cascade.
+    (Asking your OWN model the same question wastes a call, so the host lane is excluded here.)"""
     host = _host_name()
     lanes = [ln for ln in installed_lanes(all_lanes()) if not _is_host(ln, host)]
     return lanes, host
+
+
+def _host_lane(host: str) -> LaneSpec | None:
+    """The caller's OWN installed lane, if it supports model selection — so the host can
+    consult a DIFFERENT model of its own family (e.g. Claude Code -> ask Opus 4.6). Returned
+    separately from the delegates so it never joins a fan-out, only direct ask_<host> calls."""
+    if not host:
+        return None
+    own = next((ln for ln in installed_lanes(all_lanes()) if _is_host(ln, host)), None)
+    return own if own and "model" in own.caps else None
 
 
 # ─────────────────────────────── tool schema construction ───────────────────────────────
@@ -288,10 +299,31 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
     return tools
 
 
+def _self_ask_tool(lane: LaneSpec) -> Tool:
+    """ask_<host> for the caller's OWN family — requires an explicit `model` so it's only ever
+    used to reach a SIBLING model (asking your own running model the same thing is pointless)."""
+    schema = _ask_schema(lane)
+    schema["required"] = ["task", "model"]
+    can_write = "agent" in lane.caps
+    return Tool(
+        name=f"ask_{lane.key}",
+        description=(f"Consult a DIFFERENT model of your own family via {lane.display}. "
+                     "Requires an explicit `model` (e.g. a sibling like claude-opus-4-6); empty "
+                     f"model is rejected. {lane.note}"),
+        inputSchema=schema,
+        annotations={"readOnlyHint": not can_write, "openWorldHint": True,
+                     "destructiveHint": can_write},
+    )
+
+
 @server.list_tools()
 async def list_tools() -> list[Tool]:
-    lanes, _ = _active_lanes()
-    return _tools_for(lanes)
+    lanes, host = _active_lanes()
+    tools = _tools_for(lanes)
+    own = _host_lane(host)
+    if own:
+        tools.insert(0, _self_ask_tool(own))   # reach a sibling model of your own family
+    return tools
 
 
 # ─────────────────────────────── execution helpers ───────────────────────────────
@@ -411,9 +443,21 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
         return await _review_diff(lanes, args)
 
     if name.startswith("ask_"):
-        lane = _lane_by_key(name[4:], lanes)
+        key = name[4:]
+        lane = _lane_by_key(key, lanes)
         if not lane:
-            return [TextContent(type="text", text=f"[error] no such lane: {name[4:]}")]
+            # Maybe it's the host's OWN family lane (sibling-model consultation): allowed only
+            # with an explicit model so the host doesn't just re-ask its own running model.
+            own = _host_lane(host)
+            if own and own.key == key:
+                if not _str(args, "model"):
+                    return [TextContent(type="text", text=(
+                        f"[error] ask_{key} is your own family — pass an explicit `model` to "
+                        "consult a SIBLING model (e.g. claude-opus-4-6). Re-asking the model "
+                        "you're already running is pointless."))]
+                lane = own
+            else:
+                return [TextContent(type="text", text=f"[error] no such lane: {key}")]
         res = await _run_lane(lane, args)
         return [_emit(res.render(), label=f"ask_{lane.key}")]
 
