@@ -27,6 +27,17 @@ All notable changes to this project are documented here. The format follows
 - Terse preamble made leaner with a `CLI_BRIDGE_TERSE_MIN_CHARS` skip; eval fixtures + a
   no-network evaluator; ruff lint + CI lint job.
 
+### Added (reliability & onboarding)
+- **Transient retry** (`CLI_BRIDGE_RETRIES`, default 1): a delegate that fails transiently
+  (non-zero exit / spawn blip) is retried with backoff, so a flaky CLI "works the first time".
+  Quota/auth/not-found/timeout are never retried (sticky / would waste a call).
+- **Mock / dry-run** (`CLI_BRIDGE_MOCK=1`): lanes report installed and return a canned answer
+  without spawning anything — explore routing/fan-out/workflows with zero CLIs installed.
+- **`cli-bridge init`**: detect installed CLIs + print the MCP wiring snippet + cost hint.
+- **`cli-bridge bench`**: latency p50/p95/p99 + ok-rate + est tokens for a lane over N runs.
+- **Trace bundle** (`CLI_BRIDGE_TRACE_DIR`): per-delegation redacted JSON (argv, timing, output)
+  for reproducible debugging / ban-safe audit.
+
 ### Changed
 - Findings merge now also collapses **similarly-worded** findings at the same `file:line`
   (token-overlap similarity), not just exact-title matches — so two models describing the same

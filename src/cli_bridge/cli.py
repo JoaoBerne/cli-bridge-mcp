@@ -23,6 +23,8 @@ import sys
 
 from . import config, server, telemetry, workflows
 from . import jobs as jobs_mod
+from .detect import is_installed
+from .lanes import all_lanes
 
 
 def _lanes():
@@ -122,6 +124,62 @@ CLI_BRIDGE_GUARD={guard}        # off|warn|strict
 """
 
 
+def _cmd_init(a):
+    print("# cli-bridge init\n\nDetected CLIs on this machine:")
+    for ln in all_lanes():
+        mark = "✓ installed" if is_installed(ln) else "✗ not found"
+        print(f"  {ln.key:9} {mark}  [{ln.cost_label}]"
+              + (f"  (model: {ln.model_for('')})" if ln.model_for("") else ""))
+    cmd = {"command": sys.executable, "args": ["-m", "cli_bridge"]}
+    print("\nWire it into your MCP host over stdio. Claude Code:")
+    print(f"  claude mcp add cli-bridge -- {sys.executable} -m cli_bridge")
+    print("\nOr add to your client's mcpServers config:")
+    print("  " + json.dumps({"cli-bridge": cmd}))
+    print("\nThen pick a cost profile (CLI_BRIDGE_PROFILE=saver|balanced|max) and run `doctor`.")
+    print("No CLIs yet? Set CLI_BRIDGE_MOCK=1 to explore everything with canned answers.")
+    if a.probe:
+        lanes, host = server._active_lanes()
+        print("\nProbing free lanes live (uses a little quota)...\n")
+        print(asyncio.run(server._doctor_deep(host, lanes)))
+
+
+def _percentile(values, p):
+    if not values:
+        return 0
+    s = sorted(values)
+    i = min(len(s) - 1, int(round((p / 100) * (len(s) - 1))))
+    return s[i]
+
+
+def _cmd_bench(a):
+    lanes, _ = server._active_lanes()
+    lane = server._lane_by_key(a.lane, lanes)
+    if not lane:
+        sys.exit(f"[error] no such lane: {a.lane}. Run `cli-bridge doctor` for installed lanes.")
+    lat, oks, out_chars = [], 0, 0
+    for _ in range(a.runs):
+        res = asyncio.run(server._run_lane(
+            lane, {"task": a.prompt, "model": a.model, "timeout_s": a.timeout}))
+        lat.append(res.latency_ms)
+        if res.ok:
+            oks += 1
+            out_chars += len(res.output)
+    rep = {
+        "lane": lane.key, "model": lane.model_for(a.model), "runs": a.runs, "ok": oks,
+        "ok_rate": round(oks / a.runs, 3) if a.runs else 0,
+        "p50_ms": _percentile(lat, 50), "p95_ms": _percentile(lat, 95),
+        "p99_ms": _percentile(lat, 99), "avg_ms": int(sum(lat) / len(lat)) if lat else 0,
+        "est_output_tokens": out_chars // config.CHARS_PER_TOKEN,
+    }
+    if a.json:
+        print(json.dumps(rep, indent=2))
+    else:
+        print(f"# bench {lane.key} ({rep['model'] or 'default'}) — {a.runs} runs")
+        print(f"ok {oks}/{a.runs} ({int(rep['ok_rate'] * 100)}%) | "
+              f"p50 {rep['p50_ms']}ms · p95 {rep['p95_ms']}ms · p99 {rep['p99_ms']}ms · "
+              f"avg {rep['avg_ms']}ms | ~{rep['est_output_tokens']} est out-tokens")
+
+
 def _cmd_setup(a):
     print(config.SETUP_TEXT)
     if a.write is None:
@@ -203,6 +261,19 @@ def build_parser() -> argparse.ArgumentParser:
     jb = sub.add_parser("jobs", help="recent async jobs")
     jb.add_argument("--json", action="store_true")
     jb.set_defaults(func=_cmd_jobs)
+
+    it = sub.add_parser("init", help="detect CLIs + print MCP wiring + cost hint")
+    it.add_argument("--probe", action="store_true", help="also live-probe free lanes")
+    it.set_defaults(func=_cmd_init)
+
+    bn = sub.add_parser("bench", help="benchmark a lane: latency p50/p95/p99 over N runs")
+    bn.add_argument("--lane", required=True)
+    bn.add_argument("--prompt", required=True)
+    bn.add_argument("--runs", type=int, default=5)
+    bn.add_argument("--model", default="")
+    bn.add_argument("--timeout", type=int, default=None)
+    bn.add_argument("--json", action="store_true")
+    bn.set_defaults(func=_cmd_bench)
 
     st = sub.add_parser("setup", help="cost-profile guidance; --write an example config")
     st.add_argument("--write", nargs="?", const="", default=None, metavar="PATH",

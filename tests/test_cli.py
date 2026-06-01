@@ -77,6 +77,26 @@ def test_setup_write_creates_and_backs_up(tmp_path, capsys):
     assert (tmp_path / "cfg.env.bak").exists()
 
 
+def test_init_prints_wiring(capsys):
+    cli.main(["init"])
+    out = capsys.readouterr().out
+    assert "cli-bridge init" in out and "mcp add cli-bridge" in out and "CLI_BRIDGE_MOCK" in out
+
+
+def test_bench(monkeypatch, capsys):
+    async def fake_run_lane(lane, args, *, tool="ask", terse=True):
+        return RunResult(True, "answer", "ok", latency_ms=12)
+    monkeypatch.setattr(server, "_run_lane", fake_run_lane)
+    cli.main(["bench", "--lane", "gemini", "--prompt", "hi", "--runs", "3"])
+    out = capsys.readouterr().out
+    assert "bench gemini" in out and "ok 3/3" in out
+
+
+def test_bench_unknown_lane_exits():
+    with pytest.raises(SystemExit):
+        cli.main(["bench", "--lane", "nope", "--prompt", "hi"])
+
+
 def test_parser_wires_subcommands():
     p = cli.build_parser()
     a = p.parse_args(["review-diff", "--base", "main", "--json"])
