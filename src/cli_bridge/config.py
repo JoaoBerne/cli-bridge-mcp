@@ -58,6 +58,13 @@ def lane_env_int(lane_key: str, suffix: str) -> int | None:
         return None
 
 
+def max_parallel() -> int:
+    """Cap on simultaneous delegate spawns in a fan-out (ask_all). Default 6 — high enough that
+    a normal free council never hits it, low enough that many custom lanes can't OOM a small
+    machine or burst quota. Clamped 1..64."""
+    return int_env("CLI_BRIDGE_MAX_PARALLEL", 6, 1, 64)
+
+
 def mock() -> bool:
     """Dry-run mode: lanes are reported installed and return a canned answer WITHOUT spawning any
     CLI. Lets someone try cli-bridge (routing, fan-out, workflows) with zero CLIs installed."""

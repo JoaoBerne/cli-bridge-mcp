@@ -217,6 +217,7 @@ Everything is environment variables — no code edits. Tune it to **your** subsc
 | `CLI_BRIDGE_MOCK` | `1` = dry-run: lanes report installed and return a canned answer without spawning any CLI. Try the whole tool with **zero CLIs installed**. |
 | `CLI_BRIDGE_RETRIES` | Retries on a TRANSIENT failure (default 1). Makes a flaky CLI work first-try; quota/auth/not-found/timeout are never retried. |
 | `CLI_BRIDGE_TRACE_DIR` | If set, each delegation writes a redacted JSON trace (argv, timing, output) here — reproducible debug / audit. Off by default. |
+| `CLI_BRIDGE_MAX_PARALLEL` | Cap on simultaneous delegate spawns in `ask_all` (default 6). Stops a wide council (many custom lanes) from OOM-ing a small machine or bursting quota. |
 | `CLI_BRIDGE_CACHE_TTL_S` | `0` = off (default). When `>0`, an identical call within this many seconds returns the cached answer instead of re-spawning the CLI (saves quota/credits on repeats; build runs are never cached). |
 | `CLI_BRIDGE_<LANE>_CREDITS_PER_1K` | Credits per 1k tokens for a lane, used by `usage_report`/`usage_budget` to **estimate** spend (chars/4). |
 | `CLI_BRIDGE_<LANE>_DAILY_LIMIT` | Max runs/day for a lane; `usage_budget` flags when exceeded. |
@@ -280,12 +281,30 @@ host (Claude/Codex/…) ──MCP──> cli-bridge ──spawn──> official 
 No network calls of its own. No keys stored. It runs the same binaries you already trust, in your
 working directory, and hands the answer back.
 
-### Limitation
+### Works in IDE MCP hosts too
 
-If your **host** runs the MCP server inside a strict sandbox (e.g. a read-only filesystem / no
-network), the delegate CLIs it spawns inherit that sandbox and may fail to reach their providers.
-In a normal terminal session this isn't an issue. cli-bridge surfaces the failure as an `auth` or
-`failed` error rather than hanging.
+cli-bridge is plain MCP over stdio, so any MCP-capable host works — not just terminal CLIs.
+Point Cursor / VS Code (Cline, Continue) / Zed at the **same command** (`uvx cli-bridge-mcp`, or
+`<python> -m cli_bridge`). The host's own lane is auto-hidden; everything else is identical.
+
+### Known limitations (honest list)
+
+- **Ban-safe depends on each provider's ToS.** cli-bridge only runs the official CLI you'd run
+  by hand — but non-interactive/scripted use isn't *guaranteed* sanctioned and can change. Use
+  your own accounts within their terms; treat "ban-safe" as "no token/key extraction", not a
+  blanket guarantee.
+- **Async jobs are in-process.** A server restart marks running jobs `interrupted` — no
+  cross-restart resume in v1.
+- **The injection guard is heuristic.** It catches high-signal patterns, not everything; in
+  `warn` mode the text still reaches the host (treat delegate output as data).
+- **Token/credit figures are estimates** (chars/4 + your `CREDITS_PER_1K`), never exact.
+- **BYO-API (curl) lanes:** a `${ENV}` key is substituted into the argv, so it can appear in this
+  machine's process list while the call runs (it's never logged — traces redact it). Prefer a
+  provider's own CLI when possible; for curl, a header-file (`curl -H @file`) avoids argv exposure.
+- **Experimental lanes** (`qwen`, `copilot`): flags aren't verified live — report breakage.
+- **Sandboxed host:** if your host runs the server in a strict sandbox (read-only FS / no
+  network), spawned CLIs inherit it and may fail to reach their providers. cli-bridge surfaces
+  this as an `auth`/`failed` error rather than hanging.
 
 ---
 

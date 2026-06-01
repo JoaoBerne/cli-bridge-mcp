@@ -99,3 +99,24 @@ def test_trace_off_by_default(monkeypatch, tmp_path):
     monkeypatch.delenv("CLI_BRIDGE_TRACE_DIR", raising=False)
     server._write_trace(_lane(), "m", ["echo", "hi"], None, 10, RunResult(True, "x", "ok"))
     assert not list(tmp_path.glob("*.json"))      # nothing written when off
+
+
+# ── ask_all concurrency cap ─────────────────────────────────────────────────────────────────
+
+def test_ask_all_respects_max_parallel(monkeypatch):
+    monkeypatch.setenv("CLI_BRIDGE_MAX_PARALLEL", "2")
+    monkeypatch.setattr(server.telemetry, "cooldown_remaining", lambda key: 0)
+    lanes = [LaneSpec(f"l{i}", f"L{i}", "echo", lambda *a: []) for i in range(6)]
+    state = {"now": 0, "max": 0}
+
+    async def fake_run_lane(lane, args, *, tool="ask", terse=True):
+        state["now"] += 1
+        state["max"] = max(state["max"], state["now"])
+        await asyncio.sleep(0.02)         # hold the slot so overlap is observable
+        state["now"] -= 1
+        return RunResult(True, "ok", "ok", latency_ms=1)
+    monkeypatch.setattr(server, "_run_lane", fake_run_lane)
+
+    asyncio.run(server._ask_all_body(lanes, {"task": "hi"}))
+    assert state["max"] <= 2              # never more than the cap ran at once
+
