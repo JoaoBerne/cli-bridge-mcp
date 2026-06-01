@@ -34,6 +34,30 @@ def int_env(name: str, default: int, lo: int, hi: int) -> int:
 CACHE_TTL_S = int_env("CLI_BRIDGE_CACHE_TTL_S", 0, 0, 31_536_000)  # max 1 year
 
 
+# Crude token estimate: chars / CHARS_PER_TOKEN. Always surfaced as "estimated" — we never
+# pretend to know a provider's real tokenization or pricing.
+CHARS_PER_TOKEN = 4
+
+
+def lane_env(lane_key: str, suffix: str) -> str:
+    """Read a per-lane env var, e.g. lane_env('gpt','DAILY_LIMIT') -> CLI_BRIDGE_GPT_DAILY_LIMIT."""
+    return os.environ.get(f"CLI_BRIDGE_{lane_key.upper()}_{suffix}", "").strip()
+
+
+def lane_env_float(lane_key: str, suffix: str) -> float | None:
+    try:
+        return float(lane_env(lane_key, suffix))
+    except ValueError:
+        return None
+
+
+def lane_env_int(lane_key: str, suffix: str) -> int | None:
+    try:
+        return int(lane_env(lane_key, suffix))
+    except ValueError:
+        return None
+
+
 def terse_min_chars() -> int:
     """Skip the terse preamble for tasks shorter than this many chars (0 = never skip, the
     default). A tiny task produces a tiny answer, so the preamble's fixed input overhead

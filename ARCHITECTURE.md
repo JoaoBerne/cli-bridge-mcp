@@ -27,8 +27,8 @@ host (Claude/Codex/…) ──MCP/stdio──▶ cli-bridge ──spawn subproce
 | `lanes.py` | The **lane registry**: one `LaneSpec` per CLI (claude/gpt/gemini/mistral/opencode/qwen/copilot) + the argv builders (`_claude_ask`, …) + the custom-lane JSON loader. | Add a CLI = add a `LaneSpec`. Never touch the server. |
 | `runner.py` | Runs a subprocess safely: timeout, process-tree kill, secret redaction, error classification (`quota`/`auth`/`timeout`/…), output cap. Returns a `RunResult`. | All "how do we spawn safely" lives here. |
 | `config.py` | All env parsing, timeouts, cost profile, onboarding text. **Single source of truth** for settings. | Need a new env var? It goes here. |
-| `telemetry.py` | Local sqlite: a run log + per-lane health/cooldown + the opt-in response cache. | **Best-effort: must never raise into a delegation.** |
-| `router.py` | Pure functions that order lanes cheapest→strongest for `ask_cascade`, skipping cooled ones. | No side effects — pure, easy to test. |
+| `telemetry.py` | Local sqlite: run log + per-lane health/cooldown + response cache + async-job rows + estimated token/credit accounting. | **Best-effort: must never raise into a delegation.** |
+| `router.py` | Pure functions that order lanes for `ask_cascade` (cheapest→strongest) and `ask_best` (per-mode: fast/cheap/deep/code/review/security), skipping cooled ones. | No side effects — pure, easy to test. |
 | `workflows.py` | The multi-model workflows: `review_diff`, `security_review`, `debate` + the `council_recap` digest + deterministic `prechecks` (secrets / dangerous shell). Orchestrates several lanes. | Takes an injected `run_lane`, so it's testable with fakes. |
 | `findings.py` | Pure: parse each reviewer's JSON tolerantly, merge by file/line/title, derive confidence from agreement, render Markdown or a JSON result. | No I/O — deterministic merge replaces an LLM merge pass (can't fabricate findings). |
 | `jobs.py` | In-process async jobs (`ask_all_async`): wrap a coroutine in `asyncio.create_task`, return a job id, poll/fetch/cancel later. Live registry + best-effort sqlite row. | No cross-restart resume in v1 — stale `running` rows become `interrupted`. |
@@ -68,7 +68,11 @@ host (Claude/Codex/…) ──MCP/stdio──▶ cli-bridge ──spawn subproce
   tool-call deadline. Cancel kills the delegates' process groups; a restart marks it interrupted.
 - **`ask_cascade`** — one answer with automatic fallback (cheapest→strongest, skips cooled lanes).
   For **reliability/automation**, not comparison.
-- **`route_plan`** — explains the order cascade would try (runs nothing).
+- **`ask_best`** — picks ONE lane by `mode` (fast/cheap/deep/code/review/security) from cost,
+  health and measured latency, then runs it with fallback. For "just use the right model".
+- **`route_plan`** — explains the order cascade would try (runs nothing); `mode` previews `ask_best`.
+- **`usage_report` / `usage_budget`** — local stats with ESTIMATED tokens (chars/4) and credits
+  (per-lane `CREDITS_PER_1K`); budget shows today's runs vs `DAILY_LIMIT`. Always labelled estimated.
 - **`review_diff` / `security_review`** — role-diverse multi-model review of a git diff. Each
   reviewer returns JSON findings; deterministic prechecks (secrets, dangerous shell) seed the
   set; findings merge by file/line/title with agreement-based confidence (single/majority/
@@ -76,7 +80,7 @@ host (Claude/Codex/…) ──MCP/stdio──▶ cli-bridge ──spawn subproce
   adds a `residual_risk` section.
 - **`debate`** — models answer, see each other, revise over bounded rounds, a judge concludes.
 - **`doctor`** — health check (installed CLIs, host, cost profile, cooldowns). `deep: true` live-probes auth.
-- **`usage_report` / `lane_stats` / `reset_lane_state`** — local telemetry + cooldown management.
+- **`lane_stats` / `reset_lane_state`** — per-lane health + cooldown management.
 - **`setup`** — walk the user through the cost profile.
 - **Self-model**: from a given host, `ask_<host>` appears as a separate tool that **requires an
   explicit model** — so you can consult a sibling model of your own family.

@@ -41,6 +41,7 @@ def _connect() -> sqlite3.Connection | None:
         conn = sqlite3.connect(path, check_same_thread=False, timeout=5)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript(_SCHEMA)
+        _migrate(conn)
         conn.commit()
         _CONN = conn
         return conn
@@ -61,6 +62,7 @@ CREATE TABLE IF NOT EXISTS runs (
   task_preview TEXT,
   duration_ms INTEGER,
   output_chars INTEGER,
+  input_chars INTEGER NOT NULL DEFAULT 0,
   started_at REAL NOT NULL
 );
 CREATE TABLE IF NOT EXISTS lane_state (
@@ -94,6 +96,18 @@ CREATE TABLE IF NOT EXISTS jobs (
 """
 
 
+# Columns added after v1 shipped — best-effort ALTER so existing DBs gain them without a wipe.
+_MIGRATIONS = (("runs", "input_chars", "INTEGER NOT NULL DEFAULT 0"),)
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    for table, col, decl in _MIGRATIONS:
+        try:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+        except sqlite3.Error:
+            pass   # already present (or table absent) — fine
+
+
 @dataclass
 class RunStart:
     tool: str
@@ -111,7 +125,7 @@ def _store_transcripts() -> bool:
     return os.environ.get("CLI_BRIDGE_STORE_TRANSCRIPTS", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def record(run: RunStart, ok: bool, kind: str, output_chars: int) -> None:
+def record(run: RunStart, ok: bool, kind: str, output_chars: int, input_chars: int = 0) -> None:
     """Record a finished run + update the lane's health/cooldown. Best-effort: never raises."""
     conn = _connect()
     if conn is None:
@@ -124,9 +138,9 @@ def record(run: RunStart, ok: bool, kind: str, output_chars: int) -> None:
         with _LOCK:
             conn.execute(
                 "INSERT INTO runs (tool, lane, model, status, kind, task_hash, task_preview, "
-                "duration_ms, output_chars, started_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                "duration_ms, output_chars, input_chars, started_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                 (run.tool, run.lane, run.model, status, kind, task_hash, preview,
-                 duration_ms, output_chars, run.started_at))
+                 duration_ms, output_chars, input_chars, run.started_at))
             _update_lane_state(conn, run.lane, ok, kind, run.model)
             conn.commit()
     except sqlite3.Error:
@@ -225,31 +239,106 @@ def lane_stats() -> list[dict]:
     return out
 
 
-def usage_report(limit_recent: int = 10) -> dict:
+def lane_perf() -> dict:
+    """{lane: {"runs", "avg_ms", "fail_rate"}} — used by the router to bias fast/healthy lanes."""
+    conn = _connect()
+    if conn is None:
+        return {}
+    try:
+        with _LOCK:
+            rows = conn.execute(
+                "SELECT lane, COUNT(*), SUM(status='ok'), AVG(duration_ms) "
+                "FROM runs WHERE lane IS NOT NULL GROUP BY lane").fetchall()
+    except sqlite3.Error:
+        return {}
+    out = {}
+    for lane, n, ok, avg in rows:
+        n = n or 0
+        out[lane] = {"runs": n, "avg_ms": int(avg or 0),
+                     "fail_rate": (1 - (ok or 0) / n) if n else 0.0}
+    return out
+
+
+def _est_credits(lane: str, total_tokens: float) -> float | None:
+    rate = config.lane_env_float(lane, "CREDITS_PER_1K")   # cost per 1k total tokens
+    return round(rate * total_tokens / 1000, 4) if rate is not None else None
+
+
+def usage_report(limit_recent: int = 10, since_s: float | None = None) -> dict:
+    """Local usage with ESTIMATED token/credit figures (chars/4; per-lane CREDITS_PER_1K if set).
+    since_s limits to runs in the last N seconds. Estimates are never presented as exact."""
     conn = _connect()
     if conn is None:
         return {"enabled": False}
+    where, params = ("WHERE started_at >= ?", (_now() - since_s,)) if since_s else ("", ())
     try:
         with _LOCK:
-            total = conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
+            total = conn.execute(f"SELECT COUNT(*) FROM runs {where}", params).fetchone()[0]
             by_lane = conn.execute(
-                "SELECT lane, COUNT(*), SUM(status='ok'), AVG(duration_ms) "
-                "FROM runs GROUP BY lane ORDER BY COUNT(*) DESC").fetchall()
+                f"SELECT lane, COUNT(*), SUM(status='ok'), AVG(duration_ms), "
+                f"SUM(input_chars), SUM(output_chars) FROM runs {where} "
+                f"GROUP BY lane ORDER BY COUNT(*) DESC", params).fetchall()
             recent = conn.execute(
-                "SELECT tool, lane, model, status, kind, duration_ms, task_preview "
-                "FROM runs ORDER BY id DESC LIMIT ?", (limit_recent,)).fetchall()
+                f"SELECT tool, lane, model, status, kind, duration_ms, task_preview "
+                f"FROM runs {where} ORDER BY id DESC LIMIT ?", (*params, limit_recent)).fetchall()
     except sqlite3.Error:
         return {"enabled": False}
+    cpt = config.CHARS_PER_TOKEN
+    lanes_out, est_total = [], 0.0
+    have_rate = False
+    for (l, n, ok, avg, inc, outc) in by_lane:
+        in_tok, out_tok = int((inc or 0) / cpt), int((outc or 0) / cpt)
+        cred = _est_credits(l, in_tok + out_tok) if l else None
+        if cred is not None:
+            have_rate = True
+            est_total += cred
+        lanes_out.append({"lane": l, "runs": n, "ok": int(ok or 0), "avg_ms": int(avg or 0),
+                          "est_input_tokens": in_tok, "est_output_tokens": out_tok,
+                          "est_credits": cred})
     return {
         "enabled": True,
         "total_runs": total,
-        "by_lane": [
-            {"lane": l, "runs": n, "ok": int(ok or 0),
-             "avg_ms": int(avg or 0)} for (l, n, ok, avg) in by_lane],
+        "since_s": since_s,
+        "token_basis": f"estimated (chars/{cpt})",
+        "est_total_credits": round(est_total, 4) if have_rate else None,
+        "by_lane": lanes_out,
         "recent": [
             {"tool": t, "lane": l, "model": m, "status": s, "kind": k,
              "duration_ms": d, "task": p} for (t, l, m, s, k, d, p) in recent],
     }
+
+
+def _utc_day_start() -> float:
+    t = _now()
+    g = time.gmtime(t)
+    return t - (g.tm_hour * 3600 + g.tm_min * 60 + g.tm_sec)
+
+
+def usage_budget() -> dict:
+    """Per-lane runs since UTC midnight vs an optional CLI_BRIDGE_<LANE>_DAILY_LIMIT, plus the
+    estimated credits spent today. All token/credit figures are estimates."""
+    conn = _connect()
+    if conn is None:
+        return {"enabled": False}
+    start = _utc_day_start()
+    try:
+        with _LOCK:
+            rows = conn.execute(
+                "SELECT lane, COUNT(*), SUM(input_chars), SUM(output_chars) FROM runs "
+                "WHERE started_at >= ? AND lane IS NOT NULL GROUP BY lane", (start,)).fetchall()
+    except sqlite3.Error:
+        return {"enabled": False}
+    cpt = config.CHARS_PER_TOKEN
+    lanes = []
+    for lane, n, inc, outc in rows:
+        limit = config.lane_env_int(lane, "DAILY_LIMIT")
+        tok = int(((inc or 0) + (outc or 0)) / cpt)
+        lanes.append({
+            "lane": lane, "runs_today": n, "daily_limit": limit,
+            "over_limit": bool(limit is not None and n > limit),
+            "est_tokens_today": tok, "est_credits_today": _est_credits(lane, tok),
+        })
+    return {"enabled": True, "day_start_utc": start, "by_lane": lanes}
 
 
 def cache_get(key: str, ttl_s: int) -> tuple[bool, str, str] | None:

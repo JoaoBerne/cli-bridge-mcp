@@ -76,6 +76,28 @@ def test_cascade_trace_shows_attempts_and_chosen(monkeypatch):
     assert "✅ **b** [free] 34ms — chosen" in text
 
 
+def test_ask_best_picks_a_lane_and_traces(monkeypatch):
+    a = LaneSpec("a", "LaneA", "echo", lambda *x: [])
+    b = LaneSpec("b", "LaneB", "echo", lambda *x: [])
+    monkeypatch.setattr(server.telemetry, "cooldown_remaining", lambda key: 0)
+    monkeypatch.setattr(server.telemetry, "lane_perf", lambda: {})
+
+    async def fake_run_lane(lane, args, *, tool="ask", terse=True):
+        assert tool == "ask_best"
+        return RunResult(True, "best answer", "ok", latency_ms=20)
+    monkeypatch.setattr(server, "_run_lane", fake_run_lane)
+
+    out = asyncio.run(server._ask_best([a, b], {"task": "hi", "mode": "cheap"}))
+    text = out[0].text
+    assert "best answer" in text and "mode 'cheap'" in text
+
+
+def test_ask_best_rejects_unknown_mode(monkeypatch):
+    a = LaneSpec("a", "LaneA", "echo", lambda *x: [])
+    out = asyncio.run(server._ask_best([a], {"task": "hi", "mode": "wizardry"}))
+    assert out[0].text.startswith("[error] unknown mode")
+
+
 def test_cascade_trace_on_total_failure(monkeypatch):
     a = LaneSpec("a", "LaneA", "echo", lambda *x: [])
     monkeypatch.setattr(server.telemetry, "cooldown_remaining", lambda key: 0)
