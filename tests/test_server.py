@@ -90,6 +90,57 @@ def test_cascade_trace_on_total_failure(monkeypatch):
     assert "Trace — cascade" in text and "❌ a [free] 5ms — failed" in text
 
 
+def _claude_lane():
+    from cli_bridge.lanes import BUILTIN_LANES
+    return next(ln for ln in BUILTIN_LANES if ln.key == "claude")
+
+
+def test_host_lane_exposed_for_sibling_model(monkeypatch):
+    claude = _claude_lane()
+    monkeypatch.setattr(server, "installed_lanes", lambda lst: [claude])
+    monkeypatch.setenv("CLI_BRIDGE_HOST", "claude-code")
+    # host's own claude lane is NOT a delegate (excluded from fan-out)...
+    delegates, host = server._active_lanes()
+    assert claude not in delegates and host == "claude-code"
+    # ...but IS available as a self-consult lane (has model cap)
+    assert server._host_lane("claude-code") is claude
+
+
+def test_self_ask_tool_listed_and_requires_model(monkeypatch):
+    claude = _claude_lane()
+    monkeypatch.setattr(server, "installed_lanes", lambda lst: [claude])
+    monkeypatch.setenv("CLI_BRIDGE_HOST", "claude-code")
+    tools = asyncio.run(server.list_tools())
+    ask_claude = next((t for t in tools if t.name == "ask_claude"), None)
+    assert ask_claude is not None
+    assert "model" in ask_claude.inputSchema["required"]
+
+
+def test_self_ask_rejects_missing_model(monkeypatch):
+    claude = _claude_lane()
+    monkeypatch.setattr(server, "installed_lanes", lambda lst: [claude])
+    monkeypatch.setenv("CLI_BRIDGE_HOST", "claude-code")
+    out = asyncio.run(server.call_tool("ask_claude", {"task": "hi"}))
+    assert "explicit `model`" in out[0].text
+
+
+def test_self_ask_runs_with_explicit_model(monkeypatch):
+    claude = _claude_lane()
+    monkeypatch.setattr(server, "installed_lanes", lambda lst: [claude])
+    monkeypatch.setenv("CLI_BRIDGE_HOST", "claude-code")
+    captured = {}
+
+    async def fake_run_lane(lane, args, *, tool="ask", terse=True):
+        captured["key"] = lane.key
+        captured["model"] = args.get("model")
+        return RunResult(True, "sibling says hi", "ok", latency_ms=7)
+    monkeypatch.setattr(server, "_run_lane", fake_run_lane)
+
+    out = asyncio.run(server.call_tool("ask_claude", {"task": "hi", "model": "claude-opus-4-6"}))
+    assert "sibling says hi" in out[0].text
+    assert captured == {"key": "claude", "model": "claude-opus-4-6"}
+
+
 def test_is_host_matches_via_slug():
     lane = LaneSpec("x", "X", "x", lambda *a: [], client_ids=frozenset({"claude-code"}))
     assert server._is_host(lane, "claude-code")
