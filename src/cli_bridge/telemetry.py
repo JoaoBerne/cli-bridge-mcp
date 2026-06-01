@@ -74,6 +74,13 @@ CREATE TABLE IF NOT EXISTS lane_state (
   total_runs INTEGER NOT NULL DEFAULT 0,
   total_failures INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS response_cache (
+  key TEXT PRIMARY KEY,
+  ok INTEGER NOT NULL,
+  output TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  created_at REAL NOT NULL
+);
 """
 
 
@@ -233,6 +240,42 @@ def usage_report(limit_recent: int = 10) -> dict:
             {"tool": t, "lane": l, "model": m, "status": s, "kind": k,
              "duration_ms": d, "task": p} for (t, l, m, s, k, d, p) in recent],
     }
+
+
+def cache_get(key: str, ttl_s: int) -> tuple[bool, str, str] | None:
+    """Return (ok, output, kind) if a fresh cached response exists, else None. Best-effort."""
+    if ttl_s <= 0 or not key:
+        return None
+    conn = _connect()
+    if conn is None:
+        return None
+    try:
+        with _LOCK:
+            row = conn.execute(
+                "SELECT ok, output, kind, created_at FROM response_cache WHERE key=?",
+                (key,)).fetchone()
+    except sqlite3.Error:
+        return None
+    if not row or (_now() - row[3]) > ttl_s:
+        return None
+    return (bool(row[0]), row[1], row[2])
+
+
+def cache_put(key: str, ok: bool, output: str, kind: str) -> None:
+    """Store a response for later identical calls. Best-effort: never raises."""
+    conn = _connect()
+    if conn is None or not key:
+        return
+    try:
+        with _LOCK:
+            conn.execute(
+                "INSERT INTO response_cache (key, ok, output, kind, created_at) VALUES (?,?,?,?,?) "
+                "ON CONFLICT(key) DO UPDATE SET ok=excluded.ok, output=excluded.output, "
+                "kind=excluded.kind, created_at=excluded.created_at",
+                (key, 1 if ok else 0, output, kind, _now()))
+            conn.commit()
+    except sqlite3.Error:
+        pass
 
 
 def _reset_for_tests() -> None:

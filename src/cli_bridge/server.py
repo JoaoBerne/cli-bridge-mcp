@@ -370,6 +370,12 @@ def _ask_all_targets(lanes: list[LaneSpec], include_paid: bool,
     return out
 
 
+def _cache_key(lane: LaneSpec, model: str, effort: str, agent: str, cwd: str,
+               task: str, terse_level: str) -> str:
+    raw = "\x00".join([lane.key, model, effort, agent, cwd or "", terse_level, task])
+    return hashlib.sha256(raw.encode("utf-8", "replace")).hexdigest()
+
+
 async def _run_lane(lane: LaneSpec, args: dict, *, tool: str = "ask",
                     terse: bool = True) -> runner.RunResult:
     task = _str(args, "task")
@@ -379,20 +385,34 @@ async def _run_lane(lane: LaneSpec, args: dict, *, tool: str = "ask",
     agent = _str(args, "agent").lower()
     if agent not in {"", "plan", "build"}:    # never let a hallucinated value enable writes
         agent = "plan"
-    # Compress the FINAL answer (cuts host context + delegate output tokens). Skipped for
-    # structured-output tools (terse=False) so JSON stays intact. Telemetry keys on the raw
-    # task, not the prefixed prompt.
-    prompt = preamble.apply(task) if terse else task
-    argv = [lane.bin] + lane.build_ask(prompt, model, _str(args, "effort"), agent, lane.bin)
+    effort = _str(args, "effort")
     cwd = _str(args, "cwd")
     expanded = os.path.expanduser(cwd) if cwd else None
     if expanded and not os.path.isdir(expanded):
         return runner.RunResult(False, f"cwd `{cwd}` is not an existing directory", "failed")
+    # Opt-in response cache (CLI_BRIDGE_CACHE_TTL_S>0): an identical call returns the stored
+    # answer instead of re-spawning the CLI. Keyed on everything that changes the output,
+    # incl. the terse level (it changes the prompt) and a build run is never served stale.
+    terse_level = preamble.level() if terse else "off"
+    ttl = config.CACHE_TTL_S
+    key = ""
+    if ttl > 0 and agent != "build":
+        key = _cache_key(lane, model, effort, agent, expanded or "", task, terse_level)
+        hit = telemetry.cache_get(key, ttl)
+        if hit is not None:
+            return runner.RunResult(hit[0], hit[1], hit[2], latency_ms=0)
+    # Compress the FINAL answer (cuts host context + delegate output tokens). Skipped for
+    # structured-output tools (terse=False) so JSON stays intact. Telemetry keys on the raw
+    # task, not the prefixed prompt.
+    prompt = preamble.apply(task) if terse else task
+    argv = [lane.bin] + lane.build_ask(prompt, model, effort, agent, lane.bin)
     rec = telemetry.start(tool, lane.key, model, task)
     t0 = time.monotonic()
     res = await runner.arun(argv, _timeout(args.get("timeout_s")), expanded)
     res.latency_ms = int((time.monotonic() - t0) * 1000)
     telemetry.record(rec, res.ok, res.kind, len(res.output))
+    if key and res.ok:                        # cache only successes; failures are transient
+        telemetry.cache_put(key, res.ok, res.output, res.kind)
     return res
 
 

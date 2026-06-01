@@ -27,6 +27,13 @@ def int_env(name: str, default: int, lo: int, hi: int) -> int:
         return default
 
 
+# Response cache: 0 = OFF (default). When >0, an identical delegate call (same lane, model,
+# effort, agent, cwd, terse level, task) within this many seconds returns the stored answer
+# instead of re-spawning the CLI — saves quota/credits on repeats. Opt-in because a cached
+# answer can be stale. Stored in the local telemetry DB (needs telemetry on, the default).
+CACHE_TTL_S = int_env("CLI_BRIDGE_CACHE_TTL_S", 0, 0, 31_536_000)  # max 1 year
+
+
 # review_diff is a deliberately heavier workflow (each reviewer reads a whole diff, then a
 # merge pass). Reviewers run in parallel, so wall time ≈ slowest reviewer + merge — longer
 # than ask_all on purpose. Per-stage default; clamped to MAX_TIMEOUT_S like a direct ask.
