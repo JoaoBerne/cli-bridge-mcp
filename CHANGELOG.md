@@ -38,6 +38,13 @@ All notable changes to this project are documented here. The format follows
 - **Trace bundle** (`CLI_BRIDGE_TRACE_DIR`): per-delegation redacted JSON (argv, timing, output)
   for reproducible debugging / ban-safe audit.
 
+### Added (from the council audit)
+- **`CLI_BRIDGE_MAX_PARALLEL`** (default 6): caps simultaneous delegate spawns in `ask_all` so a
+  wide council (many custom lanes) can't OOM a small machine or burst quota.
+- README: "Works in IDE MCP hosts too" + an honest **Known limitations** list (ban-safe ToS
+  caveat, in-process jobs, heuristic guard, estimated tokens, BYO-API argv exposure, experimental
+  lanes). SECURITY.md notes the BYO-API curl key-in-argv exposure + mitigation.
+
 ### Changed
 - Findings merge now also collapses **similarly-worded** findings at the same `file:line`
   (token-overlap similarity), not just exact-title matches — so two models describing the same

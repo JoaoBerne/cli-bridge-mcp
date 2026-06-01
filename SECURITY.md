@@ -50,6 +50,11 @@ cli-bridge handles two kinds of untrusted data:
 - **It can't vet the models themselves.** A compromised or malicious model could emit harmful
   content; that's why output is annotated and, for writes, isolated.
 - **`cwd`/path arguments are not jailed.** A delegate sees whatever directory you point it at.
+- **BYO-API (curl) lanes expose the key in argv.** A custom lane that substitutes a `${ENV}` key
+  into a `curl` command line puts that key in this machine's process list for the duration of the
+  call (it is never logged — traces redact it, and it never leaves your machine otherwise). On a
+  shared/multi-user host, prefer a provider's official CLI, or a header file (`curl -H @file`,
+  `chmod 600`) so the secret stays out of argv.
 
 ## Hardening checklist for sensitive use
 

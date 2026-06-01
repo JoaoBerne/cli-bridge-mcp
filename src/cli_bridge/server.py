@@ -1144,9 +1144,16 @@ async def _ask_all_body(lanes: list[LaneSpec], args: dict) -> str:
                 "then install/log into at least one CLI (e.g. gemini, mistral, opencode).")
     sub = {"task": _str(args, "task"), "cwd": _str(args, "cwd"),
            "timeout_s": _ask_all_timeout(args.get("timeout_s"))}
+    # Cap simultaneous spawns so a wide council (many custom lanes) can't OOM a small machine
+    # or burst quota. Default high enough that a normal free council is unaffected. The semaphore
+    # is created in the running loop (per call) to stay safe across separate event loops.
+    sem = asyncio.Semaphore(config.max_parallel())
+
+    async def _capped(ln):
+        async with sem:
+            return await _run_lane(ln, sub)
     # return_exceptions: one broken lane must not sink the whole fan-out.
-    results = await asyncio.gather(*[_run_lane(ln, sub) for ln in targets],
-                                   return_exceptions=True)
+    results = await asyncio.gather(*[_capped(ln) for ln in targets], return_exceptions=True)
     blocks = []
     rows = []
     for lane, res in zip(targets, results, strict=False):
