@@ -21,7 +21,7 @@ from mcp.types import (
     GetPromptResult, Prompt, PromptArgument, PromptMessage, TextContent, Tool,
 )
 
-from . import config, jobs, preamble, router, runner, telemetry, workflows
+from . import config, guards, jobs, preamble, router, runner, telemetry, workflows
 from .config import (
     ASK_ALL_DEFAULT_TIMEOUT_S, ASK_ALL_MAX_TIMEOUT_S, ASK_ALL_SYNTH_TIMEOUT_S,
     DEFAULT_TIMEOUT_S, INLINE_MAX_CHARS, INSTRUCTIONS, MAX_TIMEOUT_S, OVERFLOW_DIR,
@@ -65,10 +65,15 @@ def _prune_overflow() -> None:
         pass
 
 
-def _emit(text: str, label: str = "answer") -> TextContent:
+def _emit(text: str, label: str = "answer", guard: bool = True) -> TextContent:
     """Return small answers inline; spill big ones to a file and return a preview + path.
     This is what makes a delegate behave like a subagent: the host gets a compact digest,
-    and the full output stays out of its context until it deliberately reads the file."""
+    and the full output stays out of its context until it deliberately reads the file.
+
+    guard=True (the default) runs the injection/tool-poisoning guard over UNTRUSTED delegate
+    output first; internal reports (doctor/usage/lane_stats) pass guard=False — they're ours."""
+    if guard:
+        text = guards.apply(text)
     if len(text) <= INLINE_MAX_CHARS:
         return TextContent(type="text", text=text)
     try:
@@ -613,13 +618,13 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
 
     if name == "doctor":
         text = await _doctor_deep(host, lanes) if bool(args.get("deep")) else _doctor(host)
-        return [_emit(text, label="doctor")]
+        return [_emit(text, label="doctor", guard=False)]
 
     if name == "usage_report":
-        return [_emit(_render_usage(), label="usage_report")]
+        return [_emit(_render_usage(), label="usage_report", guard=False)]
 
     if name == "lane_stats":
-        return [_emit(_render_lane_stats(), label="lane_stats")]
+        return [_emit(_render_lane_stats(), label="lane_stats", guard=False)]
 
     if name == "reset_lane_state":
         lane = _str(args, "lane")

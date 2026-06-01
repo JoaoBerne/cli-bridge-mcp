@@ -33,6 +33,7 @@ host (Claude/Codex/…) ──MCP/stdio──▶ cli-bridge ──spawn subproce
 | `findings.py` | Pure: parse each reviewer's JSON tolerantly, merge by file/line/title, derive confidence from agreement, render Markdown or a JSON result. | No I/O — deterministic merge replaces an LLM merge pass (can't fabricate findings). |
 | `jobs.py` | In-process async jobs (`ask_all_async`): wrap a coroutine in `asyncio.create_task`, return a job id, poll/fetch/cancel later. Live registry + best-effort sqlite row. | No cross-restart resume in v1 — stale `running` rows become `interrupted`. |
 | `preamble.py` | The terse response-style preamble prepended to delegate prompts. | Prose only — never applied to structured (JSON) workflows. |
+| `guards.py` | Scans UNTRUSTED delegate output for prompt-injection / tool-poisoning; `CLI_BRIDGE_GUARD=off\|warn\|strict`. | Runs in `_emit` after redaction; never on cli-bridge's own reports. |
 | `detect.py` | Which CLIs are actually installed (PATH lookup). | — |
 
 ## Request lifecycle (a single `ask_<lane>` call)
@@ -48,7 +49,8 @@ host (Claude/Codex/…) ──MCP/stdio──▶ cli-bridge ──spawn subproce
    - records **telemetry** (duration, status, kind) and stores the cache entry on success.
 4. **`runner.arun`** spawns the CLI, enforces the timeout (killing the whole process group on
    expiry/cancel), redacts secrets, classifies the exit, caps the size → `RunResult`.
-5. **`_emit`** (`server.py`) returns the answer inline if small, or spills it to a file and
+5. **`_emit`** (`server.py`) runs the **output guard** over untrusted delegate text (warn/strict
+   per `CLI_BRIDGE_GUARD`), then returns the answer inline if small, or spills it to a file and
    returns a preview + path if huge (so the host's context stays lean).
 
 ## Tool catalog
