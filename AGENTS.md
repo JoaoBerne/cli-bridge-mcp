@@ -46,6 +46,7 @@ CLI_BRIDGE_STATE_DB=/tmp/t.sqlite pytest -q   # keep tests off your real state d
 
 ## Roadmap
 
-See `SOTA_ACTION_PLAN.md`. Done: config extraction, telemetry+cooldown, cascade router.
-Next candidates: workflow tools (review_diff/security_review/debate), MCP prompts, security
-guard, worktree isolation for write-capable agents, human CLI, PyPI publish.
+See `SOTA_ACTION_PLAN.md`. Done: config extraction, telemetry+cooldown, cascade router,
+terse preamble, response cache, trace fields, workflow tools (review_diff/security_review/
+debate), MCP prompts, opt-in write/build mode (all lanes), sibling-model self-consultation.
+Next candidates: async durable jobs, worktree-isolated writers, retries w/ backoff, PyPI publish.
