@@ -24,6 +24,7 @@ src/cli_bridge/
   findings.py   # parse/merge/render structured review findings (pure)
   guards.py     # injection/tool-poisoning output guard (CLI_BRIDGE_GUARD)
   worktrees.py  # ask_build_isolated: write mode in a throwaway git worktree
+  cli.py        # human/CI entry point (cli-bridge ...) over the same internals
   detect.py     # PATH detection
 tests/          # pytest; unit + cross-host integration (no real CLI needed)
 ```
@@ -57,5 +58,6 @@ security_review/debate), council recap, MCP prompts, opt-in write/build mode (al
 sibling-model self-consultation, in-process async jobs (ask_all_async), structured findings
 JSON + deterministic merge + prechecks + residual_risk, output guard (injection/poisoning),
 worktree-isolated write mode (ask_build_isolated), ask_best mode router + estimated token/
-credit accounting (usage_report/usage_budget).
-Next candidates: human CLI, MCP resources, premortem/test_plan workflows, evals + lint, PyPI.
+credit accounting (usage_report/usage_budget), human CLI (cli-bridge), MCP resources,
+premortem/test_plan workflows.
+Next candidates: evals + fixtures, ruff lint, CI hardening, release docs, PyPI publish.

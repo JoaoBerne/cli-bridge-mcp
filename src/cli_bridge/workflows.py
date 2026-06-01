@@ -436,3 +436,120 @@ async def debate(targets: list[LaneSpec], args: dict, run_lane) -> str:
         lines.append(f"<details><summary>{display}</summary>\n\n{text.strip()}\n\n</details>")
     lines.append("\n## Trace\n```json\n" + json.dumps(meta, indent=2) + "\n```")
     return "\n".join(lines)
+
+
+# ── premortem / test_plan: fan a specialized question across lanes, then merge ──────────────
+
+async def _council_synth(targets, run_lane, *, ask: str, merge, heading: str, tool: str,
+                         timeout: int) -> str:
+    """Ask every target the same specialized prompt, recap who said what, then have one lane
+    merge the answers into a single prioritized result. terse=False (structured prose)."""
+    if not targets:
+        return ("[error] no lanes available. Install/login a CLI, or set include_paid=true / "
+                "CLI_BRIDGE_PROFILE=max to allow limited/paid lanes.")
+
+    async def _ask(lane: LaneSpec):
+        res = await run_lane(lane, {"task": ask, "timeout_s": timeout}, tool=tool, terse=False)
+        return lane, res
+
+    raw = await asyncio.gather(*[_ask(l) for l in targets], return_exceptions=True)
+    answers: list[tuple[str, str]] = []
+    rows: list[tuple[str, bool, int, str]] = []
+    for item in raw:
+        if isinstance(item, BaseException):
+            rows.append(("crashed", False, 0, str(item)))
+            continue
+        lane, res = item
+        if res.ok:
+            answers.append((lane.display, res.output))
+            rows.append((lane.display, True, res.latency_ms, res.output))
+        else:
+            rows.append((lane.display, False, res.latency_ms, res.kind))
+    if not answers:
+        return f"[error] all lanes failed for {tool}. Check `doctor`."
+
+    if len(answers) >= 2:
+        transcript = "\n\n".join(f"### {d}\n{t}" for d, t in answers)
+        jr = await run_lane(targets[0], {"task": merge(transcript), "timeout_s": timeout},
+                            tool=tool, terse=False)
+        merged = jr.output if jr.ok else answers[0][1]
+    else:
+        merged = answers[0][1]
+
+    lines = [f"# {heading}", "", council_recap(rows, title="Council"), "", "## Merged\n",
+             merged.strip() or "_(merge produced no output)_"]
+    if len(answers) > 1:
+        lines.append("\n## Per-model detail\n")
+        for d, t in answers:
+            lines.append(f"<details><summary>{d}</summary>\n\n{t.strip()}\n\n</details>")
+    return "\n".join(lines)
+
+
+def _premortem_ask(subject: str) -> str:
+    return (
+        "Run a PREMORTEM. Assume the change/plan below has FAILED badly some months from now. "
+        "Working backwards, give the most LIKELY failure modes, each with: its root cause, an "
+        "early warning sign, and a concrete mitigation. Prioritize by likelihood × impact; be "
+        f"specific to THIS change, not generic.\n\nCHANGE / PLAN:\n{subject}")
+
+
+def _premortem_merge(transcript: str) -> str:
+    return ("Several models ran a premortem on the same change. Merge into ONE prioritized risk "
+            "list (highest likelihood × impact first), deduped; when several flag the same risk, "
+            "keep one entry and note the agreement. Each: risk, root cause, early sign, "
+            f"mitigation. End with the single biggest thing to de-risk first.\n\n{transcript}")
+
+
+def _test_plan_ask(subject: str, is_diff: bool) -> str:
+    what = "git diff" if is_diff else "description"
+    return (
+        f"Produce a TEST PLAN for the change below (given as a {what}). List the behaviors and "
+        "edge cases that must be tested, the failure modes a test should catch, and the minimal "
+        "set of concrete test cases (unit / integration) to add — each mapped to the code area "
+        "it covers. Prefer the smallest suite that would catch a regression; don't pad.\n\n"
+        f"{subject}")
+
+
+def _test_plan_merge(transcript: str) -> str:
+    return ("Several models proposed a test plan for the same change. Merge into ONE deduped, "
+            "prioritized plan: the must-have cases first, then nice-to-have. Group by code area; "
+            f"note where models agreed a case is essential.\n\n{transcript}")
+
+
+async def premortem(targets: list[LaneSpec], args: dict, run_lane) -> str:
+    """Multi-model premortem: each lane lists how the plan could fail; one merges into a
+    prioritized risk list."""
+    subject = (args.get("task") or "").strip()
+    if not subject:
+        return "[error] task (the change/plan to premortem) is required"
+    return await _council_synth(targets, run_lane, ask=_premortem_ask(subject),
+                                merge=_premortem_merge, heading="Premortem (multi-model)",
+                                tool="premortem", timeout=_timeout(args.get("timeout_s")))
+
+
+async def test_plan(targets: list[LaneSpec], args: dict, run_lane) -> str:
+    """Multi-model test plan from a git diff (default: working-tree changes) or a description."""
+    task = (args.get("task") or "").strip()
+    diff = args.get("diff") or ""
+    is_diff = False
+    if task and not diff:
+        subject = task
+    else:
+        cwd = (args.get("cwd") or "").strip()
+        base = (args.get("base") or "").strip() or "HEAD"
+        if not diff:
+            diff, err = git_diff(cwd, base)
+            if err:
+                return f"[error] {err}"
+        if not diff.strip():
+            return ("[test_plan] empty diff and no task. Pass `task` (a description), or make "
+                    "changes / pass a `diff`/`base`.")
+        truncated = len(diff) > config.REVIEW_DIFF_MAX_CHARS
+        subject = (diff[:config.REVIEW_DIFF_MAX_CHARS] if truncated else diff)
+        if truncated:
+            subject += "\n\n[diff truncated to fit context]"
+        subject = f"```diff\n{subject}\n```"
+        is_diff = True
+    return await _council_synth(targets, run_lane, ask=_test_plan_ask(subject, is_diff),
+                                merge=_test_plan_merge, heading="Test plan (multi-model)",
+                                tool="test_plan", timeout=_timeout(args.get("timeout_s")))

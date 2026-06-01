@@ -207,3 +207,50 @@ def test_debate_caps_debaters():
     targets = [_lane(f"l{i}") for i in range(8)]   # 8 lanes, cap is 4
     asyncio.run(workflows.debate(targets, {"task": "q", "rounds": 0}, _fake_run_lane(rec)))
     assert len(rec) == workflows.DEBATE_MAX_DEBATERS + 1   # 4 openers + judge
+
+
+# ── premortem / test_plan (M7) ──
+
+def test_premortem_requires_task():
+    out = asyncio.run(workflows.premortem([_lane("a")], {"task": "  "}, _fake_run_lane([])))
+    assert out.startswith("[error]")
+
+
+def test_premortem_fans_out_and_merges():
+    rec = []
+    targets = [_lane("a", "LaneA"), _lane("b", "LaneB")]
+    rl = _fake_run_lane(rec, output="Risk: data loss; mitigation: backups")
+    report = asyncio.run(workflows.premortem(targets, {"task": "ship a migration"}, rl))
+    assert "# Premortem (multi-model)" in report
+    assert "## Council" in report and "## Merged" in report
+    assert len(rec) == 3                          # 2 openers + 1 merge
+    assert all(c["terse"] is False for c in rec)
+    assert any("PREMORTEM" in c["task"] for c in rec)
+
+
+def test_test_plan_from_diff():
+    rec = []
+    rl = _fake_run_lane(rec, output="Test: empty input case")
+    report = asyncio.run(workflows.test_plan(
+        [_lane("a", "LaneA")], {"diff": "diff --git a/f b/f\n+def g(): ...\n"}, rl))
+    assert "# Test plan (multi-model)" in report
+    assert any("TEST PLAN" in c["task"] and "```diff" in c["task"] for c in rec)
+
+
+def test_test_plan_from_task_text():
+    rec = []
+    rl = _fake_run_lane(rec, output="Test: boundary")
+    report = asyncio.run(workflows.test_plan(
+        [_lane("a")], {"task": "a function that sums a list"}, rl))
+    assert "# Test plan (multi-model)" in report
+    assert any("sums a list" in c["task"] for c in rec)
+
+
+def test_test_plan_empty_diff_no_task():
+    out = asyncio.run(workflows.test_plan([_lane("a")], {"diff": "   "}, _fake_run_lane([])))
+    assert "empty diff" in out
+
+
+def test_council_no_lanes():
+    out = asyncio.run(workflows.premortem([], {"task": "x"}, _fake_run_lane([])))
+    assert out.startswith("[error] no lanes")

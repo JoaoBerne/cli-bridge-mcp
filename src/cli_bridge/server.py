@@ -20,10 +20,12 @@ import time
 from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import (
-    GetPromptResult, Prompt, PromptArgument, PromptMessage, TextContent, Tool,
+    GetPromptResult, Prompt, PromptArgument, PromptMessage, Resource, TextContent, Tool,
 )
 
-from . import config, guards, jobs, preamble, router, runner, telemetry, workflows, worktrees
+from . import (
+    config, findings, guards, jobs, preamble, router, runner, telemetry, workflows, worktrees,
+)
 from .config import (
     ASK_ALL_DEFAULT_TIMEOUT_S, ASK_ALL_MAX_TIMEOUT_S, ASK_ALL_SYNTH_TIMEOUT_S,
     DEFAULT_TIMEOUT_S, INLINE_MAX_CHARS, INSTRUCTIONS, MAX_TIMEOUT_S, OVERFLOW_DIR,
@@ -480,6 +482,42 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             },
             annotations={"readOnlyHint": True, "openWorldHint": True, "destructiveHint": False},
         ))
+        tools.append(Tool(
+            name="premortem",
+            description=("Multi-model PREMORTEM: each lane imagines the change/plan failed and "
+                         "lists likely failure modes, root causes, early signs and mitigations; "
+                         "one lane merges into a prioritized risk list. Run it BEFORE building."),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "task": {"type": "string", "description": "The change or plan to stress-test."},
+                    "include_paid": {"type": "boolean", "description": "Allow limited/paid lanes."},
+                    "timeout_s": {"type": "integer", "description": f"Per-lane timeout (max {MAX_TIMEOUT_S})."},
+                },
+                "required": ["task"],
+            },
+            annotations={"readOnlyHint": True, "openWorldHint": True, "destructiveHint": False},
+        ))
+        tools.append(Tool(
+            name="test_plan",
+            description=("Multi-model TEST PLAN from a git diff (default: working-tree changes) or "
+                         "a description: the behaviors/edge cases to test and the minimal set of "
+                         "concrete test cases to add, merged + prioritized."),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "task": {"type": "string",
+                             "description": "Describe the change (or omit to use the git diff)."},
+                    "diff": {"type": "string", "description": "Plan tests for this diff text."},
+                    "base": {"type": "string", "description": "git ref/range. Default HEAD."},
+                    "cwd": {"type": "string", "description": "Repo dir for `git diff`."},
+                    "include_paid": {"type": "boolean", "description": "Allow limited/paid lanes."},
+                    "timeout_s": {"type": "integer", "description": f"Per-lane timeout (max {MAX_TIMEOUT_S})."},
+                },
+                "required": [],
+            },
+            annotations={"readOnlyHint": True, "openWorldHint": True, "destructiveHint": False},
+        ))
     return tools
 
 
@@ -541,6 +579,21 @@ def _p_cost_setup(a: dict) -> str:
             "(saver / balanced / max) and how to set it for my plan.")
 
 
+def _p_premortem(a: dict) -> str:
+    plan = (a or {}).get("plan", "").strip()
+    return (f"Use the cli-bridge `premortem` tool on this plan, then give me the prioritized "
+            f"risks and mitigations:\n\n{plan}" if plan
+            else "Use the cli-bridge `premortem` tool to stress-test a plan. Ask me for the plan "
+                 "if I didn't give one.")
+
+
+def _p_test_plan(a: dict) -> str:
+    base = (a or {}).get("base", "").strip()
+    against = f" against `{base}`" if base else ""
+    return (f"Use the cli-bridge `test_plan` tool on the git diff{against}, then give me the "
+            "prioritized test cases to add.")
+
+
 _PROMPTS: dict[str, dict] = {
     "review_diff": {
         "description": "Multi-model code review of your current git diff.",
@@ -565,6 +618,18 @@ _PROMPTS: dict[str, dict] = {
         "arguments": [],
         "build": _p_cost_setup,
     },
+    "premortem": {
+        "description": "Stress-test a plan across models before building it.",
+        "arguments": [PromptArgument(
+            name="plan", description="The plan/change to premortem", required=False)],
+        "build": _p_premortem,
+    },
+    "test_plan": {
+        "description": "Derive a prioritized test plan from your git diff across models.",
+        "arguments": [PromptArgument(
+            name="base", description="git ref/range to diff against (default HEAD)", required=False)],
+        "build": _p_test_plan,
+    },
 }
 
 
@@ -583,6 +648,81 @@ async def get_prompt(name: str, arguments: dict | None) -> GetPromptResult:
     return GetPromptResult(
         description=spec["description"],
         messages=[PromptMessage(role="user", content=TextContent(type="text", text=text))])
+
+
+# ─────────────────────────────── MCP resources (read-only views) ───────────────────────────────
+# Inspectable JSON snapshots of cli-bridge's own state — handy for hosts that browse resources
+# and for the human CLI. All read-only and local; no delegate output here.
+
+_REVIEW_DIFF_SCHEMA = {
+    "title": "review_diff / security_review JSON result",
+    "type": "object",
+    "properties": {
+        "tool": {"type": "string"},
+        "status": {"type": "string"},
+        "summary": {"type": "string"},
+        "verdict": {"type": "string"},
+        "findings": {"type": "array", "items": {"type": "object", "properties": {
+            "id": {"type": "string"},
+            "severity": {"enum": list(findings.SEVERITIES)},
+            "confidence": {"enum": ["single", "majority", "consensus"]},
+            "title": {"type": "string"},
+            "file": {"type": ["string", "null"]},
+            "line": {"type": ["integer", "null"]},
+            "models": {"type": "array", "items": {"type": "string"}},
+            "evidence": {"type": "string"},
+            "recommendation": {"type": "string"},
+        }}},
+        "residual_risk": {"type": "string"},
+        "meta": {"type": "object"},
+    },
+}
+
+
+def _config_snapshot(host: str) -> dict:
+    return {
+        "host": host or None,
+        "profile": _profile(),
+        "profile_set": _profile_is_set(),
+        "guard": guards.level(),
+        "terse": preamble.level(),
+        "cache_ttl_s": config.CACHE_TTL_S,
+        "lanes": [
+            {"key": ln.key, "installed": is_installed(ln), "enabled": ln.enabled,
+             "cost": ln.cost_label, "model": ln.model_for(""), "experimental": ln.experimental,
+             "caps": sorted(ln.caps)}
+            for ln in all_lanes()
+        ],
+    }
+
+
+_RESOURCES = {
+    "cli-bridge://config": ("Effective config", "Profile, guard, terse, and per-lane cost/model."),
+    "cli-bridge://lane-stats": ("Lane health", "Per-lane runs/failures/cooldown (JSON)."),
+    "cli-bridge://usage-summary": ("Usage summary", "Estimated tokens/credits by lane (JSON)."),
+    "cli-bridge://workflow-schemas/review-diff": (
+        "review_diff schema", "JSON schema of the structured review result."),
+}
+
+
+@server.list_resources()
+async def list_resources() -> list[Resource]:
+    return [Resource(uri=uri, name=name, description=desc, mimeType="application/json")
+            for uri, (name, desc) in _RESOURCES.items()]
+
+
+@server.read_resource()
+async def read_resource(uri) -> str:
+    key = str(uri)
+    if key == "cli-bridge://config":
+        return json.dumps(_config_snapshot(_host_name()), indent=2)
+    if key == "cli-bridge://lane-stats":
+        return json.dumps(telemetry.lane_stats(), indent=2)
+    if key == "cli-bridge://usage-summary":
+        return json.dumps(telemetry.usage_report(), indent=2)
+    if key == "cli-bridge://workflow-schemas/review-diff":
+        return json.dumps(_REVIEW_DIFF_SCHEMA, indent=2)
+    raise ValueError(f"unknown resource: {key}")
 
 
 # ─────────────────────────────── execution helpers ───────────────────────────────
@@ -782,6 +922,14 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
     if name == "debate":
         targets = _ask_all_targets(lanes, _ask_all_include_paid(args))
         return [_emit(await workflows.debate(targets, args, _run_lane), label="debate")]
+
+    if name == "premortem":
+        targets = _ask_all_targets(lanes, _ask_all_include_paid(args))
+        return [_emit(await workflows.premortem(targets, args, _run_lane), label="premortem")]
+
+    if name == "test_plan":
+        targets = _ask_all_targets(lanes, _ask_all_include_paid(args))
+        return [_emit(await workflows.test_plan(targets, args, _run_lane), label="test_plan")]
 
     if name == "ask_build_isolated":
         key = _str(args, "lane")

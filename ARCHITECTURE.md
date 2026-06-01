@@ -36,6 +36,7 @@ host (Claude/Codex/…) ──MCP/stdio──▶ cli-bridge ──spawn subproce
 | `guards.py` | Scans UNTRUSTED delegate output for prompt-injection / tool-poisoning; `CLI_BRIDGE_GUARD=off\|warn\|strict`. | Runs in `_emit` after redaction; never on cli-bridge's own reports. |
 | `worktrees.py` | `ask_build_isolated`: run a build-capable agent in a throwaway git worktree, return its diff, discard. | Real repo never modified; nothing auto-applied. |
 | `detect.py` | Which CLIs are actually installed (PATH lookup). | — |
+| `cli.py` | Human/CI entry point (`cli-bridge …`) over the SAME internal functions the MCP tools use. | Thin wrappers — no logic of its own. |
 
 ## Request lifecycle (a single `ask_<lane>` call)
 
@@ -79,13 +80,19 @@ host (Claude/Codex/…) ──MCP/stdio──▶ cli-bridge ──spawn subproce
   consensus). `output_format: markdown` (default, PR-friendly) or `json`. `security_review`
   adds a `residual_risk` section.
 - **`debate`** — models answer, see each other, revise over bounded rounds, a judge concludes.
+- **`premortem`** — each lane imagines the plan failed → merged, prioritized risk list (run before building).
+- **`test_plan`** — test plan (behaviors, edge cases, concrete cases) from a git diff or a description.
 - **`doctor`** — health check (installed CLIs, host, cost profile, cooldowns). `deep: true` live-probes auth.
 - **`lane_stats` / `reset_lane_state`** — per-lane health + cooldown management.
 - **`setup`** — walk the user through the cost profile.
 - **Self-model**: from a given host, `ask_<host>` appears as a separate tool that **requires an
   explicit model** — so you can consult a sibling model of your own family.
-- **MCP prompts**: `review_diff`, `security_review`, `debate`, `cost_setup` show up as native
-  slash commands in hosts that support prompts.
+- **MCP prompts**: `review_diff`, `security_review`, `debate`, `premortem`, `test_plan`,
+  `cost_setup` show up as native slash commands in hosts that support prompts.
+- **MCP resources**: `cli-bridge://config`, `://lane-stats`, `://usage-summary`,
+  `://workflow-schemas/review-diff` — read-only JSON snapshots of cli-bridge's own state.
+- **Human CLI**: `cli-bridge doctor|ask|ask-all|ask-best|review-diff|security-review|test-plan|
+  premortem|stats|usage|budget|jobs|setup` — same engine, terminal/CI friendly (`--json`).
 
 ## Design invariants (don't break these)
 
