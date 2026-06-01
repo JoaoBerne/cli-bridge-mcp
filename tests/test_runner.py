@@ -1,7 +1,14 @@
 import os
+import sys
 import time
 
+import pytest
+
 from cli_bridge import runner
+
+# These exercise the runner via a POSIX shell (`sh -c …`). The runner itself is portable (it has
+# a Windows process-kill branch), but these specific tests need `sh`, so skip them on Windows.
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="uses POSIX shell (sh)")
 
 
 def test_success_returns_stdout_only():
