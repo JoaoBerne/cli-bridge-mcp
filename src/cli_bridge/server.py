@@ -20,19 +20,41 @@ import time
 from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import (
-    GetPromptResult, Prompt, PromptArgument, PromptMessage, Resource, TextContent, Tool,
+    GetPromptResult,
+    Prompt,
+    PromptArgument,
+    PromptMessage,
+    Resource,
+    TextContent,
+    Tool,
 )
 
 from . import (
-    config, findings, guards, jobs, preamble, router, runner, telemetry, workflows, worktrees,
+    config,
+    findings,
+    guards,
+    jobs,
+    preamble,
+    router,
+    runner,
+    telemetry,
+    workflows,
+    worktrees,
 )
 from .config import (
-    ASK_ALL_DEFAULT_TIMEOUT_S, ASK_ALL_MAX_TIMEOUT_S, ASK_ALL_SYNTH_TIMEOUT_S,
-    DEFAULT_TIMEOUT_S, INLINE_MAX_CHARS, INSTRUCTIONS, MAX_TIMEOUT_S, OVERFLOW_DIR,
+    ASK_ALL_DEFAULT_TIMEOUT_S,
+    ASK_ALL_MAX_TIMEOUT_S,
+    ASK_ALL_SYNTH_TIMEOUT_S,
+    DEFAULT_TIMEOUT_S,
+    INLINE_MAX_CHARS,
+    INSTRUCTIONS,
+    MAX_TIMEOUT_S,
+    OVERFLOW_DIR,
     SETUP_TEXT,
 )
-from .detect import is_installed, installed_lanes
-from .lanes import LANES_LOAD_STATUS as _LANES_LOAD_STATUS, LaneSpec, all_lanes
+from .detect import installed_lanes, is_installed
+from .lanes import LANES_LOAD_STATUS as _LANES_LOAD_STATUS
+from .lanes import LaneSpec, all_lanes
 
 # config.py is the single source of truth for env/timeouts/profile/onboarding. These thin
 # aliases keep the historical server.* call sites (and tests) working after the extraction.
@@ -334,7 +356,8 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                                      "description": "Allow limited/paid lanes in the chain. "
                                                     "Default false (except CLI_BRIDGE_PROFILE=max)."},
                     "cwd": {"type": "string", "description": "Directory the CLI runs in."},
-                    "timeout_s": {"type": "integer", "description": f"Per-attempt timeout (max {MAX_TIMEOUT_S})."},
+                    "timeout_s": {"type": "integer",
+                                  "description": f"Per-attempt timeout (max {MAX_TIMEOUT_S})."},
                 },
                 "required": ["task"],
             },
@@ -370,7 +393,8 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                                      "description": "Allow limited/paid lanes. Default false "
                                                     "(except CLI_BRIDGE_PROFILE=max)."},
                     "cwd": {"type": "string", "description": "Directory the CLI runs in."},
-                    "timeout_s": {"type": "integer", "description": f"Per-attempt timeout (max {MAX_TIMEOUT_S})."},
+                    "timeout_s": {"type": "integer",
+                                  "description": f"Per-attempt timeout (max {MAX_TIMEOUT_S})."},
                 },
                 "required": ["task"],
             },
@@ -492,7 +516,8 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                 "properties": {
                     "task": {"type": "string", "description": "The change or plan to stress-test."},
                     "include_paid": {"type": "boolean", "description": "Allow limited/paid lanes."},
-                    "timeout_s": {"type": "integer", "description": f"Per-lane timeout (max {MAX_TIMEOUT_S})."},
+                    "timeout_s": {"type": "integer",
+                                  "description": f"Per-lane timeout (max {MAX_TIMEOUT_S})."},
                 },
                 "required": ["task"],
             },
@@ -512,7 +537,8 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                     "base": {"type": "string", "description": "git ref/range. Default HEAD."},
                     "cwd": {"type": "string", "description": "Repo dir for `git diff`."},
                     "include_paid": {"type": "boolean", "description": "Allow limited/paid lanes."},
-                    "timeout_s": {"type": "integer", "description": f"Per-lane timeout (max {MAX_TIMEOUT_S})."},
+                    "timeout_s": {"type": "integer",
+                                  "description": f"Per-lane timeout (max {MAX_TIMEOUT_S})."},
                 },
                 "required": [],
             },
@@ -1075,7 +1101,7 @@ async def _ask_all_body(lanes: list[LaneSpec], args: dict) -> str:
                                    return_exceptions=True)
     blocks = []
     rows = []
-    for lane, res in zip(targets, results):
+    for lane, res in zip(targets, results, strict=False):
         if isinstance(res, BaseException):
             blocks.append(f"## {lane.display} - FAILED (crash)\n\n[crash] {res}")
             rows.append((lane.display, False, 0, f"crash: {res}"))
@@ -1094,7 +1120,7 @@ async def _ask_all_body(lanes: list[LaneSpec], args: dict) -> str:
     body = recap + "\n\n" + "\n\n".join(blocks) + footer
 
     if bool(args.get("synthesize")):
-        ok = [(lane, res) for lane, res in zip(targets, results)
+        ok = [(lane, res) for lane, res in zip(targets, results, strict=False)
               if not isinstance(res, BaseException) and res.ok]
         synth = await _synthesize(_str(args, "task"), ok, targets)
         if synth:

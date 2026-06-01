@@ -1,7 +1,6 @@
 """The bring-your-own-API path: a custom lane that spawns curl against an OpenAI-compatible
 endpoint, with the key pulled from an env var and the prompt JSON-escaped."""
 import json
-import os
 
 from cli_bridge import lanes
 

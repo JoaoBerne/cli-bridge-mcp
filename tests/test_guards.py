@@ -6,7 +6,6 @@ from cli_bridge import guards, server
 from cli_bridge.lanes import LaneSpec
 from cli_bridge.runner import RunResult
 
-
 # ── detection ───────────────────────────────────────────────────────────────────────────
 
 def test_scan_catches_instruction_override():

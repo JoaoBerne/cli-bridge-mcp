@@ -18,8 +18,8 @@ import json
 import os
 import shutil
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable
 
 _EFFORT = {"": "", "minimal": "minimal", "low": "low", "medium": "medium",
            "high": "high", "max": "max"}

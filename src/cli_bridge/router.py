@@ -8,8 +8,7 @@ higher-priority. `ask_cascade` walks this order until one succeeds; `ask_best` t
 """
 from __future__ import annotations
 
-import os
-from typing import Callable
+from collections.abc import Callable
 
 from .lanes import LaneSpec
 

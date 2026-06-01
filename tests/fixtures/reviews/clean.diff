@@ -1,0 +1,11 @@
+diff --git a/app/util.py b/app/util.py
+index 5555555..6666666 100644
+--- a/app/util.py
++++ b/app/util.py
+@@ -1,2 +1,6 @@
+ def add(a, b):
+     return a + b
++
++
++def mean(values):
++    return sum(values) / len(values) if values else 0

@@ -4,7 +4,6 @@ import json
 from cli_bridge import findings
 from cli_bridge.findings import Finding
 
-
 # ── severity normalization ──────────────────────────────────────────────────────────────
 
 def test_normalize_severity_aliases_and_default():

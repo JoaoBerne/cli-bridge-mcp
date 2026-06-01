@@ -16,7 +16,6 @@ import os
 import shutil
 import subprocess
 import tempfile
-import uuid
 
 from .lanes import LaneSpec
 
@@ -89,7 +88,7 @@ async def ask_build_isolated(lane: LaneSpec, args: dict, run_lane) -> str:
 
 def _report(lane: LaneSpec, res, diff: str, root: str, kept: str | None) -> str:
     where = f"kept at `{kept}`" if kept else "discarded"
-    lines = [f"# Isolated build (worktree)",
+    lines = ["# Isolated build (worktree)",
              f"_Agent: {lane.display} (build) · repo: `{root}` · worktree {where} · "
              "your repo was NOT modified_\n"]
     lines.append("## Agent output\n")

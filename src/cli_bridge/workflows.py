@@ -258,7 +258,7 @@ async def _diff_review(targets, args, run_lane, *, roles_def, prompt_fn, heading
         res = await run_lane(lane, sub, tool=tool, terse=False)
         return role, lane, res
 
-    raw = await asyncio.gather(*[_review(r, d, l) for r, d, l in roles],
+    raw = await asyncio.gather(*[_review(r, d, ln) for r, d, ln in roles],
                                return_exceptions=True)
     all_findings: list[findings.Finding] = list(prechecks(diff_in))
     recap_rows: list[tuple[str, bool, int, str]] = []
@@ -374,7 +374,7 @@ async def debate(targets: list[LaneSpec], args: dict, run_lane) -> str:
         return lane, res
 
     # Round 0: independent answers.
-    raw = await asyncio.gather(*[_ask(l, debate_open_prompt(question)) for l in debaters],
+    raw = await asyncio.gather(*[_ask(ln, debate_open_prompt(question)) for ln in debaters],
                                return_exceptions=True)
     positions: dict[str, tuple[str, str]] = {}   # lane.key -> (display, latest answer)
     for item in raw:
@@ -392,9 +392,9 @@ async def debate(targets: list[LaneSpec], args: dict, run_lane) -> str:
         if len(positions) < 2:
             break                         # nothing to debate against
         transcript = _debate_transcript(list(positions.values()))
-        live = [l for l in debaters if l.key in positions]
+        live = [ln for ln in debaters if ln.key in positions]
         raw = await asyncio.gather(
-            *[_ask(l, debate_revise_prompt(question, transcript)) for l in live],
+            *[_ask(ln, debate_revise_prompt(question, transcript)) for ln in live],
             return_exceptions=True)
         for item in raw:
             if isinstance(item, BaseException):
@@ -412,8 +412,8 @@ async def debate(targets: list[LaneSpec], args: dict, run_lane) -> str:
         "rounds": rounds_run,
     }
     # Judge: prefer a free non-experimental lane; fall back to the first debater.
-    judge = next((l for l in targets
-                  if not l.is_paid and not l.is_limited and not l.experimental), debaters[0])
+    judge = next((ln for ln in targets
+                  if not ln.is_paid and not ln.is_limited and not ln.experimental), debaters[0])
     if len(final_positions) >= 2:
         jr = await run_lane(judge, {"task": debate_judge_prompt(question, transcript),
                                     "timeout_s": timeout}, tool="debate")
@@ -452,7 +452,7 @@ async def _council_synth(targets, run_lane, *, ask: str, merge, heading: str, to
         res = await run_lane(lane, {"task": ask, "timeout_s": timeout}, tool=tool, terse=False)
         return lane, res
 
-    raw = await asyncio.gather(*[_ask(l) for l in targets], return_exceptions=True)
+    raw = await asyncio.gather(*[_ask(ln) for ln in targets], return_exceptions=True)
     answers: list[tuple[str, str]] = []
     rows: list[tuple[str, bool, int, str]] = []
     for item in raw:

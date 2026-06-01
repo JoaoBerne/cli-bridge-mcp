@@ -6,7 +6,6 @@ needs no real AI CLI installed.
 """
 import json
 import os
-import sys
 import subprocess
 import tempfile
 

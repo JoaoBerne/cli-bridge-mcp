@@ -1,5 +1,4 @@
 """P1: realistic cost defaults + per-lane env overrides + first-run detection."""
-import os
 
 from cli_bridge import lanes, server
 

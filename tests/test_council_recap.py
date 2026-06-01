@@ -5,7 +5,6 @@ from cli_bridge import server, workflows
 from cli_bridge.lanes import LaneSpec
 from cli_bridge.runner import RunResult
 
-
 # ── one_phrase ──────────────────────────────────────────────────────────────────────────
 
 def test_one_phrase_takes_first_meaningful_line():

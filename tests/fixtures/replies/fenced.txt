@@ -1,0 +1,6 @@
+```json
+[
+  {"severity": "critical", "title": "SQL injection", "file": "db.py", "line": 42,
+   "evidence": "user input concatenated into query", "recommendation": "use parameterized queries"}
+]
+```

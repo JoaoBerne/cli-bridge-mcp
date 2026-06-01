@@ -1,5 +1,4 @@
 """Human CLI: argument parsing + dispatch to the shared engine (with fakes, no real CLI)."""
-import asyncio
 
 import pytest
 

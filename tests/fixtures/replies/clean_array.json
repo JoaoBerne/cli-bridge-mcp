@@ -1,0 +1,6 @@
+[
+  {"severity": "high", "title": "Missing null check on values", "file": "app/util.py", "line": 6,
+   "evidence": "mean() divides by len(values) but the empty case returns 0 silently", "recommendation": "Raise or document the empty-list behavior"},
+  {"severity": "low", "title": "No type hints", "file": "app/util.py", "line": 1,
+   "evidence": "add/mean lack annotations", "recommendation": "Add type hints"}
+]

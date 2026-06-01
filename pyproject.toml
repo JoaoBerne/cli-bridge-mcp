@@ -33,3 +33,17 @@ packages = ["src/cli_bridge"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+# pyflakes (F), pycodestyle (E/W), isort (I), bugbear (B), pyupgrade (UP).
+select = ["E", "F", "W", "I", "B", "UP"]
+# E741: short loop vars are fine in tight comprehensions; B008: argparse default patterns.
+ignore = ["E741"]
+
+[tool.ruff.lint.per-file-ignores]
+# tests may shadow/leave locals and use bare asserts freely.
+"tests/*" = ["F841", "B011"]

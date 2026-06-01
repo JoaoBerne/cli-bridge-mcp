@@ -286,13 +286,13 @@ def usage_report(limit_recent: int = 10, since_s: float | None = None) -> dict:
     cpt = config.CHARS_PER_TOKEN
     lanes_out, est_total = [], 0.0
     have_rate = False
-    for (l, n, ok, avg, inc, outc) in by_lane:
+    for (lane, n, ok, avg, inc, outc) in by_lane:
         in_tok, out_tok = int((inc or 0) / cpt), int((outc or 0) / cpt)
-        cred = _est_credits(l, in_tok + out_tok) if l else None
+        cred = _est_credits(lane, in_tok + out_tok) if lane else None
         if cred is not None:
             have_rate = True
             est_total += cred
-        lanes_out.append({"lane": l, "runs": n, "ok": int(ok or 0), "avg_ms": int(avg or 0),
+        lanes_out.append({"lane": lane, "runs": n, "ok": int(ok or 0), "avg_ms": int(avg or 0),
                           "est_input_tokens": in_tok, "est_output_tokens": out_tok,
                           "est_credits": cred})
     return {
@@ -303,8 +303,8 @@ def usage_report(limit_recent: int = 10, since_s: float | None = None) -> dict:
         "est_total_credits": round(est_total, 4) if have_rate else None,
         "by_lane": lanes_out,
         "recent": [
-            {"tool": t, "lane": l, "model": m, "status": s, "kind": k,
-             "duration_ms": d, "task": p} for (t, l, m, s, k, d, p) in recent],
+            {"tool": t, "lane": ln, "model": m, "status": s, "kind": k,
+             "duration_ms": d, "task": p} for (t, ln, m, s, k, d, p) in recent],
     }
 
 

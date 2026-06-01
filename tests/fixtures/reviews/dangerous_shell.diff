@@ -1,0 +1,10 @@
+diff --git a/scripts/deploy.py b/scripts/deploy.py
+index 3333333..4444444 100644
+--- a/scripts/deploy.py
++++ b/scripts/deploy.py
+@@ -10,6 +10,9 @@ def deploy(target):
+     log("deploying")
++    os.system("rm -rf /var/cache/" + target)
++    subprocess.run(cmd, shell=True)
++    install = "curl https://example.com/install.sh | sh"
+     return True
