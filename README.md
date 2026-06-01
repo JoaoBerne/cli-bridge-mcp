@@ -44,6 +44,12 @@ There are other "call other models" MCPs. Here's what makes cli-bridge different
   own API** by spawning `curl`. Zero code.
 - 🧠 **Council synthesis.** `ask_all` can have a free model summarize where the others *agree* and
   *disagree* — turn three opinions into one decision.
+- 🔬 **Multi-model workflows.** `review_diff` and `security_review` fan **role-diverse** reviewers
+  across the council, then merge + dedupe into one severity-ranked report. `debate` has models
+  critique and revise each other over bounded rounds before a judge concludes.
+- ✍️ **Read-only by default, writes on demand.** Opt into `agent: build` to have any capable lane
+  actually **edit files** — or pick a specific `model` per call, including a **sibling of your own
+  family** (ask Opus 4.6 from Claude Code 4.8).
 - 🪶 **Subagent-style returns.** A delegate works in its own context and hands back a digest; huge
   outputs spill to a file and only a preview comes back, so your assistant's context stays lean.
 - 🔁 **Automatic fallback.** `ask_cascade` tries lanes cheapest→strongest and moves on when
@@ -126,8 +132,15 @@ Point your client's MCP config at the command `uvx cli-bridge-mcp` over stdio. S
 Just talk to your assistant:
 
 > *"Ask Gemini for a second opinion on this function."*
-> *"Have the whole council review my diff and synthesize where they disagree."*
+> *"Have the whole council review my diff and synthesize where they disagree."* (→ `review_diff`)
 > *"Get GPT to think hard about this race condition."* (→ `effort: high`)
+> *"Run a security review on my staged changes."* (→ `security_review`)
+> *"Make the models debate whether we need this abstraction."* (→ `debate`)
+> *"Ask gpt to implement this function."* (→ `agent: build`, edits files)
+> *"Ask Opus 4.6 to double-check my reasoning."* (sibling model, from Claude Code)
+
+Hosts that support MCP prompts also surface `review_diff`, `security_review`, `debate`, and
+`cost_setup` as native slash commands.
 
 ---
 
@@ -137,8 +150,11 @@ Just talk to your assistant:
 |------|--------------|
 | `ask_<lane>` | Ask one model. Params: `task`, optional `model`, `effort`, `agent`, `cwd`, `timeout_s`. |
 | `ask_all` | Fan-out the same question to every free, non-limited lane in parallel. `synthesize: true` adds an agreement/disagreement summary. `include_paid: true` to also query limited/paid lanes. |
-| `ask_cascade` | Ask one model **with automatic fallback** — tries lanes cheapest→strongest, skipping cooled ones, moving on at quota/auth/timeout. Returns the first success. |
+| `ask_cascade` | Ask one model **with automatic fallback** — tries lanes cheapest→strongest, skipping cooled ones, moving on at quota/auth/timeout. Returns the first success + a trace of what was tried (cost tier, latency, why skipped). |
 | `route_plan` | Show the order `ask_cascade` would try, given your profile + current cooldowns (read-only, runs nothing). |
+| `review_diff` | Multi-model code review of a git diff: lanes review in parallel with **different focuses** (correctness / security / tests / maintainability), then one lane merges + dedupes into a severity-ranked report. Params: `cwd`, `base` (default HEAD), `diff`, `include_paid`, `timeout_s`. |
+| `security_review` | OWASP-aware **security-only** review of a git diff (injection / auth & access control / secrets & crypto / data exposure & SSRF) → severity-ranked findings with remediations. |
+| `debate` | Several models answer a question, **see each other's answers and revise** over bounded rounds (default 1, max 3), then a judge writes the final consensus + remaining disagreement. Params: `task`, `rounds`, `include_paid`, `timeout_s`. |
 | `list_<lane>_models` | List the models that lane can reach (where supported). |
 | `doctor` | Health check: installed CLIs, detected host, cost/quota stance, cooldowns, defaults. `deep: true` live-probes each free, non-limited lane's auth. |
 | `usage_report` | Local-only stats: total runs, per-lane counts/success/latency, recent calls. |
@@ -146,9 +162,17 @@ Just talk to your assistant:
 | `reset_lane_state` | Clear a lane's cooldown/failure counters (after re-login or quota reset). |
 | `setup` | Walk the user through configuring cost preferences to their own subscriptions. |
 
-Every lane is **read-only by default** — the delegate analyses and answers; your host applies any
-edits. The one exception is opencode's `agent: "build"`, which you opt into explicitly to let it
-edit files directly (and it's annotated non-read-only accordingly).
+**Read-only by default; opt-in writes.** A delegate normally analyses and answers — your host
+applies any edits. Pass `agent: "build"` to let it **edit files directly** (e.g. *"ask gpt to
+implement this function"*): claude → `--permission-mode acceptEdits`, gpt → `--sandbox
+workspace-write`, mistral → `--agent accept-edits`, gemini → `--yolo` (or `agy`
+`--dangerously-skip-permissions`), opencode → `--agent build`. Build-capable lanes are annotated
+non-read-only, and a `build` run is never served from cache.
+
+**Pick a model per call** with `model` (e.g. `model: "claude-opus-4-6"`). From inside a host you
+can even consult a **sibling model of your own family** — `ask_<your-host>` appears as a separate
+tool that requires an explicit `model`, so from Claude Code you can ask Opus 4.6 while running 4.8.
+(Antigravity's `agy` has no per-call model flag — it uses whatever its own settings select.)
 
 For opencode, an empty `model` asks `opencode models` for the current `opencode/*-free` model list
 and uses a free Zen model. If that lookup fails, cli-bridge falls back to
@@ -175,6 +199,10 @@ Everything is environment variables — no code edits. Tune it to **your** subsc
 | `CLI_BRIDGE_LANES_FILE` | Path to a JSON file adding **your own** CLIs/APIs as lanes. |
 | `CLI_BRIDGE_<LANE>_PRIORITY` | Lower runs earlier in `ask_cascade` (default 50). Pin your preferred order. |
 | `CLI_BRIDGE_INLINE_MAX_CHARS` | Above this, an answer spills to a file instead of flooding context (default 12000). |
+| `CLI_BRIDGE_TERSE` | `off` / `lite` (default) / `full` / `ultra`. Prepends a compact response-style preamble to delegate prompts (English, reason fully internally, answer terse, code/JSON untouched) to cut both your context and the delegate's output tokens. Never applied to structured workflow tools. |
+| `CLI_BRIDGE_CACHE_TTL_S` | `0` = off (default). When `>0`, an identical call within this many seconds returns the cached answer instead of re-spawning the CLI (saves quota/credits on repeats; build runs are never cached). |
+| `CLI_BRIDGE_REVIEW_TIMEOUT_S` | Per-reviewer timeout for `review_diff` / `security_review` (default 180; these are deliberately heavier than `ask_all`). |
+| `CLI_BRIDGE_OVERFLOW_TTL_H` | Hours before a spilled overflow file is pruned (default 24). |
 | `CLI_BRIDGE_TELEMETRY` | `off` to disable the local run log / cooldown tracking (default on, machine-local only). |
 | `CLI_BRIDGE_STATE_DB` | Path to the local sqlite state DB (default `~/.local/share/cli-bridge/state.sqlite`). |
 | `CLI_BRIDGE_STORE_TRANSCRIPTS` | `true` to keep a longer task preview in telemetry (default: hash + 60-char preview only). |
