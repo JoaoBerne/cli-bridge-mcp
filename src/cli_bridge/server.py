@@ -17,7 +17,9 @@ import time
 
 from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import TextContent, Tool
+from mcp.types import (
+    GetPromptResult, Prompt, PromptArgument, PromptMessage, TextContent, Tool,
+)
 
 from . import config, preamble, router, runner, telemetry, workflows
 from .config import (
@@ -368,6 +370,81 @@ async def list_tools() -> list[Tool]:
     if own:
         tools.insert(0, _self_ask_tool(own))   # reach a sibling model of your own family
     return tools
+
+
+# ─────────────────────────────── MCP prompts (host-native slash commands) ───────────────────────────────
+# Each prompt returns a user message that points the host at the matching cli-bridge tool, so
+# the council's workflows show up as native slash commands / prompt pickers in MCP hosts.
+
+def _p_review_diff(a: dict) -> str:
+    base = (a or {}).get("base", "").strip()
+    against = f" against `{base}`" if base else ""
+    return (f"Use the cli-bridge `review_diff` tool to review the git diff{against}, then "
+            "summarize the merged findings grouped by severity.")
+
+
+def _p_security_review(a: dict) -> str:
+    base = (a or {}).get("base", "").strip()
+    against = f" against `{base}`" if base else ""
+    return (f"Use the cli-bridge `security_review` tool on the git diff{against}, then report "
+            "the security findings by severity with remediations.")
+
+
+def _p_debate(a: dict) -> str:
+    q = (a or {}).get("question", "").strip()
+    return (f"Use the cli-bridge `debate` tool to debate this question across models, then give "
+            f"me the final conclusion:\n\n{q}" if q
+            else "Use the cli-bridge `debate` tool to debate a question across models. Ask me "
+                 "for the question if I didn't provide one.")
+
+
+def _p_cost_setup(a: dict) -> str:
+    return ("Call the cli-bridge `setup` tool, then walk me through choosing a cost profile "
+            "(saver / balanced / max) and how to set it for my plan.")
+
+
+_PROMPTS: dict[str, dict] = {
+    "review_diff": {
+        "description": "Multi-model code review of your current git diff.",
+        "arguments": [PromptArgument(
+            name="base", description="git ref/range to diff against (default HEAD)", required=False)],
+        "build": _p_review_diff,
+    },
+    "security_review": {
+        "description": "OWASP-aware multi-model security review of your git diff.",
+        "arguments": [PromptArgument(
+            name="base", description="git ref/range to diff against (default HEAD)", required=False)],
+        "build": _p_security_review,
+    },
+    "debate": {
+        "description": "Debate a question across several models, then a judge concludes.",
+        "arguments": [PromptArgument(
+            name="question", description="The question to debate", required=True)],
+        "build": _p_debate,
+    },
+    "cost_setup": {
+        "description": "Configure how cli-bridge spends paid credits/quota (cost profile).",
+        "arguments": [],
+        "build": _p_cost_setup,
+    },
+}
+
+
+@server.list_prompts()
+async def list_prompts() -> list[Prompt]:
+    return [Prompt(name=name, description=spec["description"], arguments=spec["arguments"])
+            for name, spec in _PROMPTS.items()]
+
+
+@server.get_prompt()
+async def get_prompt(name: str, arguments: dict | None) -> GetPromptResult:
+    spec = _PROMPTS.get(name)
+    if spec is None:
+        raise ValueError(f"unknown prompt: {name}")
+    text = spec["build"](arguments or {})
+    return GetPromptResult(
+        description=spec["description"],
+        messages=[PromptMessage(role="user", content=TextContent(type="text", text=text))])
 
 
 # ─────────────────────────────── execution helpers ───────────────────────────────
