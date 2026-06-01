@@ -11,18 +11,25 @@ purpose: these models are strongest in English, and it costs fewer tokens than F
 
 NOT applied to structured output (JSON workflows) — compressing those would break the
 format. The server passes terse=False there.
+
+Fixed overhead (measured, not estimated): the prepended instruction is constant text, so its
+input cost is exactly known — `lite` is 156 chars (~39 tokens), `full` 462 (~115), `ultra`
+299 (~74). That's the price per delegate call; the saving (smaller final answer) is model-
+dependent and only outweighs the overhead once the answer is non-trivial. Hence
+CLI_BRIDGE_TERSE_MIN_CHARS: skip the preamble on tiny tasks where it can't pay for itself.
 """
 from __future__ import annotations
 
 import os
 
+from . import config
+
 _LEVELS = ("off", "lite", "full", "ultra")
 
 _RULES = {
     "lite": (
-        "Reply in English. Be concise: cut filler and pleasantries, keep full sentences. "
-        "Reason fully internally; only the final answer is trimmed. Keep code, JSON, "
-        "commands, numbers, units and technical terms exact."
+        "Reply in English, concise: cut filler, keep code, numbers and technical terms "
+        "exact. Reason fully internally; trim only the final answer."
     ),
     "full": (
         "Reply in English, terse like a smart caveman — but reason FULLY internally first; "
@@ -59,6 +66,13 @@ def preamble(lvl: str | None = None) -> str:
 
 
 def apply(task: str, lvl: str | None = None) -> str:
-    """Prepend the terse instruction to a prose task. No-op when level is off."""
+    """Prepend the terse instruction to a prose task. No-op when level is off, or when the
+    task is shorter than CLI_BRIDGE_TERSE_MIN_CHARS (a tiny task yields a tiny answer, so the
+    preamble's fixed input overhead would cost more than the compression it buys)."""
     p = preamble(lvl)
-    return p + task if p else task
+    if not p:
+        return task
+    min_chars = config.terse_min_chars()
+    if min_chars and len(task.strip()) < min_chars:
+        return task
+    return p + task

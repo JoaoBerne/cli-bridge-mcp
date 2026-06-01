@@ -34,6 +34,14 @@ def int_env(name: str, default: int, lo: int, hi: int) -> int:
 CACHE_TTL_S = int_env("CLI_BRIDGE_CACHE_TTL_S", 0, 0, 31_536_000)  # max 1 year
 
 
+def terse_min_chars() -> int:
+    """Skip the terse preamble for tasks shorter than this many chars (0 = never skip, the
+    default). A tiny task produces a tiny answer, so the preamble's fixed input overhead
+    would outweigh the output it compresses. Read live (not a module constant) so it stays
+    runtime-configurable, matching preamble.level()."""
+    return int_env("CLI_BRIDGE_TERSE_MIN_CHARS", 0, 0, 100_000)
+
+
 # review_diff is a deliberately heavier workflow (each reviewer reads a whole diff, then a
 # merge pass). Reviewers run in parallel, so wall time ≈ slowest reviewer + merge — longer
 # than ask_all on purpose. Per-stage default; clamped to MAX_TIMEOUT_S like a direct ask.
