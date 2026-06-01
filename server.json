@@ -1,0 +1,36 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
+  "name": "io.github.JoaoBtt/cli-bridge-mcp",
+  "description": "Consult a council of AI CLIs (Gemini, GPT, Claude, Mistral, Qwen, Copilot, OpenCode…) from inside any MCP client — free and ban-safe.",
+  "version": "0.1.0",
+  "repository": {
+    "url": "https://github.com/JoaoBtt/cli-bridge-mcp",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registry_name": "pypi",
+      "name": "cli-bridge-mcp",
+      "version": "0.1.0",
+      "runtime_hint": "uvx",
+      "transport": { "type": "stdio" },
+      "environment_variables": [
+        {
+          "name": "CLI_BRIDGE_PROFILE",
+          "description": "Cost profile: saver | balanced | max (max lets ask_all/cascade use limited/paid lanes).",
+          "is_required": false
+        },
+        {
+          "name": "CLI_BRIDGE_TERSE",
+          "description": "Response-style preamble level: off | lite (default) | full | ultra.",
+          "is_required": false
+        },
+        {
+          "name": "CLI_BRIDGE_CACHE_TTL_S",
+          "description": "Response cache TTL in seconds. 0 = off (default).",
+          "is_required": false
+        }
+      ]
+    }
+  ]
+}
