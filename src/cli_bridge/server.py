@@ -830,7 +830,8 @@ def _write_trace(lane: LaneSpec, model: str, argv: list[str], cwd: str | None,
         os.makedirs(d, exist_ok=True)
         rec = {"ts": time.time(), "lane": lane.key, "model": model,
                "argv": [runner.redact(a) for a in argv], "cwd": cwd or "", "timeout_s": timeout,
-               "ok": res.ok, "kind": res.kind, "latency_ms": res.latency_ms,
+               "ok": res.ok, "kind": res.kind, "exit_code": res.exit_code,
+               "latency_ms": res.latency_ms,
                "output_chars": len(res.output), "output": runner.redact(res.output)[:4000]}
         h = hashlib.sha1("\x00".join(argv).encode("utf-8", "replace")).hexdigest()[:10]
         with open(os.path.join(d, f"{lane.key}-{h}.json"), "w", encoding="utf-8") as fh:
