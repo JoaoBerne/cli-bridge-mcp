@@ -27,6 +27,15 @@ def int_env(name: str, default: int, lo: int, hi: int) -> int:
         return default
 
 
+# review_diff is a deliberately heavier workflow (each reviewer reads a whole diff, then a
+# merge pass). Reviewers run in parallel, so wall time ≈ slowest reviewer + merge — longer
+# than ask_all on purpose. Per-stage default; clamped to MAX_TIMEOUT_S like a direct ask.
+REVIEW_DEFAULT_TIMEOUT_S = int_env("CLI_BRIDGE_REVIEW_TIMEOUT_S", 180, 1, MAX_TIMEOUT_S)
+# Largest diff (chars) fed into a review prompt; bigger diffs are truncated with a note so the
+# prompt stays within model context instead of erroring or getting silently dropped.
+REVIEW_DIFF_MAX_CHARS = int_env("CLI_BRIDGE_REVIEW_DIFF_MAX_CHARS", 60000, 2000, 1_000_000)
+
+
 # ── subagent-style overflow ───────────────────────────────────────────────────────────
 INLINE_MAX_CHARS = int_env("CLI_BRIDGE_INLINE_MAX_CHARS", 12000, 500, 1_000_000)
 OVERFLOW_DIR = os.environ.get("CLI_BRIDGE_OVERFLOW_DIR", "").strip() \

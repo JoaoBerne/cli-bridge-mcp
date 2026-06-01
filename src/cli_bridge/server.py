@@ -19,7 +19,7 @@ from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
-from . import config, preamble, router, runner, telemetry
+from . import config, preamble, router, runner, telemetry, workflows
 from .config import (
     ASK_ALL_DEFAULT_TIMEOUT_S, ASK_ALL_MAX_TIMEOUT_S, ASK_ALL_SYNTH_TIMEOUT_S,
     DEFAULT_TIMEOUT_S, INLINE_MAX_CHARS, INSTRUCTIONS, MAX_TIMEOUT_S, OVERFLOW_DIR,
@@ -257,6 +257,34 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                 "include_paid": {"type": "boolean", "description": "Include limited/paid lanes."}}},
             annotations={"readOnlyHint": True, "destructiveHint": False},
         ))
+        tools.append(Tool(
+            name="review_diff",
+            description=("Multi-model code review of a git diff: several lanes review in parallel "
+                         "with DIFFERENT focuses (correctness/security/tests/maintainability), "
+                         "then one lane merges + dedupes into a ranked Markdown report. "
+                         "Reviews working-tree changes by default. Free/non-limited lanes only "
+                         "unless include_paid. A deliberately longer call than ask_all."),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "cwd": {"type": "string",
+                            "description": "Repo dir to run `git diff` in (default: host launch dir)."},
+                    "base": {"type": "string",
+                             "description": "git ref/range to diff against. Default HEAD "
+                                            "(uncommitted changes). E.g. 'main', 'HEAD~3', 'main...HEAD'."},
+                    "diff": {"type": "string",
+                             "description": "Review this diff text directly instead of running git."},
+                    "include_paid": {"type": "boolean",
+                                     "description": "Allow limited/paid lanes as reviewers. "
+                                                    "Default false (except CLI_BRIDGE_PROFILE=max)."},
+                    "timeout_s": {"type": "integer",
+                                  "description": f"Per-reviewer timeout (max {MAX_TIMEOUT_S}, "
+                                                 f"default {config.REVIEW_DEFAULT_TIMEOUT_S})."},
+                },
+                "required": [],
+            },
+            annotations={"readOnlyHint": True, "openWorldHint": True, "destructiveHint": False},
+        ))
     return tools
 
 
@@ -377,6 +405,9 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
     if name == "ask_all":
         return await _ask_all(lanes, args)
 
+    if name == "review_diff":
+        return await _review_diff(lanes, args)
+
     if name.startswith("ask_"):
         lane = _lane_by_key(name[4:], lanes)
         if not lane:
@@ -459,6 +490,15 @@ async def _ask_all(lanes: list[LaneSpec], args: dict) -> list[TextContent]:
         if synth:
             body += f"\n\n---\n## Synthesis (agreement / disagreement)\n\n{synth}"
     return [_emit(body, label="ask_all")]
+
+
+async def _review_diff(lanes: list[LaneSpec], args: dict) -> list[TextContent]:
+    # Same cost policy as ask_all: free/non-limited reviewers unless the caller widens, and
+    # never a cooled lane. Then hand off to the (decoupled, testable) workflow engine.
+    include_paid = _ask_all_include_paid(args)
+    targets = _ask_all_targets(lanes, include_paid)
+    report = await workflows.review_diff(targets, args, _run_lane)
+    return [_emit(report, label="review_diff")]
 
 
 async def _synthesize(question, answered, targets) -> str:
