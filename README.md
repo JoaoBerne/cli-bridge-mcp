@@ -169,8 +169,9 @@ Hosts that support MCP prompts also surface `review_diff`, `security_review`, `d
 | `setup` | Walk the user through configuring cost preferences to their own subscriptions. |
 
 There's also a **human CLI** — the same engine from your terminal or CI:
-`cli-bridge doctor`, `ask <lane> <task>`, `ask-all`, `ask-best --mode`, `review-diff --base
-origin/main --json`, `usage`, `budget`, `jobs`, `setup --write`. See
+`cli-bridge init` (detect CLIs + print MCP wiring), `doctor`, `ask <lane> <task>`, `ask-all`,
+`ask-best --mode`, `review-diff --base origin/main --json`, `bench --lane gemini --prompt … `
+(latency p50/p95/p99), `usage`, `budget`, `jobs`, `setup --write`. See
 `examples/github-action-pr-review.yml` for a PR-review GitHub Action (self-hosted runner).
 
 **Read-only by default; opt-in writes.** A delegate normally analyses and answers — your host
@@ -213,6 +214,9 @@ Everything is environment variables — no code edits. Tune it to **your** subsc
 | `CLI_BRIDGE_TERSE` | `off` / `lite` (default) / `full` / `ultra`. Prepends a compact response-style preamble to delegate prompts (English, reason fully internally, answer terse, code/JSON untouched) to cut both your context and the delegate's output tokens. Never applied to structured workflow tools. |
 | `CLI_BRIDGE_TERSE_MIN_CHARS` | Skip the terse preamble for tasks shorter than this many chars (default `0` = never skip). Tiny tasks can't repay the preamble's fixed overhead. |
 | `CLI_BRIDGE_GUARD` | `off` / `warn` (default) / `strict`. Scans **delegate output** for prompt-injection / tool-poisoning; `warn` prepends a banner, `strict` withholds the body. Runs after secret redaction. |
+| `CLI_BRIDGE_MOCK` | `1` = dry-run: lanes report installed and return a canned answer without spawning any CLI. Try the whole tool with **zero CLIs installed**. |
+| `CLI_BRIDGE_RETRIES` | Retries on a TRANSIENT failure (default 1). Makes a flaky CLI work first-try; quota/auth/not-found/timeout are never retried. |
+| `CLI_BRIDGE_TRACE_DIR` | If set, each delegation writes a redacted JSON trace (argv, timing, output) here — reproducible debug / audit. Off by default. |
 | `CLI_BRIDGE_CACHE_TTL_S` | `0` = off (default). When `>0`, an identical call within this many seconds returns the cached answer instead of re-spawning the CLI (saves quota/credits on repeats; build runs are never cached). |
 | `CLI_BRIDGE_<LANE>_CREDITS_PER_1K` | Credits per 1k tokens for a lane, used by `usage_report`/`usage_budget` to **estimate** spend (chars/4). |
 | `CLI_BRIDGE_<LANE>_DAILY_LIMIT` | Max runs/day for a lane; `usage_budget` flags when exceeded. |

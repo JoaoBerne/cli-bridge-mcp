@@ -58,6 +58,24 @@ def lane_env_int(lane_key: str, suffix: str) -> int | None:
         return None
 
 
+def mock() -> bool:
+    """Dry-run mode: lanes are reported installed and return a canned answer WITHOUT spawning any
+    CLI. Lets someone try cli-bridge (routing, fan-out, workflows) with zero CLIs installed."""
+    return os.environ.get("CLI_BRIDGE_MOCK", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def retries() -> int:
+    """How many times to retry a delegate on a TRANSIENT failure (default 1). Makes a flaky CLI
+    'work the first time' from the caller's view. Quota/auth/not_found/timeout are never retried."""
+    return int_env("CLI_BRIDGE_RETRIES", 1, 0, 5)
+
+
+def trace_dir() -> str:
+    """If set, every delegation writes a redacted JSON trace (argv, timing, output) here — a
+    reproducible, ban-safe audit artifact. Empty = off."""
+    return os.environ.get("CLI_BRIDGE_TRACE_DIR", "").strip()
+
+
 def terse_min_chars() -> int:
     """Skip the terse preamble for tasks shorter than this many chars (0 = never skip, the
     default). A tiny task produces a tiny answer, so the preamble's fixed input overhead

@@ -801,12 +801,57 @@ def _cache_key(lane: LaneSpec, model: str, effort: str, agent: str, cwd: str,
     return hashlib.sha256(raw.encode("utf-8", "replace")).hexdigest()
 
 
+# Transient kinds worth a quick retry (a flaky CLI blip). NOT timeout (would burn another full
+# wait), nor quota/auth/not_found (those are sticky and cooled — retrying just wastes a call).
+_RETRYABLE = {"failed", "spawn"}
+
+
+async def _spawn_with_retry(argv: list[str], timeout: int, cwd: str | None) -> runner.RunResult:
+    """Run the CLI, retrying a TRANSIENT failure up to CLI_BRIDGE_RETRIES times with backoff —
+    so an occasionally-flaky lane 'works the first time' from the caller's point of view."""
+    attempts = config.retries() + 1
+    res = await runner.arun(argv, timeout, cwd)
+    n = 1
+    while not res.ok and res.kind in _RETRYABLE and n < attempts:
+        await asyncio.sleep(min(0.4 * (2 ** (n - 1)), 3.0))
+        res = await runner.arun(argv, timeout, cwd)
+        n += 1
+    return res
+
+
+def _write_trace(lane: LaneSpec, model: str, argv: list[str], cwd: str | None,
+                 timeout: int, res: runner.RunResult) -> None:
+    """Best-effort reproducible trace (redacted argv + output, timing) for debug/audit. Off
+    unless CLI_BRIDGE_TRACE_DIR is set. Never raises into a delegation."""
+    d = config.trace_dir()
+    if not d:
+        return
+    try:
+        os.makedirs(d, exist_ok=True)
+        rec = {"ts": time.time(), "lane": lane.key, "model": model,
+               "argv": [runner.redact(a) for a in argv], "cwd": cwd or "", "timeout_s": timeout,
+               "ok": res.ok, "kind": res.kind, "latency_ms": res.latency_ms,
+               "output_chars": len(res.output), "output": runner.redact(res.output)[:4000]}
+        h = hashlib.sha1("\x00".join(argv).encode("utf-8", "replace")).hexdigest()[:10]
+        with open(os.path.join(d, f"{lane.key}-{h}.json"), "w", encoding="utf-8") as fh:
+            json.dump(rec, fh, indent=2)
+    except OSError:
+        pass
+
+
+def _mock_answer(lane: LaneSpec, model: str, task: str) -> str:
+    return (f"[mock:{lane.key}] dry-run — no CLI spawned (CLI_BRIDGE_MOCK). "
+            f"model={model or 'default'} would answer:\n{task[:300]}")
+
+
 async def _run_lane(lane: LaneSpec, args: dict, *, tool: str = "ask",
                     terse: bool = True) -> runner.RunResult:
     task = _str(args, "task")
     if not task:
         return runner.RunResult(False, "task is required", "failed")
     model = lane.model_for(_str(args, "model"))
+    if config.mock():                          # dry-run: canned answer, no spawn
+        return runner.RunResult(True, _mock_answer(lane, model, task), "ok", latency_ms=0)
     agent = _str(args, "agent").lower()
     if agent not in {"", "plan", "build"}:    # never let a hallucinated value enable writes
         agent = "plan"
@@ -832,10 +877,12 @@ async def _run_lane(lane: LaneSpec, args: dict, *, tool: str = "ask",
     prompt = preamble.apply(task) if terse else task
     argv = [lane.bin] + lane.build_ask(prompt, model, effort, agent, lane.bin)
     rec = telemetry.start(tool, lane.key, model, task)
+    timeout = _timeout(args.get("timeout_s"))
     t0 = time.monotonic()
-    res = await runner.arun(argv, _timeout(args.get("timeout_s")), expanded)
+    res = await _spawn_with_retry(argv, timeout, expanded)
     res.latency_ms = int((time.monotonic() - t0) * 1000)
     telemetry.record(rec, res.ok, res.kind, len(res.output), input_chars=len(prompt))
+    _write_trace(lane, model, argv, expanded, timeout, res)
     if key and res.ok:                        # cache only successes; failures are transient
         telemetry.cache_put(key, res.ok, res.output, res.kind)
     return res

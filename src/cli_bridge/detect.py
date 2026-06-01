@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import shutil
 
+from . import config
 from .lanes import LaneSpec
 
 
 def is_installed(lane: LaneSpec) -> bool:
-    return shutil.which(lane.bin) is not None
+    # Dry-run mode reports every lane installed so the whole tool is explorable with no CLIs.
+    return True if config.mock() else shutil.which(lane.bin) is not None
 
 
 def installed_lanes(lanes: list[LaneSpec]) -> list[LaneSpec]:
