@@ -1,0 +1,29 @@
+# Smithery deployment manifest — https://smithery.ai/docs
+# cli-bridge runs as a local stdio MCP server that spawns the user's own AI CLIs.
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties:
+      profile:
+        type: string
+        enum: ["saver", "balanced", "max"]
+        description: "Cost profile. 'max' lets ask_all/cascade use limited/paid lanes too."
+      terse:
+        type: string
+        enum: ["off", "lite", "full", "ultra"]
+        description: "Response-style preamble level prepended to delegate prompts (default lite)."
+      cacheTtlS:
+        type: integer
+        description: "Response cache TTL in seconds. 0 = off (default)."
+    additionalProperties: false
+  commandFunction: |-
+    (config) => ({
+      command: "cli-bridge-mcp",
+      args: [],
+      env: {
+        ...(config.profile ? { CLI_BRIDGE_PROFILE: config.profile } : {}),
+        ...(config.terse ? { CLI_BRIDGE_TERSE: config.terse } : {}),
+        ...(config.cacheTtlS != null ? { CLI_BRIDGE_CACHE_TTL_S: String(config.cacheTtlS) } : {})
+      }
+    })

@@ -2,6 +2,23 @@
 
 Date: 2026-06-01
 
+## Status (updated 2026-06-01)
+
+**Shipped (P0–P2 complete + extras):**
+- ✅ P0: config.py single-source; opencode free-model TTL cache; overflow prune.
+- ✅ P1: terse delegate preamble (`CLI_BRIDGE_TERSE`, default lite); isolation guarantee + test.
+- ✅ P2-7 `review_diff` · P2-8 trace+latency on cascade/ask_all · P2-9 opt-in response cache ·
+  P2-10 MCP prompts · P2-11 `security_review` + `debate`.
+- ✅ Extra (user-requested): opt-in **write/build mode** on every lane (bin-aware builders);
+  **sibling-model self-consultation** (`ask_<host>` with explicit model).
+- ✅ Telemetry + lane cooldown; deterministic cascade router; per-lane cost tiers.
+- Suite: 119 tests green. Manifests: `smithery.yaml`, `server.json`.
+
+**Still open / deferred:** async durable job system, web dashboard, OTel export, semantic
+cache, worktree-isolated writers, retries w/ backoff, PyPI publish (user action).
+
+---
+
 Goal: turn `cli-bridge` from a useful MCP bridge into a high-trust, cost-aware, workflow-ready
 multi-agent council that people can install in minutes and keep using daily.
 
