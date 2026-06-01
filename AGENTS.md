@@ -56,5 +56,6 @@ terse preamble (+min-chars skip), response cache, trace fields, workflow tools (
 security_review/debate), council recap, MCP prompts, opt-in write/build mode (all lanes),
 sibling-model self-consultation, in-process async jobs (ask_all_async), structured findings
 JSON + deterministic merge + prechecks + residual_risk, output guard (injection/poisoning),
-worktree-isolated write mode (ask_build_isolated).
-Next candidates: ask_best router, token/credit accounting, human CLI, PyPI publish.
+worktree-isolated write mode (ask_build_isolated), ask_best mode router + estimated token/
+credit accounting (usage_report/usage_budget).
+Next candidates: human CLI, MCP resources, premortem/test_plan workflows, evals + lint, PyPI.

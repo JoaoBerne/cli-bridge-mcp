@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import os
+import re
 import time
 
 from mcp.server.lowlevel import Server
@@ -281,7 +283,21 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
     tools.append(Tool(
         name="usage_report",
         description="Local usage stats (this machine only): total runs, per-lane counts/success/"
-                    "avg latency, and the most recent calls. Helps see what your council spent.",
+                    "avg latency, ESTIMATED tokens (chars/4) and credits (if CLI_BRIDGE_<LANE>_"
+                    "CREDITS_PER_1K is set), and recent calls. All token/credit figures are "
+                    "estimates, never exact.",
+        inputSchema={"type": "object", "properties": {
+            "since": {"type": "string",
+                      "description": "Limit to a recent window, e.g. '24h', '7d', '90m' (default: all)."},
+            "format": {"type": "string", "enum": ["text", "json"],
+                       "description": "text (default) or json."}}},
+        annotations={"readOnlyHint": True, "destructiveHint": False},
+    ))
+    tools.append(Tool(
+        name="usage_budget",
+        description="Per-lane runs since UTC midnight vs an optional CLI_BRIDGE_<LANE>_DAILY_LIMIT, "
+                    "plus estimated tokens/credits spent today. Flags lanes over their limit. "
+                    "Estimates only.",
         inputSchema={"type": "object", "properties": {}},
         annotations={"readOnlyHint": True, "destructiveHint": False},
     ))
@@ -325,10 +341,38 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
         tools.append(Tool(
             name="route_plan",
             description="Explain (without running anything) the order ask_cascade would try lanes "
-                        "in, given current cost profile and lane cooldowns.",
+                        "in, given current cost profile and lane cooldowns. Pass a `mode` to "
+                        "preview ask_best's order instead.",
             inputSchema={"type": "object", "properties": {
-                "include_paid": {"type": "boolean", "description": "Include limited/paid lanes."}}},
+                "include_paid": {"type": "boolean", "description": "Include limited/paid lanes."},
+                "mode": {"type": "string", "enum": list(router.MODES),
+                         "description": "Preview ask_best's ordering for this mode."}}},
             annotations={"readOnlyHint": True, "destructiveHint": False},
+        ))
+        tools.append(Tool(
+            name="ask_best",
+            description=("Ask the BEST lane for the job: pick one lane by `mode` (fast/cheap/deep/"
+                         "code/review/security) using cost, health and measured latency, then run "
+                         "it with automatic fallback. Use this when you don't want to choose a "
+                         "lane yourself. (Use ask_all to COMPARE many; ask_cascade for plain "
+                         "cheapest-first reliability.)"),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "task": {"type": "string", "description": "The prompt."},
+                    "mode": {"type": "string", "enum": list(router.MODES),
+                             "description": "fast=low latency · cheap=free only (default) · "
+                                            "deep/code=stronger lanes · review/security=capable "
+                                            "lane. paid lanes only if include_paid/profile allows."},
+                    "include_paid": {"type": "boolean",
+                                     "description": "Allow limited/paid lanes. Default false "
+                                                    "(except CLI_BRIDGE_PROFILE=max)."},
+                    "cwd": {"type": "string", "description": "Directory the CLI runs in."},
+                    "timeout_s": {"type": "integer", "description": f"Per-attempt timeout (max {MAX_TIMEOUT_S})."},
+                },
+                "required": ["task"],
+            },
+            annotations={"readOnlyHint": True, "openWorldHint": True, "destructiveHint": False},
         ))
         tools.append(Tool(
             name="review_diff",
@@ -625,7 +669,7 @@ async def _run_lane(lane: LaneSpec, args: dict, *, tool: str = "ask",
     t0 = time.monotonic()
     res = await runner.arun(argv, _timeout(args.get("timeout_s")), expanded)
     res.latency_ms = int((time.monotonic() - t0) * 1000)
-    telemetry.record(rec, res.ok, res.kind, len(res.output))
+    telemetry.record(rec, res.ok, res.kind, len(res.output), input_chars=len(prompt))
     if key and res.ok:                        # cache only successes; failures are transient
         telemetry.cache_put(key, res.ok, res.output, res.kind)
     return res
@@ -650,7 +694,14 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
         return [_emit(text, label="doctor", guard=False)]
 
     if name == "usage_report":
-        return [_emit(_render_usage(), label="usage_report", guard=False)]
+        since_s = _parse_since(_str(args, "since"))
+        rep = telemetry.usage_report(since_s=since_s)
+        if _str(args, "format").lower() == "json":
+            return [_emit(json.dumps(rep, indent=2), label="usage_report", guard=False)]
+        return [_emit(_render_usage(rep), label="usage_report", guard=False)]
+
+    if name == "usage_budget":
+        return [_emit(_render_budget(telemetry.usage_budget()), label="usage_budget", guard=False)]
 
     if name == "lane_stats":
         return [_emit(_render_lane_stats(), label="lane_stats", guard=False)]
@@ -665,9 +716,17 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
     if name == "ask_cascade":
         return await _ask_cascade(lanes, args)
 
+    if name == "ask_best":
+        return await _ask_best(lanes, args)
+
     if name == "route_plan":
         include_paid = (bool(args["include_paid"]) if args.get("include_paid") is not None
                         else _profile() == "max")
+        mode = _str(args, "mode").lower()
+        if mode and mode in router.MODES:
+            perf = telemetry.lane_perf()
+            return [TextContent(type="text", text=router.explain_mode(
+                lanes, telemetry.cooldown_remaining, lambda k: perf.get(k, {}), mode, include_paid))]
         return [TextContent(type="text", text=router.explain(
             lanes, telemetry.cooldown_remaining, include_paid))]
 
@@ -777,17 +836,56 @@ async def _ask_cascade(lanes: list[LaneSpec], args: dict) -> list[TextContent]:
             "[error] no lanes eligible for cascade. Install/login a CLI, or set include_paid=true "
             "/ CLI_BRIDGE_PROFILE=max to allow limited/paid lanes."))]
     sub = {"task": task, "cwd": _str(args, "cwd"), "timeout_s": args.get("timeout_s")}
-    attempts: list[tuple[LaneSpec, runner.RunResult]] = []
-    for lane in ordered:
-        res = await _run_lane(lane, sub, tool="ask_cascade")
-        attempts.append((lane, res))
-        if res.ok:
-            return [_emit(f"{res.output}\n\n{_cascade_trace(attempts, chosen=lane)}",
-                          label="ask_cascade")]
+    chosen, attempts = await _run_chain(ordered, sub, "ask_cascade")
+    if chosen is not None:
+        res = next(r for ln, r in attempts if ln is chosen)
+        return [_emit(f"{res.output}\n\n{_cascade_trace(attempts, chosen=chosen)}",
+                      label="ask_cascade")]
     return [TextContent(type="text", text=(
         "[error] all lanes failed in cascade: "
         + ", ".join(f"{ln.key}={r.kind}" for ln, r in attempts)
         + ". Try again later or check `doctor`.\n\n" + _cascade_trace(attempts, chosen=None)))]
+
+
+async def _run_chain(ordered: list[LaneSpec], sub: dict, tool: str
+                     ) -> tuple[LaneSpec | None, list[tuple[LaneSpec, runner.RunResult]]]:
+    """Try lanes in order, stop at the first success. Shared by ask_cascade and ask_best."""
+    attempts: list[tuple[LaneSpec, runner.RunResult]] = []
+    for lane in ordered:
+        res = await _run_lane(lane, sub, tool=tool)
+        attempts.append((lane, res))
+        if res.ok:
+            return lane, attempts
+    return None, attempts
+
+
+async def _ask_best(lanes: list[LaneSpec], args: dict) -> list[TextContent]:
+    task = _str(args, "task")
+    if not task:
+        return [TextContent(type="text", text="[error] task is required")]
+    mode = _str(args, "mode").lower() or "cheap"
+    if mode not in router.MODES:
+        return [TextContent(type="text", text=(
+            f"[error] unknown mode '{mode}'. Choose one of: {', '.join(router.MODES)}."))]
+    include_paid = (bool(args["include_paid"]) if args.get("include_paid") is not None
+                    else _profile() == "max")
+    perf = telemetry.lane_perf()
+    ordered = router.order_for_mode(lanes, telemetry.cooldown_remaining, lambda k: perf.get(k, {}),
+                                    mode, include_paid)
+    if not ordered:
+        return [TextContent(type="text", text=(
+            f"[error] no lanes eligible for mode '{mode}'. Install/login a CLI, or widen with "
+            "include_paid=true / CLI_BRIDGE_PROFILE=max."))]
+    sub = {"task": task, "cwd": _str(args, "cwd"), "timeout_s": args.get("timeout_s")}
+    chosen, attempts = await _run_chain(ordered, sub, "ask_best")
+    if chosen is not None:
+        res = next(r for ln, r in attempts if ln is chosen)
+        trace = _cascade_trace(attempts, chosen=chosen).replace("cheapest→strongest", f"mode '{mode}'")
+        return [_emit(f"{res.output}\n\n{trace}", label="ask_best")]
+    return [TextContent(type="text", text=(
+        f"[error] all lanes failed for mode '{mode}': "
+        + ", ".join(f"{ln.key}={r.kind}" for ln, r in attempts)
+        + ". Check `doctor`.\n\n" + _cascade_trace(attempts, chosen=None)))]
 
 
 def _cascade_trace(attempts: list[tuple[LaneSpec, runner.RunResult]],
@@ -899,19 +997,57 @@ async def _doctor_deep(host: str, lanes: list[LaneSpec]) -> str:
     return base + "\n\n## Deep probe (live auth check, free lanes)\n\n" + "\n".join(results)
 
 
-def _render_usage() -> str:
-    rep = telemetry.usage_report()
+_SINCE_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+
+
+def _parse_since(raw: str) -> float | None:
+    """'24h' / '7d' / '90m' / bare seconds -> seconds. Empty/invalid -> None (all-time)."""
+    s = (raw or "").strip().lower()
+    if not s:
+        return None
+    m = re.fullmatch(r"(\d+)\s*([smhd])", s)
+    if m:
+        return int(m.group(1)) * _SINCE_UNITS[m.group(2)]
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def _render_usage(rep: dict) -> str:
     if not rep.get("enabled"):
         return ("Telemetry is off or unavailable (set CLI_BRIDGE_TELEMETRY=on, or it couldn't "
                 "open its local DB). No usage to report.")
-    lines = [f"# cli-bridge usage — {rep['total_runs']} total runs (local only)", ""]
+    window = f" (last {int(rep['since_s'])}s)" if rep.get("since_s") else ""
+    lines = [f"# cli-bridge usage — {rep['total_runs']} total runs{window} (local only)",
+             f"_tokens {rep['token_basis']}_", ""]
     lines.append("## By lane")
     for r in rep["by_lane"]:
-        lines.append(f"- **{r['lane']}**: {r['runs']} runs, {r['ok']} ok, ~{r['avg_ms']}ms avg")
+        cred = f", ~{r['est_credits']} credits" if r.get("est_credits") is not None else ""
+        lines.append(f"- **{r['lane']}**: {r['runs']} runs, {r['ok']} ok, ~{r['avg_ms']}ms avg, "
+                     f"~{r['est_input_tokens']}+{r['est_output_tokens']} tok{cred}")
+    if rep.get("est_total_credits") is not None:
+        lines.append(f"\n_Estimated total credits: ~{rep['est_total_credits']}._")
     lines.append("\n## Recent")
     for r in rep["recent"]:
         lines.append(f"- {r['lane'] or r['tool']} [{r['status']}/{r['kind']}] "
                      f"{r['duration_ms']}ms — {r['task']}")
+    return "\n".join(lines)
+
+
+def _render_budget(rep: dict) -> str:
+    if not rep.get("enabled"):
+        return "Telemetry is off or unavailable. No budget to report."
+    if not rep["by_lane"]:
+        return "No runs today (since UTC midnight)."
+    lines = ["# Today's usage (since UTC midnight) — estimated", ""]
+    for r in rep["by_lane"]:
+        limit = (f"{r['runs_today']}/{r['daily_limit']}" if r["daily_limit"] is not None
+                 else f"{r['runs_today']} (no limit set)")
+        cred = f", ~{r['est_credits_today']} credits" if r.get("est_credits_today") is not None else ""
+        flag = "  ⚠️ OVER LIMIT" if r["over_limit"] else ""
+        lines.append(f"- **{r['lane']}**: {limit} runs, ~{r['est_tokens_today']} tok{cred}{flag}")
+    lines.append("\n_Set CLI_BRIDGE_<LANE>_DAILY_LIMIT and _CREDITS_PER_1K to track budgets._")
     return "\n".join(lines)
 
 
