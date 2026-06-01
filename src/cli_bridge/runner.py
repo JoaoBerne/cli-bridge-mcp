@@ -94,6 +94,7 @@ class RunResult:
     output: str
     kind: str = "ok"          # ok | timeout | not_found | quota | auth | failed | spawn
     exit_code: int | None = None
+    latency_ms: int = 0       # wall time of the spawn, filled in by the caller (server._run_lane)
 
     def render(self) -> str:
         """One string for the MCP tool result. Errors are prefixed so the caller can tell

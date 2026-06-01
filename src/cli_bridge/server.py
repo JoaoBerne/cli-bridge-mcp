@@ -357,7 +357,9 @@ async def _run_lane(lane: LaneSpec, args: dict, *, tool: str = "ask",
     if expanded and not os.path.isdir(expanded):
         return runner.RunResult(False, f"cwd `{cwd}` is not an existing directory", "failed")
     rec = telemetry.start(tool, lane.key, model, task)
+    t0 = time.monotonic()
     res = await runner.arun(argv, _timeout(args.get("timeout_s")), expanded)
+    res.latency_ms = int((time.monotonic() - t0) * 1000)
     telemetry.record(rec, res.ok, res.kind, len(res.output))
     return res
 
@@ -437,17 +439,30 @@ async def _ask_cascade(lanes: list[LaneSpec], args: dict) -> list[TextContent]:
             "[error] no lanes eligible for cascade. Install/login a CLI, or set include_paid=true "
             "/ CLI_BRIDGE_PROFILE=max to allow limited/paid lanes."))]
     sub = {"task": task, "cwd": _str(args, "cwd"), "timeout_s": args.get("timeout_s")}
-    tried = []
+    attempts: list[tuple[LaneSpec, runner.RunResult]] = []
     for lane in ordered:
         res = await _run_lane(lane, sub, tool="ask_cascade")
+        attempts.append((lane, res))
         if res.ok:
-            note = (f"_(cascade: {lane.display} answered"
-                    + (f"; skipped {', '.join(tried)})_" if tried else ")_"))
-            return [_emit(f"{res.output}\n\n{note}", label="ask_cascade")]
-        tried.append(f"{lane.key}={res.kind}")
+            return [_emit(f"{res.output}\n\n{_cascade_trace(attempts, chosen=lane)}",
+                          label="ask_cascade")]
     return [TextContent(type="text", text=(
-        "[error] all lanes failed in cascade: " + ", ".join(tried)
-        + ". Try again later or check `doctor`."))]
+        "[error] all lanes failed in cascade: "
+        + ", ".join(f"{ln.key}={r.kind}" for ln, r in attempts)
+        + ". Try again later or check `doctor`.\n\n" + _cascade_trace(attempts, chosen=None)))]
+
+
+def _cascade_trace(attempts: list[tuple[LaneSpec, runner.RunResult]],
+                   chosen: LaneSpec | None) -> str:
+    """Compact, honest record of what the cascade did: order tried (cheapest→strongest),
+    each lane's cost tier + latency, why it was skipped, and which one answered."""
+    lines = ["---", "_Trace — cascade (cheapest→strongest):_"]
+    for lane, res in attempts:
+        if chosen is not None and lane is chosen:
+            lines.append(f"- ✅ **{lane.key}** [{lane.cost_label}] {res.latency_ms}ms — chosen")
+        else:
+            lines.append(f"- ❌ {lane.key} [{lane.cost_label}] {res.latency_ms}ms — {res.kind}")
+    return "\n".join(lines)
 
 
 async def _ask_all(lanes: list[LaneSpec], args: dict) -> list[TextContent]:
@@ -476,7 +491,8 @@ async def _ask_all(lanes: list[LaneSpec], args: dict) -> list[TextContent]:
             blocks.append(f"## {lane.display} - FAILED (crash)\n\n[crash] {res}")
         else:
             status = "OK" if res.ok else f"FAILED ({res.kind})"
-            blocks.append(f"## {lane.display} - {status}\n\n{res.render()}")
+            blocks.append(f"## {lane.display} - {status} _[{lane.cost_label}, {res.latency_ms}ms]_"
+                          f"\n\n{res.render()}")
     skipped = [ln.display for ln in lanes if (ln.is_paid or ln.is_limited) and not include_paid]
     footer = (f"\n\n---\n_Skipped limited/paid lanes: {', '.join(skipped)} "
               f"(set include_paid=true)._"
