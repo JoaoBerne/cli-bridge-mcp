@@ -141,6 +141,33 @@ def test_self_ask_runs_with_explicit_model(monkeypatch):
     assert captured == {"key": "claude", "model": "claude-opus-4-6"}
 
 
+def test_list_prompts_exposes_workflows():
+    names = {p.name for p in asyncio.run(server.list_prompts())}
+    assert {"review_diff", "security_review", "debate", "cost_setup"} <= names
+
+
+def test_get_prompt_review_diff_with_base():
+    res = asyncio.run(server.get_prompt("review_diff", {"base": "main"}))
+    text = res.messages[0].content.text
+    assert "review_diff" in text and "main" in text
+
+
+def test_get_prompt_debate_uses_question():
+    res = asyncio.run(server.get_prompt("debate", {"question": "tabs or spaces?"}))
+    assert "tabs or spaces?" in res.messages[0].content.text
+
+
+def test_get_prompt_debate_without_question_falls_back():
+    res = asyncio.run(server.get_prompt("debate", {}))
+    assert "debate" in res.messages[0].content.text.lower()
+
+
+def test_get_prompt_unknown_raises():
+    import pytest
+    with pytest.raises(ValueError):
+        asyncio.run(server.get_prompt("nope", {}))
+
+
 def test_is_host_matches_via_slug():
     lane = LaneSpec("x", "X", "x", lambda *a: [], client_ids=frozenset({"claude-code"}))
     assert server._is_host(lane, "claude-code")
