@@ -21,9 +21,9 @@ def test_levels(monkeypatch):
         assert preamble.preamble()  # non-empty
 
 
-def test_invalid_falls_back_to_full(monkeypatch):
+def test_invalid_falls_back_to_default(monkeypatch):
     monkeypatch.setenv("CLI_BRIDGE_TERSE", "garbage")
-    assert preamble.level() == "full"
+    assert preamble.level() == "lite"   # unknown value -> safe default
 
 
 def test_full_preamble_has_key_directives(monkeypatch):
