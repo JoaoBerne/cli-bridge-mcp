@@ -23,6 +23,7 @@ src/cli_bridge/
   workflows.py  # review_diff/security_review/debate + prechecks + council recap
   findings.py   # parse/merge/render structured review findings (pure)
   guards.py     # injection/tool-poisoning output guard (CLI_BRIDGE_GUARD)
+  worktrees.py  # ask_build_isolated: write mode in a throwaway git worktree
   detect.py     # PATH detection
 tests/          # pytest; unit + cross-host integration (no real CLI needed)
 ```
@@ -54,5 +55,6 @@ See `SOTA_ACTION_PLAN.md`. Done: config extraction, telemetry+cooldown, cascade 
 terse preamble (+min-chars skip), response cache, trace fields, workflow tools (review_diff/
 security_review/debate), council recap, MCP prompts, opt-in write/build mode (all lanes),
 sibling-model self-consultation, in-process async jobs (ask_all_async), structured findings
-JSON + deterministic merge + prechecks + residual_risk, output guard (injection/poisoning).
-Next candidates: worktree-isolated writers, ask_best router, human CLI, PyPI publish.
+JSON + deterministic merge + prechecks + residual_risk, output guard (injection/poisoning),
+worktree-isolated write mode (ask_build_isolated).
+Next candidates: ask_best router, token/credit accounting, human CLI, PyPI publish.

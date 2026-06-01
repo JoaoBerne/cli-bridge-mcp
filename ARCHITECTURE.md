@@ -34,6 +34,7 @@ host (Claude/Codex/…) ──MCP/stdio──▶ cli-bridge ──spawn subproce
 | `jobs.py` | In-process async jobs (`ask_all_async`): wrap a coroutine in `asyncio.create_task`, return a job id, poll/fetch/cancel later. Live registry + best-effort sqlite row. | No cross-restart resume in v1 — stale `running` rows become `interrupted`. |
 | `preamble.py` | The terse response-style preamble prepended to delegate prompts. | Prose only — never applied to structured (JSON) workflows. |
 | `guards.py` | Scans UNTRUSTED delegate output for prompt-injection / tool-poisoning; `CLI_BRIDGE_GUARD=off\|warn\|strict`. | Runs in `_emit` after redaction; never on cli-bridge's own reports. |
+| `worktrees.py` | `ask_build_isolated`: run a build-capable agent in a throwaway git worktree, return its diff, discard. | Real repo never modified; nothing auto-applied. |
 | `detect.py` | Which CLIs are actually installed (PATH lookup). | — |
 
 ## Request lifecycle (a single `ask_<lane>` call)
@@ -57,6 +58,8 @@ host (Claude/Codex/…) ──MCP/stdio──▶ cli-bridge ──spawn subproce
 
 - **`ask_<lane>`** — one model. Params: `task`, `model`, `effort`, `agent` (plan|build), `cwd`,
   `timeout_s`. `agent: build` lets it **edit files**.
+- **`ask_build_isolated`** — the SAFE way to use write mode: runs a build-capable lane in a
+  throwaway git worktree at HEAD and returns the diff; your real repo is never touched.
 - **`ask_all`** — same question to every free, non-limited lane in parallel; `synthesize: true`
   adds an agree/disagree summary. For **comparing** opinions. Output opens with a one-line-per-
   lane **council recap** so no answer is a blind spot.
@@ -88,7 +91,8 @@ host (Claude/Codex/…) ──MCP/stdio──▶ cli-bridge ──spawn subproce
    `test_isolation.py`.)
 3. **Cost safety**: an empty/missing model must never resolve to a paid model; `ask_all` /
    `ask_cascade` exclude limited/paid lanes by default.
-4. **Read-only by default**: writes happen only with explicit `agent: build`, annotated destructive.
+4. **Read-only by default**: writes happen only with explicit `agent: build`, annotated
+   destructive — and `ask_build_isolated` confines them to a throwaway worktree.
 5. **Telemetry never raises** into a delegation path.
 6. **Portable**: macOS/Linux/Windows (see `runner._kill_tree`'s Windows branch).
 7. **Stdlib + `mcp` only**: no new runtime dependencies.
