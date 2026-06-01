@@ -21,7 +21,7 @@ from mcp.types import (
     GetPromptResult, Prompt, PromptArgument, PromptMessage, TextContent, Tool,
 )
 
-from . import config, guards, jobs, preamble, router, runner, telemetry, workflows
+from . import config, guards, jobs, preamble, router, runner, telemetry, workflows, worktrees
 from .config import (
     ASK_ALL_DEFAULT_TIMEOUT_S, ASK_ALL_MAX_TIMEOUT_S, ASK_ALL_SYNTH_TIMEOUT_S,
     DEFAULT_TIMEOUT_S, INLINE_MAX_CHARS, INSTRUCTIONS, MAX_TIMEOUT_S, OVERFLOW_DIR,
@@ -384,6 +384,35 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             },
             annotations={"readOnlyHint": True, "openWorldHint": True, "destructiveHint": False},
         ))
+        build_lanes = [ln for ln in lanes if "agent" in ln.caps]
+        if build_lanes:
+            tools.append(Tool(
+                name="ask_build_isolated",
+                description=("Run a build-capable lane in WRITE mode but SAFELY: it edits a "
+                             "throwaway git worktree checked out at HEAD, and you get the "
+                             "resulting diff to review — your real repo is never modified "
+                             "(nothing is auto-applied). The recommended way to use write mode."),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "task": {"type": "string", "description": "What the agent should build/edit."},
+                        "lane": {"type": "string", "enum": [ln.key for ln in build_lanes],
+                                 "description": "Which build-capable lane to run."},
+                        "model": {"type": "string", "description": "Model override (empty = default)."},
+                        "effort": {"type": "string",
+                                   "enum": ["", "minimal", "low", "medium", "high", "max"],
+                                   "description": "Reasoning depth."},
+                        "cwd": {"type": "string",
+                                "description": "A dir inside the git repo to isolate (default: "
+                                               "host launch dir)."},
+                        "timeout_s": {"type": "integer",
+                                      "description": f"Timeout (max {MAX_TIMEOUT_S})."},
+                    },
+                    "required": ["task", "lane"],
+                },
+                annotations={"readOnlyHint": False, "openWorldHint": True,
+                             "destructiveHint": False},   # edits are isolated + discarded
+            ))
         tools.append(Tool(
             name="debate",
             description=("Multi-model debate: each lane answers the question, then sees the "
@@ -694,6 +723,18 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
     if name == "debate":
         targets = _ask_all_targets(lanes, _ask_all_include_paid(args))
         return [_emit(await workflows.debate(targets, args, _run_lane), label="debate")]
+
+    if name == "ask_build_isolated":
+        key = _str(args, "lane")
+        lane = _lane_by_key(key, lanes)
+        if not lane:
+            return [TextContent(type="text", text=(
+                f"[error] no such lane: {key or '(none)'}. Pass a build-capable `lane`."))]
+        if "agent" not in lane.caps:
+            return [TextContent(type="text", text=(
+                f"[error] lane '{key}' has no build/write mode."))]
+        return [_emit(await worktrees.ask_build_isolated(lane, args, _run_lane),
+                      label="ask_build_isolated")]
 
     if name.startswith("ask_"):
         key = name[4:]
