@@ -296,6 +296,50 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             },
             annotations={"readOnlyHint": True, "openWorldHint": True, "destructiveHint": False},
         ))
+        tools.append(Tool(
+            name="security_review",
+            description=("OWASP-aware SECURITY review of a git diff: lanes review in parallel "
+                         "across security categories (injection / auth & access control / "
+                         "secrets & crypto / data exposure & SSRF), then merge into a severity-"
+                         "ranked report. Deeper than review_diff's single security lens. "
+                         "Free/non-limited lanes unless include_paid."),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "cwd": {"type": "string", "description": "Repo dir to run `git diff` in."},
+                    "base": {"type": "string", "description": "git ref/range. Default HEAD."},
+                    "diff": {"type": "string", "description": "Review this diff text directly."},
+                    "include_paid": {"type": "boolean", "description": "Allow limited/paid lanes."},
+                    "timeout_s": {"type": "integer",
+                                  "description": f"Per-reviewer timeout (max {MAX_TIMEOUT_S})."},
+                },
+                "required": [],
+            },
+            annotations={"readOnlyHint": True, "openWorldHint": True, "destructiveHint": False},
+        ))
+        tools.append(Tool(
+            name="debate",
+            description=("Multi-model debate: each lane answers the question, then sees the "
+                         "others and REVISES over a bounded number of rounds, then a judge "
+                         "writes the final conclusion (consensus + remaining disagreement). "
+                         "Good for hard/contested questions. Free/non-limited lanes unless "
+                         "include_paid; bounded to a few debaters to cap cost."),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "task": {"type": "string", "description": "The question to debate."},
+                    "rounds": {"type": "integer",
+                               "description": "Revision rounds after the opening answers "
+                                              "(default 1, max 3)."},
+                    "include_paid": {"type": "boolean", "description": "Allow limited/paid lanes."},
+                    "cwd": {"type": "string", "description": "Directory the CLIs run in."},
+                    "timeout_s": {"type": "integer",
+                                  "description": f"Per-turn timeout (max {MAX_TIMEOUT_S})."},
+                },
+                "required": ["task"],
+            },
+            annotations={"readOnlyHint": True, "openWorldHint": True, "destructiveHint": False},
+        ))
     return tools
 
 
@@ -461,6 +505,15 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
 
     if name == "review_diff":
         return await _review_diff(lanes, args)
+
+    if name == "security_review":
+        targets = _ask_all_targets(lanes, _ask_all_include_paid(args))
+        return [_emit(await workflows.security_review(targets, args, _run_lane),
+                      label="security_review")]
+
+    if name == "debate":
+        targets = _ask_all_targets(lanes, _ask_all_include_paid(args))
+        return [_emit(await workflows.debate(targets, args, _run_lane), label="debate")]
 
     if name.startswith("ask_"):
         key = name[4:]
