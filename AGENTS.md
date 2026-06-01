@@ -19,6 +19,7 @@ src/cli_bridge/
   config.py     # env parsing, cost profile, timeouts, onboarding text
   telemetry.py  # sqlite3 run log + lane health/cooldown (best-effort, privacy-first)
   router.py     # deterministic cascade ordering (pure)
+  jobs.py       # in-process async jobs (ask_all_async) + sqlite persistence
   detect.py     # PATH detection
 tests/          # pytest; unit + cross-host integration (no real CLI needed)
 ```
@@ -47,6 +48,8 @@ CLI_BRIDGE_STATE_DB=/tmp/t.sqlite pytest -q   # keep tests off your real state d
 ## Roadmap
 
 See `SOTA_ACTION_PLAN.md`. Done: config extraction, telemetry+cooldown, cascade router,
-terse preamble, response cache, trace fields, workflow tools (review_diff/security_review/
-debate), MCP prompts, opt-in write/build mode (all lanes), sibling-model self-consultation.
-Next candidates: async durable jobs, worktree-isolated writers, retries w/ backoff, PyPI publish.
+terse preamble (+min-chars skip), response cache, trace fields, workflow tools (review_diff/
+security_review/debate), council recap, MCP prompts, opt-in write/build mode (all lanes),
+sibling-model self-consultation, in-process async jobs (ask_all_async).
+Next candidates: structured findings JSON, prompt-injection guard, worktree-isolated writers,
+ask_best router, human CLI, PyPI publish.

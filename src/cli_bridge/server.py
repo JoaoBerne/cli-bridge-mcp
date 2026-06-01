@@ -21,7 +21,7 @@ from mcp.types import (
     GetPromptResult, Prompt, PromptArgument, PromptMessage, TextContent, Tool,
 )
 
-from . import config, preamble, router, runner, telemetry, workflows
+from . import config, jobs, preamble, router, runner, telemetry, workflows
 from .config import (
     ASK_ALL_DEFAULT_TIMEOUT_S, ASK_ALL_MAX_TIMEOUT_S, ASK_ALL_SYNTH_TIMEOUT_S,
     DEFAULT_TIMEOUT_S, INLINE_MAX_CHARS, INSTRUCTIONS, MAX_TIMEOUT_S, OVERFLOW_DIR,
@@ -200,6 +200,61 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                 "required": ["task"],
             },
             annotations={"readOnlyHint": True, "openWorldHint": True, "destructiveHint": False},
+        ))
+        tools.append(Tool(
+            name="ask_all_async",
+            description=("Like ask_all but NON-BLOCKING: starts the fan-out as a background job "
+                         "and returns a job_id immediately (in <1s), so a slow council run can't "
+                         "hit the MCP host's tool-call deadline. Poll job_status, fetch "
+                         "job_result. Same options as ask_all."),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "task": {"type": "string", "description": "Prompt sent to every lane."},
+                    "include_paid": {"type": "boolean",
+                                     "description": "Also query limited/paid lanes. Default false."},
+                    "cwd": {"type": "string", "description": "Directory the CLIs run in."},
+                    "timeout_s": {"type": "integer",
+                                  "description": f"Per-lane timeout (max {ASK_ALL_MAX_TIMEOUT_S})."},
+                    "synthesize": {"type": "boolean",
+                                   "description": "Add an agree/disagree summary. Default false."},
+                },
+                "required": ["task"],
+            },
+            annotations={"readOnlyHint": True, "openWorldHint": True, "destructiveHint": False},
+        ))
+        tools.append(Tool(
+            name="job_status",
+            description="Status of an async job: running | succeeded | failed | cancelled | "
+                        "interrupted. Pass the job_id returned by ask_all_async.",
+            inputSchema={"type": "object", "properties": {
+                "job_id": {"type": "string", "description": "The job id (e.g. job_ab12…)."}},
+                "required": ["job_id"]},
+            annotations={"readOnlyHint": True, "destructiveHint": False},
+        ))
+        tools.append(Tool(
+            name="job_result",
+            description="Fetch a finished async job's output (same body as ask_all; spills to a "
+                        "file + preview if huge). Returns a 'still running' note if not done.",
+            inputSchema={"type": "object", "properties": {
+                "job_id": {"type": "string", "description": "The job id."}},
+                "required": ["job_id"]},
+            annotations={"readOnlyHint": True, "destructiveHint": False},
+        ))
+        tools.append(Tool(
+            name="job_cancel",
+            description="Cancel a running async job — kills the delegate CLIs' process groups.",
+            inputSchema={"type": "object", "properties": {
+                "job_id": {"type": "string", "description": "The job id to cancel."}},
+                "required": ["job_id"]},
+            annotations={"readOnlyHint": False, "destructiveHint": False},
+        ))
+        tools.append(Tool(
+            name="jobs_list",
+            description="List recent async jobs (this session first, then persisted history) "
+                        "with their status.",
+            inputSchema={"type": "object", "properties": {}},
+            annotations={"readOnlyHint": True, "destructiveHint": False},
         ))
     tools.append(Tool(
         name="doctor",
@@ -580,6 +635,44 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
     if name == "ask_all":
         return await _ask_all(lanes, args)
 
+    if name == "ask_all_async":
+        if not _str(args, "task"):
+            return [TextContent(type="text", text="[error] task is required")]
+        job_id = jobs.start_job("ask_all", lambda: _ask_all_body(lanes, dict(args)),
+                                preview=_str(args, "task"))
+        return [TextContent(type="text", text=(
+            f"Started background job `{job_id}` (ask_all). It runs while you keep working. "
+            f"Check it with `job_status {job_id}`, fetch the answer with `job_result {job_id}`."))]
+
+    if name == "job_status":
+        st = jobs.status(_str(args, "job_id"))
+        if st is None:
+            return [TextContent(type="text", text=f"[error] unknown job_id: {_str(args, 'job_id')}")]
+        return [TextContent(type="text", text=_render_job_status(st))]
+
+    if name == "job_result":
+        r = jobs.result(_str(args, "job_id"))
+        if r is None:
+            return [TextContent(type="text", text=f"[error] unknown job_id: {_str(args, 'job_id')}")]
+        st, body = r
+        if st == jobs.RUNNING:
+            return [TextContent(type="text", text=(
+                "Job still running — poll `job_status` and fetch again when it's succeeded."))]
+        if not body:
+            return [TextContent(type="text", text=f"[{st}] job produced no output.")]
+        return [_emit(body, label="job_result")]
+
+    if name == "job_cancel":
+        st = jobs.cancel(_str(args, "job_id"))
+        msg = {"unknown": f"[error] unknown job_id: {_str(args, 'job_id')}",
+               "cancelling": "Cancellation requested — the delegates' process groups are being "
+                             "killed; poll `job_status` for the final state."}.get(
+            st, f"Job is already **{st}** — nothing to cancel.")
+        return [TextContent(type="text", text=msg)]
+
+    if name == "jobs_list":
+        return [TextContent(type="text", text=_render_jobs_list(jobs.listing()))]
+
     if name == "review_diff":
         return await _review_diff(lanes, args)
 
@@ -660,6 +753,12 @@ def _cascade_trace(attempts: list[tuple[LaneSpec, runner.RunResult]],
 
 
 async def _ask_all(lanes: list[LaneSpec], args: dict) -> list[TextContent]:
+    return [_emit(await _ask_all_body(lanes, args), label="ask_all")]
+
+
+async def _ask_all_body(lanes: list[LaneSpec], args: dict) -> str:
+    """The fan-out itself, returning the report as a plain string so it can run either inline
+    (ask_all) or inside a background job (ask_all_async)."""
     # Explicit arg wins. Otherwise the cost profile decides: 'max' polls paid lanes too,
     # saver/balanced stay free-only by default (the caller can still pass include_paid).
     include_paid = _ask_all_include_paid(args)
@@ -667,13 +766,11 @@ async def _ask_all(lanes: list[LaneSpec], args: dict) -> list[TextContent]:
     if not targets:
         held = [ln.display for ln in lanes if ln.is_paid or ln.is_limited]
         if held:
-            msg = ("[error] no FREE lanes to fan out to. Limited/paid lanes available: "
-                   f"{', '.join(held)}. Call ask_all with include_paid=true, or mark a lane "
-                   "free for your plan via CLI_BRIDGE_<LANE>_COST=free.")
-        else:
-            msg = ("[error] no delegate CLIs installed. Run `doctor` to see install hints, "
-                   "then install/log into at least one CLI (e.g. gemini, mistral, opencode).")
-        return [TextContent(type="text", text=msg)]
+            return ("[error] no FREE lanes to fan out to. Limited/paid lanes available: "
+                    f"{', '.join(held)}. Call ask_all with include_paid=true, or mark a lane "
+                    "free for your plan via CLI_BRIDGE_<LANE>_COST=free.")
+        return ("[error] no delegate CLIs installed. Run `doctor` to see install hints, "
+                "then install/log into at least one CLI (e.g. gemini, mistral, opencode).")
     sub = {"task": _str(args, "task"), "cwd": _str(args, "cwd"),
            "timeout_s": _ask_all_timeout(args.get("timeout_s"))}
     # return_exceptions: one broken lane must not sink the whole fan-out.
@@ -705,7 +802,7 @@ async def _ask_all(lanes: list[LaneSpec], args: dict) -> list[TextContent]:
         synth = await _synthesize(_str(args, "task"), ok, targets)
         if synth:
             body += f"\n\n---\n## Synthesis (agreement / disagreement)\n\n{synth}"
-    return [_emit(body, label="ask_all")]
+    return body
 
 
 async def _review_diff(lanes: list[LaneSpec], args: dict) -> list[TextContent]:
@@ -767,6 +864,29 @@ def _render_usage() -> str:
     return "\n".join(lines)
 
 
+def _render_job_status(st: dict) -> str:
+    lines = [f"Job `{st['id']}` — **{st['status']}** ({st.get('kind', 'ask_all')})"]
+    if st.get("preview"):
+        lines.append(f"_task: {st['preview']}_")
+    if st.get("error"):
+        lines.append(f"error: {st['error']}")
+    if st["status"] == jobs.SUCCEEDED:
+        lines.append(f"Fetch it with `job_result {st['id']}`.")
+    elif st["status"] == jobs.RUNNING:
+        lines.append("Still running — poll again shortly.")
+    return "\n".join(lines)
+
+
+def _render_jobs_list(rows: list[dict]) -> str:
+    if not rows:
+        return "No async jobs yet. Start one with `ask_all_async`."
+    lines = ["# Async jobs", ""]
+    for r in rows:
+        prev = f" — {r['preview']}" if r.get("preview") else ""
+        lines.append(f"- `{r['id']}` **{r['status']}** ({r['kind']}){prev}")
+    return "\n".join(lines)
+
+
 def _render_lane_stats() -> str:
     stats = telemetry.lane_stats()
     if not stats:
@@ -803,6 +923,9 @@ def _doctor(host: str) -> str:
 
 
 def main() -> None:
+    # Any job left 'running' in the DB is from a previous process whose delegates are gone —
+    # flip it to 'interrupted' so its status is honest (v1 doesn't resume work across restarts).
+    jobs.mark_interrupted_on_startup()
     async def _serve() -> None:
         async with stdio_server() as (read, write):
             await server.run(read, write, server.create_initialization_options())

@@ -81,6 +81,16 @@ CREATE TABLE IF NOT EXISTS response_cache (
   kind TEXT NOT NULL,
   created_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS jobs (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  status TEXT NOT NULL,
+  task_preview TEXT,
+  result_path TEXT,
+  error TEXT,
+  created_at REAL NOT NULL,
+  updated_at REAL NOT NULL
+);
 """
 
 
@@ -276,6 +286,78 @@ def cache_put(key: str, ok: bool, output: str, kind: str) -> None:
             conn.commit()
     except sqlite3.Error:
         pass
+
+
+# ── async jobs (persisted so a restart can flip stale 'running' rows to 'interrupted') ──
+
+def job_put(job_id: str, kind: str, status: str, task_preview: str,
+            result_path: str | None = None, error: str | None = None) -> None:
+    """Insert/update a job row. Best-effort: never raises (jobs work in-process even if off)."""
+    conn = _connect()
+    if conn is None or not job_id:
+        return
+    try:
+        with _LOCK:
+            conn.execute(
+                "INSERT INTO jobs (id, kind, status, task_preview, result_path, error, "
+                "created_at, updated_at) VALUES (?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(id) DO UPDATE SET status=excluded.status, "
+                "result_path=excluded.result_path, error=excluded.error, "
+                "updated_at=excluded.updated_at",
+                (job_id, kind, status, task_preview, result_path, error, _now(), _now()))
+            conn.commit()
+    except sqlite3.Error:
+        pass
+
+
+def job_row(job_id: str) -> dict | None:
+    conn = _connect()
+    if conn is None or not job_id:
+        return None
+    try:
+        with _LOCK:
+            r = conn.execute(
+                "SELECT id, kind, status, task_preview, result_path, error, created_at, "
+                "updated_at FROM jobs WHERE id=?", (job_id,)).fetchone()
+    except sqlite3.Error:
+        return None
+    if not r:
+        return None
+    return {"id": r[0], "kind": r[1], "status": r[2], "task_preview": r[3],
+            "result_path": r[4], "error": r[5], "created_at": r[6], "updated_at": r[7]}
+
+
+def jobs_recent(limit: int = 20) -> list[dict]:
+    conn = _connect()
+    if conn is None:
+        return []
+    try:
+        with _LOCK:
+            rows = conn.execute(
+                "SELECT id, kind, status, task_preview, result_path, error, created_at, "
+                "updated_at FROM jobs ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+    except sqlite3.Error:
+        return []
+    return [{"id": r[0], "kind": r[1], "status": r[2], "task_preview": r[3],
+             "result_path": r[4], "error": r[5], "created_at": r[6], "updated_at": r[7]}
+            for r in rows]
+
+
+def jobs_mark_running_interrupted() -> int:
+    """On server start, any row still 'running' is from a dead process — its spawned CLIs are
+    gone, so flip it to 'interrupted' (v1 does not resume work across restarts)."""
+    conn = _connect()
+    if conn is None:
+        return 0
+    try:
+        with _LOCK:
+            cur = conn.execute(
+                "UPDATE jobs SET status='interrupted', updated_at=? WHERE status='running'",
+                (_now(),))
+            conn.commit()
+            return cur.rowcount
+    except sqlite3.Error:
+        return 0
 
 
 def _reset_for_tests() -> None:

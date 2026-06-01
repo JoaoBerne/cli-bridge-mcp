@@ -29,7 +29,8 @@ host (Claude/Codex/…) ──MCP/stdio──▶ cli-bridge ──spawn subproce
 | `config.py` | All env parsing, timeouts, cost profile, onboarding text. **Single source of truth** for settings. | Need a new env var? It goes here. |
 | `telemetry.py` | Local sqlite: a run log + per-lane health/cooldown + the opt-in response cache. | **Best-effort: must never raise into a delegation.** |
 | `router.py` | Pure functions that order lanes cheapest→strongest for `ask_cascade`, skipping cooled ones. | No side effects — pure, easy to test. |
-| `workflows.py` | The multi-model workflows: `review_diff`, `security_review`, `debate`. Orchestrates several lanes + a merge/judge step. | Takes an injected `run_lane`, so it's testable with fakes. |
+| `workflows.py` | The multi-model workflows: `review_diff`, `security_review`, `debate` + the `council_recap` digest. Orchestrates several lanes + a merge/judge step. | Takes an injected `run_lane`, so it's testable with fakes. |
+| `jobs.py` | In-process async jobs (`ask_all_async`): wrap a coroutine in `asyncio.create_task`, return a job id, poll/fetch/cancel later. Live registry + best-effort sqlite row. | No cross-restart resume in v1 — stale `running` rows become `interrupted`. |
 | `preamble.py` | The terse response-style preamble prepended to delegate prompts. | Prose only — never applied to structured (JSON) workflows. |
 | `detect.py` | Which CLIs are actually installed (PATH lookup). | — |
 
@@ -54,7 +55,11 @@ host (Claude/Codex/…) ──MCP/stdio──▶ cli-bridge ──spawn subproce
 - **`ask_<lane>`** — one model. Params: `task`, `model`, `effort`, `agent` (plan|build), `cwd`,
   `timeout_s`. `agent: build` lets it **edit files**.
 - **`ask_all`** — same question to every free, non-limited lane in parallel; `synthesize: true`
-  adds an agree/disagree summary. For **comparing** opinions.
+  adds an agree/disagree summary. For **comparing** opinions. Output opens with a one-line-per-
+  lane **council recap** so no answer is a blind spot.
+- **`ask_all_async` / `job_status` / `job_result` / `job_cancel` / `jobs_list`** — the same
+  fan-out as a background job that returns a job id in <1s, so a slow run can't hit the host's
+  tool-call deadline. Cancel kills the delegates' process groups; a restart marks it interrupted.
 - **`ask_cascade`** — one answer with automatic fallback (cheapest→strongest, skips cooled lanes).
   For **reliability/automation**, not comparison.
 - **`route_plan`** — explains the order cascade would try (runs nothing).
