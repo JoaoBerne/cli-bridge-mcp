@@ -1,5 +1,9 @@
 """Unit tests for server-side helpers that don't need a live MCP session."""
+import asyncio
+
 from cli_bridge import server
+from cli_bridge.lanes import LaneSpec
+from cli_bridge.runner import RunResult
 
 
 def test_slug_normalizes_host_names():
@@ -53,8 +57,40 @@ def test_ask_all_include_paid_profile(monkeypatch):
     assert server._ask_all_include_paid({"include_paid": False}) is False
 
 
+def test_cascade_trace_shows_attempts_and_chosen(monkeypatch):
+    a = LaneSpec("a", "LaneA", "echo", lambda *x: [])
+    b = LaneSpec("b", "LaneB", "echo", lambda *x: [])
+    monkeypatch.setattr(server.telemetry, "cooldown_remaining", lambda key: 0)
+
+    async def fake_run_lane(lane, args, *, tool="ask", terse=True):
+        if lane.key == "a":
+            return RunResult(False, "rate limited", "quota", latency_ms=12)
+        return RunResult(True, "the answer", "ok", latency_ms=34)
+    monkeypatch.setattr(server, "_run_lane", fake_run_lane)
+
+    out = asyncio.run(server._ask_cascade([a, b], {"task": "hi"}))
+    text = out[0].text
+    assert "the answer" in text
+    assert "Trace — cascade" in text
+    assert "❌ a [free] 12ms — quota" in text
+    assert "✅ **b** [free] 34ms — chosen" in text
+
+
+def test_cascade_trace_on_total_failure(monkeypatch):
+    a = LaneSpec("a", "LaneA", "echo", lambda *x: [])
+    monkeypatch.setattr(server.telemetry, "cooldown_remaining", lambda key: 0)
+
+    async def fake_run_lane(lane, args, *, tool="ask", terse=True):
+        return RunResult(False, "boom", "failed", latency_ms=5)
+    monkeypatch.setattr(server, "_run_lane", fake_run_lane)
+
+    out = asyncio.run(server._ask_cascade([a], {"task": "hi"}))
+    text = out[0].text
+    assert text.startswith("[error] all lanes failed")
+    assert "Trace — cascade" in text and "❌ a [free] 5ms — failed" in text
+
+
 def test_is_host_matches_via_slug():
-    from cli_bridge.lanes import LaneSpec
     lane = LaneSpec("x", "X", "x", lambda *a: [], client_ids=frozenset({"claude-code"}))
     assert server._is_host(lane, "claude-code")
     assert server._is_host(lane, server._slug("Claude Code"))
