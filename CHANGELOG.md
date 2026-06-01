@@ -27,6 +27,14 @@ All notable changes to this project are documented here. The format follows
 - Terse preamble made leaner with a `CLI_BRIDGE_TERSE_MIN_CHARS` skip; eval fixtures + a
   no-network evaluator; ruff lint + CI lint job.
 
+### Changed
+- Findings merge now also collapses **similarly-worded** findings at the same `file:line`
+  (token-overlap similarity), not just exact-title matches — so two models describing the same
+  bug differently merge into one entry with higher confidence. None-location findings stay
+  exact-only (no over-merging).
+- CI test matrix runs on **macOS and Windows** as well as Linux (portability is a stated
+  invariant; now it's actually exercised). POSIX-shell-only runner tests skip on Windows.
+
 ## [0.1.0]
 - Initial MCP server: per-host self-hide, PATH detection, lane registry (claude/gpt/gemini/
   mistral/opencode/qwen/copilot) + custom lanes via JSON + BYO-API via curl, `ask_<lane>`,

@@ -100,6 +100,27 @@ def test_merge_keeps_distinct_locations():
     assert len(findings.merge_findings([a, b])) == 2
 
 
+def test_merge_fuzzy_same_location_similar_titles():
+    # same file:line, same bug worded differently -> ONE merged finding
+    a = Finding("high", "SQL injection in user query", "db.py", 42, models=["Gemini"])
+    b = Finding("high", "SQL injection in the user query builder", "db.py", 42, models=["Mistral"])
+    merged = findings.merge_findings([a, b])
+    assert len(merged) == 1 and set(merged[0].models) == {"Gemini", "Mistral"}
+
+
+def test_merge_fuzzy_needs_concrete_location():
+    # similar titles but NO file/line -> NOT fuzzy-merged (can't safely anchor)
+    a = Finding("medium", "Unparsed correctness review could not read as json", models=["A"])
+    b = Finding("medium", "Unparsed security review could not read as json", models=["B"])
+    assert len(findings.merge_findings([a, b])) == 2
+
+
+def test_merge_dissimilar_titles_same_location_kept():
+    a = Finding("high", "SQL injection", "db.py", 42)
+    b = Finding("low", "Missing docstring", "db.py", 42)
+    assert len(findings.merge_findings([a, b])) == 2
+
+
 def test_merge_sorts_strongest_first():
     fs = [Finding("low", "z"), Finding("blocker", "a"), Finding("medium", "m")]
     out = [f.severity for f in findings.merge_findings(fs)]

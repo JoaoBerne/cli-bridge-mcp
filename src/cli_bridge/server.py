@@ -873,10 +873,10 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
         return [_emit(_render_lane_stats(), label="lane_stats", guard=False)]
 
     if name == "reset_lane_state":
-        lane = _str(args, "lane")
-        ok = telemetry.reset_lane(lane) if lane else False
-        msg = (f"Lane '{lane}' cooldown/failure counters cleared." if ok
-               else f"No state to clear for lane '{lane}' (already clean or unknown).")
+        lane_key = _str(args, "lane")
+        ok = telemetry.reset_lane(lane_key) if lane_key else False
+        msg = (f"Lane '{lane_key}' cooldown/failure counters cleared." if ok
+               else f"No state to clear for lane '{lane_key}' (already clean or unknown).")
         return [TextContent(type="text", text=msg)]
 
     if name == "ask_cascade":
@@ -909,10 +909,10 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
             f"Check it with `job_status {job_id}`, fetch the answer with `job_result {job_id}`."))]
 
     if name == "job_status":
-        st = jobs.status(_str(args, "job_id"))
-        if st is None:
+        info = jobs.status(_str(args, "job_id"))
+        if info is None:
             return [TextContent(type="text", text=f"[error] unknown job_id: {_str(args, 'job_id')}")]
-        return [TextContent(type="text", text=_render_job_status(st))]
+        return [TextContent(type="text", text=_render_job_status(info))]
 
     if name == "job_result":
         r = jobs.result(_str(args, "job_id"))

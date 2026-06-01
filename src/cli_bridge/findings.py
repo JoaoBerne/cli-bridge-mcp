@@ -160,20 +160,37 @@ def _norm_title(title: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", title.lower()).strip()
 
 
-def _merge_key(f: Finding) -> tuple:
-    return (f.file or "", f.line if f.line is not None else -1, _norm_title(f.title))
+_TITLE_SIM_THRESHOLD = 0.6
+
+
+def _similar_title(a: str, b: str) -> bool:
+    """Jaccard overlap of title tokens ≥ threshold — catches the same bug worded differently."""
+    ta, tb = set(_norm_title(a).split()), set(_norm_title(b).split())
+    if not ta or not tb:
+        return _norm_title(a) == _norm_title(b)
+    return len(ta & tb) / len(ta | tb) >= _TITLE_SIM_THRESHOLD
+
+
+def _same_finding(g: Finding, f: Finding) -> bool:
+    """Two findings are the same if they share a location and an equivalent title. Exact-title
+    match works at any location (incl. unknown); FUZZY title match needs a concrete file:line to
+    anchor on, so None-location findings (prechecks, unparsed replies) never over-merge."""
+    if (g.file or "") != (f.file or "") or g.line != f.line:
+        return False
+    if _norm_title(g.title) == _norm_title(f.title):
+        return True
+    return f.file is not None and f.line is not None and _similar_title(g.title, f.title)
 
 
 def merge_findings(findings: list[Finding]) -> list[Finding]:
-    """Collapse duplicates by (file, line, normalized title). The merged entry keeps the
+    """Collapse duplicates by location + (exact-or-similar) title. The merged entry keeps the
     strongest severity, unions models+roles, and keeps the longest evidence/recommendation.
     Sorted strongest-severity first, then by file/line for stable output."""
-    groups: dict[tuple, Finding] = {}
+    groups: list[Finding] = []
     for f in findings:
-        k = _merge_key(f)
-        g = groups.get(k)
+        g = next((x for x in groups if _same_finding(x, f)), None)
         if g is None:
-            groups[k] = replace(f, models=list(f.models), roles=list(f.roles))
+            groups.append(replace(f, models=list(f.models), roles=list(f.roles)))
             continue
         if _SEV_RANK[f.severity] < _SEV_RANK[g.severity]:
             g.severity = f.severity
@@ -187,7 +204,7 @@ def merge_findings(findings: list[Finding]) -> list[Finding]:
             g.evidence = f.evidence
         if len(f.recommendation) > len(g.recommendation):
             g.recommendation = f.recommendation
-    return sorted(groups.values(),
+    return sorted(groups,
                   key=lambda f: (_SEV_RANK[f.severity], f.file or "~", f.line or 0, f.title))
 
 
