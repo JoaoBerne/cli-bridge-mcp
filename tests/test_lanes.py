@@ -21,7 +21,7 @@ def test_gpt_no_model_no_flag():
 
 
 def test_opencode_free_default_applied(monkeypatch):
-    lanes._current_opencode_free_model.cache_clear()
+    lanes._opencode_model_cache.clear()
     monkeypatch.setattr(lanes.subprocess, "run", lambda *a, **k: SimpleNamespace(
         returncode=0,
         stdout="opencode/deepseek-v4-flash-free\n",
@@ -34,11 +34,11 @@ def test_opencode_free_default_applied(monkeypatch):
         assert "opencode/deepseek-v4-flash-free" in argv      # never a paid default
         assert "--dangerously-skip-permissions" not in argv   # plan = read-only
     finally:
-        lanes._current_opencode_free_model.cache_clear()
+        lanes._opencode_model_cache.clear()
 
 
 def test_opencode_default_prefers_current_free_model_list(monkeypatch):
-    lanes._current_opencode_free_model.cache_clear()
+    lanes._opencode_model_cache.clear()
     monkeypatch.setattr(lanes.subprocess, "run", lambda *a, **k: SimpleNamespace(
         returncode=0,
         stdout="opencode/big-pickle\nopencode/mimo-v2.5-free\nopencode-go/paid-model\n",
@@ -46,11 +46,11 @@ def test_opencode_default_prefers_current_free_model_list(monkeypatch):
     try:
         assert _lane("opencode").model_for("") == "opencode/mimo-v2.5-free"
     finally:
-        lanes._current_opencode_free_model.cache_clear()
+        lanes._opencode_model_cache.clear()
 
 
 def test_opencode_default_keeps_preferred_free_model_when_listed(monkeypatch):
-    lanes._current_opencode_free_model.cache_clear()
+    lanes._opencode_model_cache.clear()
     monkeypatch.setattr(lanes.subprocess, "run", lambda *a, **k: SimpleNamespace(
         returncode=0,
         stdout="opencode/mimo-v2.5-free\nopencode/deepseek-v4-flash-free\n",
@@ -58,11 +58,11 @@ def test_opencode_default_keeps_preferred_free_model_when_listed(monkeypatch):
     try:
         assert _lane("opencode").model_for("") == "opencode/deepseek-v4-flash-free"
     finally:
-        lanes._current_opencode_free_model.cache_clear()
+        lanes._opencode_model_cache.clear()
 
 
 def test_opencode_default_falls_back_when_model_list_fails(monkeypatch):
-    lanes._current_opencode_free_model.cache_clear()
+    lanes._opencode_model_cache.clear()
     monkeypatch.setattr(lanes.subprocess, "run", lambda *a, **k: SimpleNamespace(
         returncode=1,
         stdout="",
@@ -70,7 +70,7 @@ def test_opencode_default_falls_back_when_model_list_fails(monkeypatch):
     try:
         assert _lane("opencode").model_for("") == "opencode/deepseek-v4-flash-free"
     finally:
-        lanes._current_opencode_free_model.cache_clear()
+        lanes._opencode_model_cache.clear()
 
 
 def test_opencode_build_agent_writes():
