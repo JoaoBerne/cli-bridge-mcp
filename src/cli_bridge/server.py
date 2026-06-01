@@ -680,18 +680,24 @@ async def _ask_all(lanes: list[LaneSpec], args: dict) -> list[TextContent]:
     results = await asyncio.gather(*[_run_lane(ln, sub) for ln in targets],
                                    return_exceptions=True)
     blocks = []
+    rows = []
     for lane, res in zip(targets, results):
         if isinstance(res, BaseException):
             blocks.append(f"## {lane.display} - FAILED (crash)\n\n[crash] {res}")
+            rows.append((lane.display, False, 0, f"crash: {res}"))
         else:
             status = "OK" if res.ok else f"FAILED ({res.kind})"
             blocks.append(f"## {lane.display} - {status} _[{lane.cost_label}, {res.latency_ms}ms]_"
                           f"\n\n{res.render()}")
+            rows.append((lane.display, res.ok, res.latency_ms,
+                         res.output if res.ok else res.kind))
     skipped = [ln.display for ln in lanes if (ln.is_paid or ln.is_limited) and not include_paid]
     footer = (f"\n\n---\n_Skipped limited/paid lanes: {', '.join(skipped)} "
               f"(set include_paid=true)._"
               if skipped else "")
-    body = "\n\n".join(blocks) + footer
+    # Recap first so the host gets an at-a-glance digest of every lane before the full blocks.
+    recap = workflows.council_recap(rows, title="Council")
+    body = recap + "\n\n" + "\n\n".join(blocks) + footer
 
     if bool(args.get("synthesize")):
         ok = [(lane, res) for lane, res in zip(targets, results)
@@ -736,7 +742,9 @@ async def _doctor_deep(host: str, lanes: list[LaneSpec]) -> str:
     if not probes:
         return base + "\n\n_(deep probe: no free lanes to test)_"
     async def _probe(ln):
-        res = await _run_lane(ln, {"task": "Reply with exactly: OK", "timeout_s": 60})
+        # terse=False: the probe wants the literal string "OK"; a style preamble would only
+        # tempt the model to reformat it. (Also dodges the preamble's per-call overhead here.)
+        res = await _run_lane(ln, {"task": "Reply with exactly: OK", "timeout_s": 60}, terse=False)
         mark = "✅ responds" if res.ok else f"❌ {res.kind}"
         return f"- **{ln.key}**: {mark}"
     results = await asyncio.gather(*[_probe(ln) for ln in probes])

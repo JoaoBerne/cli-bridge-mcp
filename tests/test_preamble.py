@@ -39,3 +39,32 @@ def test_apply_prepends_then_task(monkeypatch):
     monkeypatch.setenv("CLI_BRIDGE_TERSE", "full")
     out = preamble.apply("THE_TASK")
     assert out.endswith("THE_TASK") and out.startswith("[response style]")
+
+
+def test_lite_is_shorter_than_full(monkeypatch):
+    monkeypatch.setenv("CLI_BRIDGE_TERSE", "lite")
+    lite = preamble.preamble()
+    monkeypatch.setenv("CLI_BRIDGE_TERSE", "full")
+    full = preamble.preamble()
+    assert 0 < len(lite) < len(full)        # lite trimmed to a low fixed overhead
+    assert len(lite) < 220                  # ~38 tokens of fixed input cost
+
+
+def test_lite_keeps_english_and_exactness(monkeypatch):
+    monkeypatch.setenv("CLI_BRIDGE_TERSE", "lite")
+    p = preamble.preamble()
+    assert "English" in p and "exact" in p and "Reason fully" in p
+
+
+def test_min_chars_skips_preamble_on_tiny_task(monkeypatch):
+    monkeypatch.setenv("CLI_BRIDGE_TERSE", "lite")
+    monkeypatch.setenv("CLI_BRIDGE_TERSE_MIN_CHARS", "50")
+    assert preamble.apply("short q") == "short q"          # below threshold -> no preamble
+    long_task = "x" * 60
+    assert preamble.apply(long_task).startswith("[response style]")  # above -> prefixed
+
+
+def test_min_chars_default_never_skips(monkeypatch):
+    monkeypatch.setenv("CLI_BRIDGE_TERSE", "lite")
+    monkeypatch.delenv("CLI_BRIDGE_TERSE_MIN_CHARS", raising=False)
+    assert preamble.apply("q").startswith("[response style]")        # 0 = never skip
