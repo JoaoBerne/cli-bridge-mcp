@@ -151,16 +151,27 @@ Hosts that support MCP prompts also surface `review_diff`, `security_review`, `d
 | `ask_<lane>` | Ask one model. Params: `task`, optional `model`, `effort`, `agent`, `cwd`, `timeout_s`. |
 | `ask_all` | Fan-out the same question to every free, non-limited lane in parallel. `synthesize: true` adds an agreement/disagreement summary. `include_paid: true` to also query limited/paid lanes. |
 | `ask_cascade` | Ask one model **with automatic fallback** — tries lanes cheapest→strongest, skipping cooled ones, moving on at quota/auth/timeout. Returns the first success + a trace of what was tried (cost tier, latency, why skipped). |
-| `route_plan` | Show the order `ask_cascade` would try, given your profile + current cooldowns (read-only, runs nothing). |
-| `review_diff` | Multi-model code review of a git diff: lanes review in parallel with **different focuses** (correctness / security / tests / maintainability), then one lane merges + dedupes into a severity-ranked report. Params: `cwd`, `base` (default HEAD), `diff`, `include_paid`, `timeout_s`. |
-| `security_review` | OWASP-aware **security-only** review of a git diff (injection / auth & access control / secrets & crypto / data exposure & SSRF) → severity-ranked findings with remediations. |
+| `ask_best` | Pick **one lane by mode** (`fast`/`cheap`/`deep`/`code`/`review`/`security`) from cost, health and measured latency, then run it with fallback. For "just use the right model" — `ask_all` compares, `ask_cascade` is plain cheapest-first. |
+| `route_plan` | Show the order `ask_cascade` would try, given your profile + current cooldowns (read-only, runs nothing). Pass `mode` to preview `ask_best`. |
+| `ask_all_async` / `job_status` / `job_result` / `job_cancel` / `jobs_list` | Run a fan-out as a **background job** that returns a job id in <1s, so a slow council run can't hit the host's tool-call deadline. Cancel kills the delegates' process groups. |
+| `review_diff` | Multi-model code review of a git diff: lanes review in parallel with **different focuses** (correctness / security / tests / maintainability), each returning JSON findings; deterministic prechecks (secrets, dangerous shell) seed them; findings **merge by file/line/title** with agreement-based confidence (single/majority/consensus). `output_format: markdown` (default) or `json`. Params: `cwd`, `base` (default HEAD), `diff`, `include_paid`, `timeout_s`. |
+| `security_review` | OWASP-aware **security-only** review of a git diff (injection / auth & access control / secrets & crypto / data exposure & SSRF) → severity-ranked findings + a `residual_risk` section. |
 | `debate` | Several models answer a question, **see each other's answers and revise** over bounded rounds (default 1, max 3), then a judge writes the final consensus + remaining disagreement. Params: `task`, `rounds`, `include_paid`, `timeout_s`. |
+| `premortem` | Each lane imagines the plan **already failed** and lists likely failure modes + mitigations; merged into a prioritized risk list. Run it before building. |
+| `test_plan` | Derive a prioritized **test plan** (behaviors, edge cases, concrete cases) from a git diff or a description. |
+| `ask_build_isolated` | **Safe write mode**: run a build-capable lane in a throwaway git worktree at HEAD and get the **diff** to review — your real repo is never modified. |
 | `list_<lane>_models` | List the models that lane can reach (where supported). |
 | `doctor` | Health check: installed CLIs, detected host, cost/quota stance, cooldowns, defaults. `deep: true` live-probes each free, non-limited lane's auth. |
-| `usage_report` | Local-only stats: total runs, per-lane counts/success/latency, recent calls. |
+| `usage_report` | Local-only stats: runs, per-lane success/latency, and **estimated** tokens (chars/4) + credits (per-lane `CREDITS_PER_1K`). `since`, `format=text\|json`. |
+| `usage_budget` | Today's runs per lane vs `CLI_BRIDGE_<LANE>_DAILY_LIMIT` + estimated spend; flags lanes over their limit. |
 | `lane_stats` | Per-lane health: runs, failures, consecutive failures/timeouts, active cooldown. |
 | `reset_lane_state` | Clear a lane's cooldown/failure counters (after re-login or quota reset). |
 | `setup` | Walk the user through configuring cost preferences to their own subscriptions. |
+
+There's also a **human CLI** — the same engine from your terminal or CI:
+`cli-bridge doctor`, `ask <lane> <task>`, `ask-all`, `ask-best --mode`, `review-diff --base
+origin/main --json`, `usage`, `budget`, `jobs`, `setup --write`. See
+`examples/github-action-pr-review.yml` for a PR-review GitHub Action (self-hosted runner).
 
 **Read-only by default; opt-in writes.** A delegate normally analyses and answers — your host
 applies any edits. Pass `agent: "build"` to let it **edit files directly** (e.g. *"ask gpt to
@@ -200,7 +211,12 @@ Everything is environment variables — no code edits. Tune it to **your** subsc
 | `CLI_BRIDGE_<LANE>_PRIORITY` | Lower runs earlier in `ask_cascade` (default 50). Pin your preferred order. |
 | `CLI_BRIDGE_INLINE_MAX_CHARS` | Above this, an answer spills to a file instead of flooding context (default 12000). |
 | `CLI_BRIDGE_TERSE` | `off` / `lite` (default) / `full` / `ultra`. Prepends a compact response-style preamble to delegate prompts (English, reason fully internally, answer terse, code/JSON untouched) to cut both your context and the delegate's output tokens. Never applied to structured workflow tools. |
+| `CLI_BRIDGE_TERSE_MIN_CHARS` | Skip the terse preamble for tasks shorter than this many chars (default `0` = never skip). Tiny tasks can't repay the preamble's fixed overhead. |
+| `CLI_BRIDGE_GUARD` | `off` / `warn` (default) / `strict`. Scans **delegate output** for prompt-injection / tool-poisoning; `warn` prepends a banner, `strict` withholds the body. Runs after secret redaction. |
 | `CLI_BRIDGE_CACHE_TTL_S` | `0` = off (default). When `>0`, an identical call within this many seconds returns the cached answer instead of re-spawning the CLI (saves quota/credits on repeats; build runs are never cached). |
+| `CLI_BRIDGE_<LANE>_CREDITS_PER_1K` | Credits per 1k tokens for a lane, used by `usage_report`/`usage_budget` to **estimate** spend (chars/4). |
+| `CLI_BRIDGE_<LANE>_DAILY_LIMIT` | Max runs/day for a lane; `usage_budget` flags when exceeded. |
+| `CLI_BRIDGE_KEEP_WORKTREES` | Keep `ask_build_isolated` worktrees instead of discarding them (for inspection). |
 | `CLI_BRIDGE_REVIEW_TIMEOUT_S` | Per-reviewer timeout for `review_diff` / `security_review` (default 180; these are deliberately heavier than `ask_all`). |
 | `CLI_BRIDGE_OVERFLOW_TTL_H` | Hours before a spilled overflow file is pruned (default 24). |
 | `CLI_BRIDGE_TELEMETRY` | `off` to disable the local run log / cooldown tracking (default on, machine-local only). |

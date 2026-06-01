@@ -1,0 +1,44 @@
+# Example: multi-model review of every pull request, posted as a comment.
+#
+# IMPORTANT: this needs a SELF-HOSTED runner. cli-bridge spawns the official AI CLIs, which must
+# already be installed and logged in on the runner — GitHub's hosted runners don't have your
+# subscriptions. Set up a self-hosted runner where `gemini`/`codex`/`opencode`/… are authenticated,
+# then drop this file in .github/workflows/.
+#
+# Alternatively, define an API-keyed lane via CLI_BRIDGE_LANES_FILE (see byo-api-lane.json) and run
+# on a hosted runner, supplying the key as a secret.
+
+name: cli-bridge review
+on:
+  pull_request:
+
+jobs:
+  review:
+    runs-on: [self-hosted]          # a runner with your AI CLIs installed + logged in
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0            # need history so `git diff origin/main` works
+
+      - name: Install cli-bridge
+        run: pipx install cli-bridge-mcp || pip install --user cli-bridge-mcp
+
+      - name: Review the diff
+        run: |
+          cli-bridge review-diff --base "origin/${{ github.base_ref }}" --json > review.json
+          cli-bridge review-diff --base "origin/${{ github.base_ref }}" > review.md
+
+      - name: Post a PR comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('review.md', 'utf8').slice(0, 60000);
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: "## 🧑‍⚖️ Multi-model review\n\n" + body,
+            });
+      # review.json is machine-readable (findings[].severity/confidence/...) — feed it to
+      # reviewdog or your own gate if you'd rather fail the check on blocker-severity findings.
