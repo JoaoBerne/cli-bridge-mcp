@@ -1,0 +1,6 @@
+Sure! After reviewing the diff, here are the issues I found:
+
+[{"severity": "medium", "title": "Unhandled edge case", "file": null, "line": null,
+  "evidence": "negative inputs are not validated", "recommendation": "validate inputs"}]
+
+Let me know if you'd like me to elaborate on any of these.

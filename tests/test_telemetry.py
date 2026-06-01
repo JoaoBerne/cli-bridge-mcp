@@ -1,9 +1,8 @@
 """Phase 1: telemetry records runs, cools lanes on repeated failure, exposes stats."""
-import time
 
 import pytest
 
-from cli_bridge import telemetry, config
+from cli_bridge import telemetry
 
 
 @pytest.fixture(autouse=True)

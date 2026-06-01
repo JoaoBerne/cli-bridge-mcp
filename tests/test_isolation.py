@@ -8,8 +8,6 @@ spawned process's argv only — never written to disk.
 import asyncio
 import os
 
-import pytest
-
 from cli_bridge import lanes, server
 
 _CLI_DIRS = [

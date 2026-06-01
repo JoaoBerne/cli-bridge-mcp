@@ -1,5 +1,4 @@
 """P0-3: opencode free-model lookup uses a TTL cache that can recover, not lru_cache."""
-import time
 
 from cli_bridge import lanes
 

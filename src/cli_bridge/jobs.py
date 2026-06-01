@@ -13,8 +13,8 @@ import asyncio
 import os
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Awaitable, Callable
 
 from . import config, telemetry
 
