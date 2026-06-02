@@ -49,6 +49,19 @@ def test_eval_prechecks_quiet_on_clean_diff():
     assert workflows.prechecks(_diff("clean.diff")) == []
 
 
+def test_eval_prechecks_multi_issue_recall():
+    """Realistic diff with several seeded issues — the deterministic net should catch the
+    dangerous-shell + secret ones (recall), and not leak the secret values."""
+    fs = workflows.prechecks(_diff("multi_issue.diff"))
+    titles = " | ".join(f.title for f in fs).lower()
+    assert "secret" in titles                       # hardcoded sk-/webhook
+    assert "os.system" in titles
+    assert "shell=true" in titles
+    assert any("eval" in f.title.lower() for f in fs)
+    blob = " ".join(f.evidence for f in fs)
+    assert "sk-proj-abcdef0123456789abcdef0123456789" not in blob   # value redacted
+
+
 # ── parser corpus: every real-world reply shape lands somewhere sane, never crashes ───────
 
 @pytest.mark.parametrize("name,parsed_ok,min_count", [

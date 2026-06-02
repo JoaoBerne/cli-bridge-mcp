@@ -38,6 +38,18 @@ All notable changes to this project are documented here. The format follows
 - **Trace bundle** (`CLI_BRIDGE_TRACE_DIR`): per-delegation redacted JSON (argv, timing, output)
   for reproducible debugging / ban-safe audit.
 
+### Added (from the council audit — round 2)
+- **JSON config file** (`~/.config/cli-bridge/config.json`): friendly alternative to env vars,
+  loaded at startup with env-wins precedence (progressive disclosure — defaults → file → env).
+- **Cost-safety & team controls**: `CLI_BRIDGE_DAILY_CREDIT_CAP` (hard stop on estimated paid
+  spend), `CLI_BRIDGE_ALLOW_LANES` (allowlist), `CLI_BRIDGE_DISABLE_BUILD` (force read-only).
+- **`ask_all`**: `output_format=json`, `summary_only` (recap+synthesis, fewer tokens), `dry_run`
+  (preview lanes + estimated cost without spawning).
+- **`doctor --deep`** now shows each free lane's CLI version (drift detection); `bench --all`
+  benchmarks every free lane into a table; `BENCHMARKS.md` explains how to generate real numbers.
+- Overflow dir gains a file-count cap (`CLI_BRIDGE_OVERFLOW_MAX_FILES`). `release.yml` publishes
+  to PyPI via Trusted Publishing on a version tag.
+
 ### Added (from the council audit)
 - **`CLI_BRIDGE_MAX_PARALLEL`** (default 6): caps simultaneous delegate spawns in `ask_all` so a
   wide council (many custom lanes) can't OOM a small machine or burst quota.

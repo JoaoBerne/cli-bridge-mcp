@@ -97,6 +97,19 @@ def test_bench_unknown_lane_exits():
         cli.main(["bench", "--lane", "nope", "--prompt", "hi"])
 
 
+def test_bench_all_table(monkeypatch, capsys):
+    a = LaneSpec("a", "A", "echo", lambda *x: [])
+    b = LaneSpec("b", "B", "echo", lambda *x: [])
+    monkeypatch.setattr(server, "_active_lanes", lambda: ([a, b], ""))
+
+    async def fake_run_lane(lane, args, *, tool="ask", terse=True):
+        return RunResult(True, "x", "ok", latency_ms=7)
+    monkeypatch.setattr(server, "_run_lane", fake_run_lane)
+    cli.main(["bench", "--all", "--prompt", "hi", "--runs", "2"])
+    out = capsys.readouterr().out
+    assert "| lane |" in out and "| a |" in out and "| b |" in out
+
+
 def test_parser_wires_subcommands():
     p = cli.build_parser()
     a = p.parse_args(["review-diff", "--base", "main", "--json"])
