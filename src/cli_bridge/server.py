@@ -146,6 +146,9 @@ def _active_lanes() -> tuple[list[LaneSpec], str]:
     (Asking your OWN model the same question wastes a call, so the host lane is excluded here.)"""
     host = _host_name()
     lanes = [ln for ln in installed_lanes(all_lanes()) if not _is_host(ln, host)]
+    allow = config.allowed_lanes()                 # optional team/locked-down allowlist
+    if allow:
+        lanes = [ln for ln in lanes if ln.key in allow]
     return lanes, host
 
 
@@ -853,8 +856,19 @@ async def _run_lane(lane: LaneSpec, args: dict, *, tool: str = "ask",
     model = lane.model_for(_str(args, "model"))
     if config.mock():                          # dry-run: canned answer, no spawn
         return runner.RunResult(True, _mock_answer(lane, model, task), "ok", latency_ms=0)
+    # Hard budget cap: refuse a PAID lane once today's estimated spend hits the ceiling.
+    cap = config.daily_credit_cap()
+    if cap > 0 and lane.is_paid:
+        spent = telemetry.est_credits_today()
+        if spent >= cap:
+            return runner.RunResult(False, (
+                f"daily credit cap reached (~{spent}/{cap} est. credits today); paid lane "
+                f"'{lane.key}' refused. Raise CLI_BRIDGE_DAILY_CREDIT_CAP or use a free lane."),
+                "blocked")
     agent = _str(args, "agent").lower()
     if agent not in {"", "plan", "build"}:    # never let a hallucinated value enable writes
+        agent = "plan"
+    if agent == "build" and config.build_disabled():   # team lock: no delegate edits files
         agent = "plan"
     effort = _str(args, "effort")
     cwd = _str(args, "cwd")
@@ -1032,7 +1046,10 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
                         "you're already running is pointless."))]
                 lane = own
             else:
-                return [TextContent(type="text", text=f"[error] no such lane: {key}")]
+                avail = ", ".join(ln.key for ln in lanes) or "none installed"
+                return [TextContent(type="text", text=(
+                    f"[error] no such lane: {key}. Available: {avail}. Run `doctor` for install "
+                    "hints, or set CLI_BRIDGE_MOCK=1 to try without any CLI."))]
         res = await _run_lane(lane, args)
         return [_emit(res.render(), label=f"ask_{lane.key}")]
 
