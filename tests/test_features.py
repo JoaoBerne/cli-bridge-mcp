@@ -175,3 +175,49 @@ def test_allowlist_filters_lanes(monkeypatch):
     lanes, _ = server._active_lanes()
     assert [ln.key for ln in lanes] == ["b"]     # only allowlisted lane exposed
 
+
+# ── ask_all output_format / summary_only / dry_run (cluster 2) ───────────────────────────────
+
+def _two_lanes():
+    return [LaneSpec("a", "LaneA", "echo", lambda *x: []),
+            LaneSpec("b", "LaneB", "echo", lambda *x: [])]
+
+
+def _ok_run_lane(monkeypatch):
+    monkeypatch.setattr(server.telemetry, "cooldown_remaining", lambda key: 0)
+
+    async def rl(lane, args, *, tool="ask", terse=True):
+        return RunResult(True, f"answer from {lane.key}", "ok", latency_ms=5)
+    monkeypatch.setattr(server, "_run_lane", rl)
+
+
+def test_ask_all_json_output(monkeypatch):
+    _ok_run_lane(monkeypatch)
+    out = asyncio.run(server._ask_all_body(_two_lanes(), {"task": "hi", "output_format": "json"}))
+    data = json.loads(out)
+    assert data["tool"] == "ask_all" and len(data["lanes"]) == 2
+    assert data["lanes"][0]["ok"] is True and "answer from a" in data["lanes"][0]["output"]
+
+
+def test_ask_all_summary_only_omits_blocks(monkeypatch):
+    _ok_run_lane(monkeypatch)
+    out = asyncio.run(server._ask_all_body(_two_lanes(), {"task": "hi", "summary_only": True}))
+    assert "## Council" in out                    # recap kept
+    assert "## LaneA - OK" not in out             # full per-lane block dropped
+
+
+def test_ask_all_dry_run_spawns_nothing(monkeypatch):
+    monkeypatch.setattr(server.telemetry, "cooldown_remaining", lambda key: 0)
+    spawned = {"n": 0}
+
+    async def rl(lane, args, *, tool="ask", terse=True):
+        spawned["n"] += 1
+        return RunResult(True, "x", "ok")
+    monkeypatch.setattr(server, "_run_lane", rl)
+    out = asyncio.run(server._ask_all_body(_two_lanes(), {"task": "hello", "dry_run": True}))
+    assert "dry run" in out and spawned["n"] == 0
+    # json dry run too
+    j = json.loads(asyncio.run(server._ask_all_body(
+        _two_lanes(), {"task": "hello", "dry_run": True, "output_format": "json"})))
+    assert j["dry_run"] is True and j["est_input_tokens_total"] >= 1
+

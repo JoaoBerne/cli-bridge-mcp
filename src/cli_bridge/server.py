@@ -230,6 +230,14 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                     "synthesize": {"type": "boolean",
                                    "description": "After collecting answers, have one free lane "
                                    "summarize where the models AGREE and DISAGREE. Default false."},
+                    "summary_only": {"type": "boolean",
+                                     "description": "Return only the recap (+synthesis), not each "
+                                     "lane's full answer — fewer tokens. Default false."},
+                    "output_format": {"type": "string", "enum": ["markdown", "json"],
+                                      "description": "markdown (default) or json (structured)."},
+                    "dry_run": {"type": "boolean",
+                                "description": "Preview which lanes + estimated cost WITHOUT "
+                                               "spawning anything. Default false."},
                 },
                 "required": ["task"],
             },
@@ -1159,7 +1167,11 @@ async def _ask_all_body(lanes: list[LaneSpec], args: dict) -> str:
                     "free for your plan via CLI_BRIDGE_<LANE>_COST=free.")
         return ("[error] no delegate CLIs installed. Run `doctor` to see install hints, "
                 "then install/log into at least one CLI (e.g. gemini, mistral, opencode).")
-    sub = {"task": _str(args, "task"), "cwd": _str(args, "cwd"),
+    out_fmt = _str(args, "output_format").lower() or "markdown"
+    task = _str(args, "task")
+    if bool(args.get("dry_run")):              # preview cost/lanes WITHOUT spawning anything
+        return _ask_all_plan(targets, task, out_fmt)
+    sub = {"task": task, "cwd": _str(args, "cwd"),
            "timeout_s": _ask_all_timeout(args.get("timeout_s"))}
     # Cap simultaneous spawns so a wide council (many custom lanes) can't OOM a small machine
     # or burst quota. Default high enough that a normal free council is unaffected. The semaphore
@@ -1187,17 +1199,52 @@ async def _ask_all_body(lanes: list[LaneSpec], args: dict) -> str:
     footer = (f"\n\n---\n_Skipped limited/paid lanes: {', '.join(skipped)} "
               f"(set include_paid=true)._"
               if skipped else "")
-    # Recap first so the host gets an at-a-glance digest of every lane before the full blocks.
-    recap = workflows.council_recap(rows, title="Council")
-    body = recap + "\n\n" + "\n\n".join(blocks) + footer
-
+    synth = ""
     if bool(args.get("synthesize")):
         ok = [(lane, res) for lane, res in zip(targets, results, strict=False)
               if not isinstance(res, BaseException) and res.ok]
-        synth = await _synthesize(_str(args, "task"), ok, targets)
-        if synth:
-            body += f"\n\n---\n## Synthesis (agreement / disagreement)\n\n{synth}"
+        synth = await _synthesize(task, ok, targets)
+
+    if out_fmt == "json":                      # structured output for CI / IDE / automation
+        return json.dumps({
+            "tool": "ask_all", "task": task,
+            "lanes": [
+                {"lane": lane.display, "ok": bool(getattr(res, "ok", False)),
+                 "kind": getattr(res, "kind", "crash"),
+                 "latency_ms": getattr(res, "latency_ms", 0),
+                 "output": (res.output if not isinstance(res, BaseException) and res.ok
+                            else (getattr(res, "output", "") or str(res)))}
+                for lane, res in zip(targets, results, strict=False)],
+            "synthesis": synth or None,
+            "skipped": skipped,
+        }, indent=2)
+
+    # Recap first so the host gets an at-a-glance digest of every lane before the full blocks.
+    recap = workflows.council_recap(rows, title="Council")
+    if bool(args.get("summary_only")):         # recap + synthesis only — skip the raw blocks (tokens-)
+        body = recap + footer
+    else:
+        body = recap + "\n\n" + "\n\n".join(blocks) + footer
+    if synth:
+        body += f"\n\n---\n## Synthesis (agreement / disagreement)\n\n{synth}"
     return body
+
+
+def _ask_all_plan(targets: list[LaneSpec], task: str, out_fmt: str) -> str:
+    """dry_run preview: which lanes would be queried + a rough ESTIMATED token/credit cost,
+    without spawning anything. chars/4 input estimate × lanes (output unknown, so input-only)."""
+    in_tok = max(1, len(task) // config.CHARS_PER_TOKEN)
+    rows = [{"lane": ln.display, "cost": ln.cost_label, "est_input_tokens": in_tok} for ln in targets]
+    if out_fmt == "json":
+        return json.dumps({"tool": "ask_all", "dry_run": True, "lanes": rows,
+                           "est_input_tokens_total": in_tok * len(targets),
+                           "note": "estimate only (chars/4); output tokens unknown until run"},
+                          indent=2)
+    lines = [f"# ask_all — dry run ({len(targets)} lanes, nothing spawned)", "",
+             f"_Each lane gets ~{in_tok} input tokens (est, chars/4); output adds more._\n"]
+    for r in rows:
+        lines.append(f"- {r['lane']} [{r['cost']}]")
+    return "\n".join(lines)
 
 
 async def _review_diff(lanes: list[LaneSpec], args: dict) -> list[TextContent]:
