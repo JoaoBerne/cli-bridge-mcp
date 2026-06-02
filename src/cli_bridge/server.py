@@ -73,20 +73,39 @@ def lanes_load_status() -> dict:
 server: Server = Server("cli-bridge", instructions=INSTRUCTIONS)
 
 
+_OVERFLOW_MAX_FILES = config.int_env("CLI_BRIDGE_OVERFLOW_MAX_FILES", 200, 0, 100_000)
+
+
 def _prune_overflow() -> None:
-    """Best-effort: drop overflow files older than OVERFLOW_TTL_H so the temp dir can't grow
-    without bound. Never raises — overflow is a convenience, not a guarantee."""
-    if OVERFLOW_TTL_H <= 0:
-        return
-    cutoff = time.time() - OVERFLOW_TTL_H * 3600
+    """Best-effort: drop overflow files older than OVERFLOW_TTL_H, and cap the file COUNT (keep
+    the newest CLI_BRIDGE_OVERFLOW_MAX_FILES, delete the oldest beyond) so the temp dir can't
+    grow without bound even within the TTL window. Never raises — overflow is a convenience."""
     try:
+        entries = []
+        cutoff = time.time() - OVERFLOW_TTL_H * 3600 if OVERFLOW_TTL_H > 0 else None
         for name in os.listdir(OVERFLOW_DIR):
             p = os.path.join(OVERFLOW_DIR, name)
             try:
-                if os.path.isfile(p) and os.path.getmtime(p) < cutoff:
-                    os.remove(p)
+                if not os.path.isfile(p):
+                    continue
+                mtime = os.path.getmtime(p)
             except OSError:
-                pass
+                continue
+            if cutoff is not None and mtime < cutoff:
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+            else:
+                entries.append((mtime, p))
+        # count cap: delete oldest beyond the limit
+        if _OVERFLOW_MAX_FILES and len(entries) > _OVERFLOW_MAX_FILES:
+            entries.sort()                       # oldest first
+            for _mtime, p in entries[:len(entries) - _OVERFLOW_MAX_FILES]:
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
     except OSError:
         pass
 
@@ -1285,9 +1304,23 @@ async def _doctor_deep(host: str, lanes: list[LaneSpec]) -> str:
         # tempt the model to reformat it. (Also dodges the preamble's per-call overhead here.)
         res = await _run_lane(ln, {"task": "Reply with exactly: OK", "timeout_s": 60}, terse=False)
         mark = "✅ responds" if res.ok else f"❌ {res.kind}"
-        return f"- **{ln.key}**: {mark}"
+        ver = await _lane_version(ln)
+        return f"- **{ln.key}**: {mark}{f' · v: {ver}' if ver else ''}"
     results = await asyncio.gather(*[_probe(ln) for ln in probes])
-    return base + "\n\n## Deep probe (live auth check, free lanes)\n\n" + "\n".join(results)
+    return (base + "\n\n## Deep probe (live auth check + CLI version, free lanes)\n\n"
+            + "\n".join(results)
+            + "\n\n_Versions help spot drift: if a CLI bumped and a lane breaks, file a `[drift]` issue._")
+
+
+async def _lane_version(lane: LaneSpec) -> str:
+    """Best-effort CLI version (first line of `<bin> --version`) — surfaces upstream drift."""
+    if not lane.version_args:
+        return ""
+    res = await runner.arun([lane.bin, *lane.version_args], 15)
+    if not res.ok:
+        return ""
+    first = (res.output or "").strip().splitlines()
+    return first[0][:60] if first else ""
 
 
 _SINCE_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}

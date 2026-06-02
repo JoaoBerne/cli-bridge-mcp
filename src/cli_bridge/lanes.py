@@ -40,6 +40,7 @@ class LaneSpec:
     default_model: str = ""               # used when caller omits model (env-overridable)
     models_args: list[str] | None = None  # argv to list models, or None
     help_args: list[str] | None = None    # argv to print CLI help, or None
+    version_args: tuple[str, ...] = ("--version",)   # argv to print the CLI's version (drift check)
     caps: frozenset[str] = field(default_factory=frozenset)        # {"model","effort","agent"}
     client_ids: frozenset[str] = field(default_factory=frozenset)  # MCP clientInfo.name == host
     bin_alts: tuple[str, ...] = ()        # fallback binaries if the default isn't on PATH

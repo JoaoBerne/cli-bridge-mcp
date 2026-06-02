@@ -221,3 +221,28 @@ def test_ask_all_dry_run_spawns_nothing(monkeypatch):
         _two_lanes(), {"task": "hello", "dry_run": True, "output_format": "json"})))
     assert j["dry_run"] is True and j["est_input_tokens_total"] >= 1
 
+
+# ── robustness: version capture + overflow cap (cluster 3) ───────────────────────────────────
+
+def test_lane_version_first_line(monkeypatch):
+    async def v(argv, timeout, cwd=None, env=None):
+        assert argv[1:] == ["--version"]
+        return RunResult(True, "mycli 1.2.3\n(build info)", "ok")
+    monkeypatch.setattr(server.runner, "arun", v)
+    ver = asyncio.run(server._lane_version(LaneSpec("x", "X", "mycli", lambda *a: [])))
+    assert ver == "mycli 1.2.3"
+
+
+def test_overflow_count_cap(monkeypatch, tmp_path):
+    import os
+    monkeypatch.setattr(server, "OVERFLOW_DIR", str(tmp_path))
+    monkeypatch.setattr(server, "OVERFLOW_TTL_H", 0)        # disable TTL prune; test count cap only
+    monkeypatch.setattr(server, "_OVERFLOW_MAX_FILES", 2)
+    for i in range(5):
+        p = tmp_path / f"f{i}.txt"
+        p.write_text("x")
+        os.utime(p, (1000 + i, 1000 + i))                  # distinct, increasing mtimes
+    server._prune_overflow()
+    names = {p.name for p in tmp_path.glob("*.txt")}
+    assert names == {"f3.txt", "f4.txt"}                   # only the 2 newest survive
+
