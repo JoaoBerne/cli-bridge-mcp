@@ -1436,6 +1436,7 @@ def _doctor(host: str) -> str:
 
 
 def main() -> None:
+    config.apply_file_config_to_env()   # JSON config fills any unset env var (env still wins)
     # Any job left 'running' in the DB is from a previous process whose delegates are gone —
     # flip it to 'interrupted' so its status is honest (v1 doesn't resume work across restarts).
     jobs.mark_interrupted_on_startup()
