@@ -284,6 +284,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> None:
+    config.apply_file_config_to_env()   # JSON config fills any unset env var (env still wins)
     args = build_parser().parse_args(argv)
     args.func(args)
 

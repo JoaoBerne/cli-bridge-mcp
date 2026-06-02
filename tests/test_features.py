@@ -1,8 +1,9 @@
 """Mock/dry-run, transient retry, and the trace bundle."""
 import asyncio
 import json
+import os
 
-from cli_bridge import detect, server
+from cli_bridge import config, detect, server
 from cli_bridge.lanes import LaneSpec
 from cli_bridge.runner import RunResult
 
@@ -245,4 +246,37 @@ def test_overflow_count_cap(monkeypatch, tmp_path):
     server._prune_overflow()
     names = {p.name for p in tmp_path.glob("*.txt")}
     assert names == {"f3.txt", "f4.txt"}                   # only the 2 newest survive
+
+
+# ── JSON config file (cluster 4) ─────────────────────────────────────────────────────────────
+
+def test_config_file_fills_env_but_env_wins(monkeypatch, tmp_path):
+    cfg = {
+        "profile": "max", "guard": "strict", "max_parallel": 9,
+        "lanes": {"gemini": {"cost": "free", "model": "g-1", "enabled": False}},
+        "CLI_BRIDGE_RAW_PASSTHROUGH": "x",
+    }
+    f = tmp_path / "config.json"
+    f.write_text(json.dumps(cfg))
+    monkeypatch.setenv("CLI_BRIDGE_CONFIG_FILE", str(f))
+    monkeypatch.setenv("CLI_BRIDGE_GUARD", "off")          # env preset -> must win over the file
+    monkeypatch.delenv("CLI_BRIDGE_PROFILE", raising=False)
+    saved = dict(os.environ)
+    try:
+        config.apply_file_config_to_env()
+        assert os.environ["CLI_BRIDGE_PROFILE"] == "max"           # from file
+        assert os.environ["CLI_BRIDGE_GUARD"] == "off"             # env won
+        assert os.environ["CLI_BRIDGE_MAX_PARALLEL"] == "9"
+        assert os.environ["CLI_BRIDGE_GEMINI_COST"] == "free"
+        assert os.environ["CLI_BRIDGE_GEMINI_MODEL"] == "g-1"
+        assert os.environ["CLI_BRIDGE_GEMINI_ENABLED"] == "false"
+        assert os.environ["CLI_BRIDGE_RAW_PASSTHROUGH"] == "x"     # passthrough
+    finally:
+        os.environ.clear()
+        os.environ.update(saved)                            # don't leak into other tests
+
+
+def test_config_file_missing_is_noop(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLI_BRIDGE_CONFIG_FILE", str(tmp_path / "absent.json"))
+    assert config.apply_file_config_to_env() == 0
 

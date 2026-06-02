@@ -6,6 +6,7 @@ state — so the server behaves identically on any host once the user sets their
 """
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 
@@ -17,6 +18,67 @@ MAX_TIMEOUT_S = 900
 ASK_ALL_DEFAULT_TIMEOUT_S = 45
 ASK_ALL_MAX_TIMEOUT_S = 60
 ASK_ALL_SYNTH_TIMEOUT_S = 45
+
+
+# ── optional JSON config file (a friendlier alternative to a wall of env vars) ──────────────
+# Loaded ONCE at startup (server/CLI main) and used to fill in any CLI_BRIDGE_* var not already
+# set in the environment — so the environment ALWAYS wins, and nothing is read at import (tests,
+# which never call main(), are unaffected). Friendly schema:
+#   {"profile":"max","terse":"lite","guard":"strict","max_parallel":6,"daily_credit_cap":5,
+#    "lanes":{"gemini":{"cost":"free","model":"…","enabled":true,"credits_per_1k":0,"daily_limit":100}}}
+# Top-level keys already named CLI_BRIDGE_* are passed through verbatim (escape hatch).
+_TOP_KEYS = {
+    "profile": "CLI_BRIDGE_PROFILE", "terse": "CLI_BRIDGE_TERSE", "guard": "CLI_BRIDGE_GUARD",
+    "max_parallel": "CLI_BRIDGE_MAX_PARALLEL", "daily_credit_cap": "CLI_BRIDGE_DAILY_CREDIT_CAP",
+    "cache_ttl_s": "CLI_BRIDGE_CACHE_TTL_S", "retries": "CLI_BRIDGE_RETRIES",
+    "allow_lanes": "CLI_BRIDGE_ALLOW_LANES", "terse_min_chars": "CLI_BRIDGE_TERSE_MIN_CHARS",
+}
+_LANE_KEYS = {
+    "cost": "COST", "model": "MODEL", "enabled": "ENABLED", "bin": "BIN",
+    "credits_per_1k": "CREDITS_PER_1K", "daily_limit": "DAILY_LIMIT", "priority": "PRIORITY",
+}
+
+
+def config_file_path() -> str:
+    return os.environ.get("CLI_BRIDGE_CONFIG_FILE", "").strip() \
+        or os.path.join(os.path.expanduser("~"), ".config", "cli-bridge", "config.json")
+
+
+def _flatten_config(cfg: dict) -> dict:
+    out: dict[str, str] = {}
+    if not isinstance(cfg, dict):
+        return out
+    for k, v in cfg.items():
+        if k.startswith("CLI_BRIDGE_"):
+            out[k] = str(v)
+        elif k in _TOP_KEYS and not isinstance(v, (dict, list)):
+            out[_TOP_KEYS[k]] = "true" if v is True else ("false" if v is False else str(v))
+        elif k == "lanes" and isinstance(v, dict):
+            for lane, fields in v.items():
+                if not isinstance(fields, dict):
+                    continue
+                for fk, fv in fields.items():
+                    suffix = _LANE_KEYS.get(fk)
+                    if suffix:
+                        out[f"CLI_BRIDGE_{lane.upper()}_{suffix}"] = (
+                            "true" if fv is True else ("false" if fv is False else str(fv)))
+    return out
+
+
+def apply_file_config_to_env() -> int:
+    """Fill any unset CLI_BRIDGE_* var from the JSON config file. Env wins (setdefault). Returns
+    the number of keys applied. Best-effort: a missing/invalid file is silently ignored."""
+    try:
+        with open(config_file_path(), encoding="utf-8") as fh:
+            cfg = json.load(fh)
+    except (OSError, ValueError):
+        return 0
+    applied = 0
+    for env_name, value in _flatten_config(cfg).items():
+        if env_name not in os.environ:
+            os.environ[env_name] = value
+            applied += 1
+    return applied
 
 
 def int_env(name: str, default: int, lo: int, hi: int) -> int:
