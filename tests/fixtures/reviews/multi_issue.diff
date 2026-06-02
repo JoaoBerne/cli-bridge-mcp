@@ -1,0 +1,22 @@
+diff --git a/api/handlers.py b/api/handlers.py
+index aaaa111..bbbb222 100644
+--- a/api/handlers.py
++++ b/api/handlers.py
+@@ -1,5 +1,18 @@
+ import os
++import subprocess
++
++SLACK_WEBHOOK = "https://hooks.slack.com/services/T000/B000/xoxb-not-a-real-token"
++API_KEY = "sk-proj-abcdef0123456789abcdef0123456789"
++
++def run_report(name):
++    # builds a shell string from user input
++    os.system("generate-report " + name)
++    subprocess.run("tar czf /tmp/out.tgz " + name, shell=True)
++
++def handle(query):
++    rows = db.execute("SELECT * FROM users WHERE name = '" + query + "'")
++    return eval(query)               # arbitrary code execution
+
+ def health():
+     return "ok"

@@ -218,6 +218,11 @@ Everything is environment variables — no code edits. Tune it to **your** subsc
 | `CLI_BRIDGE_RETRIES` | Retries on a TRANSIENT failure (default 1). Makes a flaky CLI work first-try; quota/auth/not-found/timeout are never retried. |
 | `CLI_BRIDGE_TRACE_DIR` | If set, each delegation writes a redacted JSON trace (argv, timing, output) here — reproducible debug / audit. Off by default. |
 | `CLI_BRIDGE_MAX_PARALLEL` | Cap on simultaneous delegate spawns in `ask_all` (default 6). Stops a wide council (many custom lanes) from OOM-ing a small machine or bursting quota. |
+| `CLI_BRIDGE_DAILY_CREDIT_CAP` | Hard ceiling on *estimated* paid spend per UTC day. >0 refuses a paid lane once today's estimate hits it — makes "cost-safe" enforceable, not just reported. Free lanes never gated. |
+| `CLI_BRIDGE_ALLOW_LANES` | Allowlist, e.g. `gemini,gpt`. Empty = all. Locked-down / team setups: only these lanes are exposed. |
+| `CLI_BRIDGE_DISABLE_BUILD` | `1` forces every delegate to read-only (plan) even if a caller asks `agent: build`. For shared machines. |
+| `CLI_BRIDGE_OVERFLOW_MAX_FILES` | Cap on overflow-dir file count (default 200); oldest beyond are pruned so `/tmp` can't grow unbounded. |
+| `CLI_BRIDGE_CONFIG_FILE` | Path to a JSON config (default `~/.config/cli-bridge/config.json`). A friendlier alternative to env vars — **env always wins**. See below. |
 | `CLI_BRIDGE_CACHE_TTL_S` | `0` = off (default). When `>0`, an identical call within this many seconds returns the cached answer instead of re-spawning the CLI (saves quota/credits on repeats; build runs are never cached). |
 | `CLI_BRIDGE_<LANE>_CREDITS_PER_1K` | Credits per 1k tokens for a lane, used by `usage_report`/`usage_budget` to **estimate** spend (chars/4). |
 | `CLI_BRIDGE_<LANE>_DAILY_LIMIT` | Max runs/day for a lane; `usage_budget` flags when exceeded. |
@@ -228,6 +233,25 @@ Everything is environment variables — no code edits. Tune it to **your** subsc
 | `CLI_BRIDGE_STATE_DB` | Path to the local sqlite state DB (default `~/.local/share/cli-bridge/state.sqlite`). |
 | `CLI_BRIDGE_STORE_TRANSCRIPTS` | `true` to keep a longer task preview in telemetry (default: hash + 60-char preview only). |
 | `CLI_BRIDGE_LOG` / `_LOG_FILE` | `debug`/`info` to log what ran where (default: silent). |
+
+### Config file (instead of a wall of env vars)
+
+Prefer a file? Drop `~/.config/cli-bridge/config.json` (or point `CLI_BRIDGE_CONFIG_FILE` at one).
+It fills in any env var you haven't set — **the environment always wins**, and defaults still work
+with no file at all:
+
+```json
+{
+  "profile": "balanced",
+  "guard": "warn",
+  "daily_credit_cap": 5.0,
+  "lanes": {
+    "gemini":   { "cost": "free" },
+    "opencode": { "cost": "free", "model": "opencode/deepseek-v4-flash-free" },
+    "gpt":      { "cost": "limited", "daily_limit": 50 }
+  }
+}
+```
 
 ### Add your own CLI (no fork)
 

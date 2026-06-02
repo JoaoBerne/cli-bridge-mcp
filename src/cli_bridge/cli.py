@@ -151,33 +151,53 @@ def _percentile(values, p):
     return s[i]
 
 
-def _cmd_bench(a):
-    lanes, _ = server._active_lanes()
-    lane = server._lane_by_key(a.lane, lanes)
-    if not lane:
-        sys.exit(f"[error] no such lane: {a.lane}. Run `cli-bridge doctor` for installed lanes.")
+def _bench_one(lane, prompt, runs, model, timeout):
     lat, oks, out_chars = [], 0, 0
-    for _ in range(a.runs):
+    for _ in range(runs):
         res = asyncio.run(server._run_lane(
-            lane, {"task": a.prompt, "model": a.model, "timeout_s": a.timeout}))
+            lane, {"task": prompt, "model": model, "timeout_s": timeout}))
         lat.append(res.latency_ms)
         if res.ok:
             oks += 1
             out_chars += len(res.output)
-    rep = {
-        "lane": lane.key, "model": lane.model_for(a.model), "runs": a.runs, "ok": oks,
-        "ok_rate": round(oks / a.runs, 3) if a.runs else 0,
+    return {
+        "lane": lane.key, "model": lane.model_for(model), "runs": runs, "ok": oks,
+        "ok_rate": round(oks / runs, 3) if runs else 0,
         "p50_ms": _percentile(lat, 50), "p95_ms": _percentile(lat, 95),
         "p99_ms": _percentile(lat, 99), "avg_ms": int(sum(lat) / len(lat)) if lat else 0,
         "est_output_tokens": out_chars // config.CHARS_PER_TOKEN,
     }
+
+
+def _cmd_bench(a):
+    lanes, _ = server._active_lanes()
+    if a.all:
+        targets = lanes if a.include_paid else [ln for ln in lanes
+                                                if not ln.is_paid and not ln.is_limited]
+        if not targets:
+            sys.exit("[error] no lanes to benchmark. Run `cli-bridge doctor`.")
+        reps = [_bench_one(ln, a.prompt, a.runs, "", a.timeout) for ln in targets]
+        if a.json:
+            print(json.dumps(reps, indent=2))
+        else:
+            print(f"# bench — {a.runs} runs/lane · prompt: {a.prompt[:50]!r}\n")
+            print("| lane | ok | p50 ms | p95 ms | p99 ms | avg ms | ~out tok |")
+            print("|------|----|-------:|-------:|-------:|-------:|---------:|")
+            for r in reps:
+                print(f"| {r['lane']} | {r['ok']}/{r['runs']} | {r['p50_ms']} | {r['p95_ms']} | "
+                      f"{r['p99_ms']} | {r['avg_ms']} | {r['est_output_tokens']} |")
+        return
+    lane = server._lane_by_key(a.lane, lanes) if a.lane else None
+    if not lane:
+        sys.exit(f"[error] no such lane: {a.lane}. Use --all, or `cli-bridge doctor`.")
+    r = _bench_one(lane, a.prompt, a.runs, a.model, a.timeout)
     if a.json:
-        print(json.dumps(rep, indent=2))
+        print(json.dumps(r, indent=2))
     else:
-        print(f"# bench {lane.key} ({rep['model'] or 'default'}) — {a.runs} runs")
-        print(f"ok {oks}/{a.runs} ({int(rep['ok_rate'] * 100)}%) | "
-              f"p50 {rep['p50_ms']}ms · p95 {rep['p95_ms']}ms · p99 {rep['p99_ms']}ms · "
-              f"avg {rep['avg_ms']}ms | ~{rep['est_output_tokens']} est out-tokens")
+        print(f"# bench {r['lane']} ({r['model'] or 'default'}) — {a.runs} runs")
+        print(f"ok {r['ok']}/{a.runs} ({int(r['ok_rate'] * 100)}%) | "
+              f"p50 {r['p50_ms']}ms · p95 {r['p95_ms']}ms · p99 {r['p99_ms']}ms · "
+              f"avg {r['avg_ms']}ms | ~{r['est_output_tokens']} est out-tokens")
 
 
 def _cmd_setup(a):
@@ -266,11 +286,13 @@ def build_parser() -> argparse.ArgumentParser:
     it.add_argument("--probe", action="store_true", help="also live-probe free lanes")
     it.set_defaults(func=_cmd_init)
 
-    bn = sub.add_parser("bench", help="benchmark a lane: latency p50/p95/p99 over N runs")
-    bn.add_argument("--lane", required=True)
+    bn = sub.add_parser("bench", help="benchmark a lane (or --all): latency p50/p95/p99 over N runs")
+    bn.add_argument("--lane", default="")
+    bn.add_argument("--all", action="store_true", help="benchmark every free lane → table")
     bn.add_argument("--prompt", required=True)
     bn.add_argument("--runs", type=int, default=5)
     bn.add_argument("--model", default="")
+    bn.add_argument("--include-paid", dest="include_paid", action="store_true")
     bn.add_argument("--timeout", type=int, default=None)
     bn.add_argument("--json", action="store_true")
     bn.set_defaults(func=_cmd_bench)

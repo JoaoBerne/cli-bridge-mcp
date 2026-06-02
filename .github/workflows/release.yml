@@ -1,0 +1,47 @@
+# Publish to PyPI on a version tag, via Trusted Publishing (OIDC — no API token stored).
+# One-time setup on PyPI: add a "pending publisher" for project `cli-bridge-mcp`, repo
+# JoaoBtt/cli-bridge-mcp, workflow `release.yml`, environment `pypi`. Then `git tag v0.1.0 &&
+# git push --tags` builds + publishes automatically.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build sdist + wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+      - name: Smoke-check the wheel imports + entry points
+        run: |
+          python -m pip install dist/*.whl
+          python -c "import cli_bridge, cli_bridge.cli, cli_bridge.server; print('import ok')"
+          cli-bridge --help >/dev/null && echo "cli-bridge entry ok"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write        # required for Trusted Publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
