@@ -32,3 +32,26 @@ def test_setup_text_is_conversational_not_a_locked_menu():
 def test_instructions_tell_host_to_ask():
     assert "setup" in server.INSTRUCTIONS
     assert "free is best" in server.INSTRUCTIONS  # explicitly warns against the assumption
+
+
+def test_instructions_cover_the_new_capabilities():
+    # the host must be told it can hold a round-table and delegate work safely
+    instr = server.INSTRUCTIONS.lower()
+    assert "round-table" in instr or "conversation" in instr
+    assert "ask_build_isolated" in server.INSTRUCTIONS
+    assert "when not to" in instr          # the "don't convene for one-liners" guardrail
+
+
+def test_setup_recommends_a_concrete_config(monkeypatch):
+    from cli_bridge.lanes import LaneSpec
+    monkeypatch.delenv("CLI_BRIDGE_PROFILE", raising=False)
+    free = LaneSpec("gemini", "Gemini", "echo", lambda *x: [], cost_default="free")
+    paid = LaneSpec("op", "OP", "echo", lambda *x: [], cost_default="paid")
+    rec = server._setup_recommendation([free, paid])
+    assert "gemini" in rec and "op" in rec       # lanes classified
+    assert "Recommended" in rec and "CLI_BRIDGE_PROFILE" in rec
+    assert "CLI_BRIDGE_DAILY_CREDIT_CAP" in rec  # a paid lane present -> recommend a cap
+
+
+def test_setup_recommendation_handles_no_lanes():
+    assert "No delegate CLIs" in server._setup_recommendation([])

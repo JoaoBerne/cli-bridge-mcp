@@ -92,7 +92,7 @@ def _clip(text: str) -> str:
 class RunResult:
     ok: bool
     output: str
-    kind: str = "ok"          # ok | timeout | not_found | quota | auth | failed | spawn
+    kind: str = "ok"          # ok | timeout | not_found | quota | auth | failed | spawn | empty
     exit_code: int | None = None
     latency_ms: int = 0       # wall time of the spawn, filled in by the caller (server._run_lane)
 
@@ -106,6 +106,7 @@ class RunResult:
             "quota": " - this CLI's quota/rate limit is exhausted; try later or another lane",
             "auth": " - log into this CLI in your terminal, then retry",
             "not_found": " - is the CLI installed and on PATH?",
+            "empty": " - this CLI exited cleanly but returned nothing; another lane may answer",
         }.get(self.kind, "")
         return f"[{self.kind}] {self.output}{hint}".rstrip()
 
@@ -139,15 +140,25 @@ def run(argv: list[str], timeout_s: int, cwd: str | None = None,
     err = redact((err or "").strip())
 
     if proc.returncode == 0:
-        # stdout only on success; stderr here is banner/progress noise. Fall back to
-        # stderr if stdout is empty (a few CLIs put a short answer there).
-        return RunResult(True, _clip(out or err or "(empty response)"), "ok", 0)
+        return _ok_or_empty(out, err, argv)
 
     blob = f"{err}\n{out}"
     kind = "quota" if _QUOTA.search(blob) else "auth" if _AUTH.search(blob) else "failed"
     detail = err or out or "(no output)"
     return RunResult(False, _clip(f"{argv[0]} exit {proc.returncode}: {detail}"),
                      kind, proc.returncode)
+
+
+def _ok_or_empty(out: str, err: str, argv: list[str]) -> RunResult:
+    """Map an exit-0 run to a result. stdout is the answer; stderr is usually banner/progress
+    noise, but a few CLIs put a short answer there, so fall back to it. An exit-0 with NO output
+    at all is a SOFT failure ("empty") — some CLIs (e.g. `agy` in print mode) exit clean yet say
+    nothing — so ask_cascade/ask_best fall THROUGH to a lane that actually answers instead of
+    stopping on a blank. Not retried, not cached, not a cooldown (it's per-call, not lane health)."""
+    text = out or err
+    if not text:
+        return RunResult(False, f"`{argv[0]}` returned no output (exit 0)", "empty", 0)
+    return RunResult(True, _clip(text), "ok", 0)
 
 
 def _kill_group(proc: subprocess.Popen) -> None:
@@ -170,9 +181,7 @@ def _finish(returncode, out, err, argv) -> RunResult:
     out = redact((out or "").strip())
     err = redact((err or "").strip())
     if returncode == 0:
-        # stdout only on success; stderr here is banner/progress noise. Fall back to stderr
-        # if stdout is empty (a few CLIs put a short answer there).
-        return RunResult(True, _clip(out or err or "(empty response)"), "ok", 0)
+        return _ok_or_empty(out, err, argv)
     blob = f"{err}\n{out}"
     kind = "quota" if _QUOTA.search(blob) else "auth" if _AUTH.search(blob) else "failed"
     detail = err or out or "(no output)"

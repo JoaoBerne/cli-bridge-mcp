@@ -13,6 +13,36 @@ def test_slug_normalizes_host_names():
     assert server._slug("Anthropic  Claude!") == "anthropic--claude"
 
 
+def test_flag_drift_section_flags_broken_lane(monkeypatch):
+    clean = LaneSpec("c", "C", "cbin", lambda *x: [], help_args=["--help"], probe_flags=("-p", "-m"))
+    broke = LaneSpec("b", "B", "bbin", lambda *x: [], help_args=["--help"], probe_flags=("--old",))
+    gone = LaneSpec("g", "G", "gbin", lambda *x: [], help_args=["--help"], probe_flags=("-x",))
+
+    async def fake_arun(argv, timeout, cwd=None, env=None):
+        text = {"cbin": "options: -p PROMPT, -m MODEL", "bbin": "options: --fresh only"}.get(argv[0])
+        if text is None:                                   # gbin: CLI not installed
+            return RunResult(False, "not found", "not_found")
+        return RunResult(True, text, "ok")
+    monkeypatch.setattr(server.runner, "arun", fake_arun)
+
+    out = asyncio.run(server._flag_drift_section([clean, broke, gone]))
+    assert "Flag drift" in out
+    assert "**b**" in out and "--old" in out               # broke: flag missing from help
+    assert "**c**" not in out                              # clean: all flags present
+    assert "**g**" not in out                              # uninstalled: no help -> no false alarm
+
+
+def test_flag_drift_section_clean_when_all_present(monkeypatch):
+    lane = LaneSpec("c", "C", "cbin", lambda *x: [], help_args=["--help"], probe_flags=("-p",))
+
+    async def fake_arun(argv, timeout, cwd=None, env=None):
+        return RunResult(True, "usage: -p PROMPT", "ok")
+    monkeypatch.setattr(server.runner, "arun", fake_arun)
+
+    out = asyncio.run(server._flag_drift_section([lane]))
+    assert "still present" in out and "drift" not in out.lower()
+
+
 def test_str_coerces_null_to_empty():
     assert server._str({"x": None}, "x") == ""        # JSON null must not become "None"
     assert server._str({}, "x") == ""
@@ -90,6 +120,26 @@ def test_ask_best_picks_a_lane_and_traces(monkeypatch):
     out = asyncio.run(server._ask_best([a, b], {"task": "hi", "mode": "cheap"}))
     text = out[0].text
     assert "best answer" in text and "mode 'cheap'" in text
+
+
+def test_ask_best_falls_through_empty_lane(monkeypatch):
+    # The live scenario: the top-routed lane (agy/gemini) exits clean but says NOTHING. ask_best
+    # must skip that blank and return the lane that actually answers — not hand back "".
+    a = LaneSpec("a", "LaneA", "echo", lambda *x: [])
+    b = LaneSpec("b", "LaneB", "echo", lambda *x: [])
+    monkeypatch.setattr(server.telemetry, "cooldown_remaining", lambda key: 0)
+    monkeypatch.setattr(server.telemetry, "lane_perf", lambda: {})
+
+    async def fake_run_lane(lane, args, *, tool="ask", terse=True):
+        if lane.key == "a":
+            return RunResult(False, "`agy` returned no output (exit 0)", "empty", latency_ms=9)
+        return RunResult(True, "real answer", "ok", latency_ms=15)
+    monkeypatch.setattr(server, "_run_lane", fake_run_lane)
+
+    out = asyncio.run(server._ask_best([a, b], {"task": "hi", "mode": "cheap"}))
+    text = out[0].text
+    assert "real answer" in text
+    assert "❌ a [free] 9ms — empty" in text and "✅ **b**" in text
 
 
 def test_ask_best_rejects_unknown_mode(monkeypatch):

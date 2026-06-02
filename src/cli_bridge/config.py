@@ -185,6 +185,27 @@ REVIEW_DEFAULT_TIMEOUT_S = int_env("CLI_BRIDGE_REVIEW_TIMEOUT_S", 180, 1, MAX_TI
 REVIEW_DIFF_MAX_CHARS = int_env("CLI_BRIDGE_REVIEW_DIFF_MAX_CHARS", 60000, 2000, 1_000_000)
 
 
+# ── round-table conversations (multi-turn, multi-lane threads via transcript replay) ──────
+def convo_max_chars() -> int:
+    """Sliding-window cap (chars) on the history replayed before each conversation turn.
+    ~4 chars/token, so 32000 ≈ 8k tokens — about two rounds of a 4-lane round-table, or
+    ~8-16 turns one-on-one. Bounds per-turn token cost regardless of how long the thread
+    grows (oldest turns are dropped, newest kept). Clamped 1000..1_000_000."""
+    return int_env("CLI_BRIDGE_CONVO_MAX_CHARS", 32000, 1000, 1_000_000)
+
+
+def convo_max_stored() -> int:
+    """Keep at most this many conversations in the local DB (oldest pruned whole). Threads are
+    session-scoped in spirit — no need to hoard old ones forever. Clamped 1..100000."""
+    return int_env("CLI_BRIDGE_CONVO_MAX_STORED", 200, 1, 100_000)
+
+
+def convo_log_dir() -> str:
+    """If set, each conversation is also mirrored to a readable <id>.md transcript here (handy
+    to re-read a round-table after a /compact). Empty = off (sqlite is the source of truth)."""
+    return os.environ.get("CLI_BRIDGE_CONVO_LOG_DIR", "").strip()
+
+
 # ── subagent-style overflow ───────────────────────────────────────────────────────────
 INLINE_MAX_CHARS = int_env("CLI_BRIDGE_INLINE_MAX_CHARS", 12000, 500, 1_000_000)
 OVERFLOW_DIR = os.environ.get("CLI_BRIDGE_OVERFLOW_DIR", "").strip() \
@@ -255,20 +276,39 @@ SETUP_TEXT = (
     "     CLI_BRIDGE_<LANE>_MODEL = <id>          (their preferred default model for a lane)\n"
     "     CLI_BRIDGE_PROFILE = saver|balanced|max (optional shorthand if they'd rather not "
     "go lane-by-lane: saver=free only, balanced=paid when it earns it, max=best by default)\n"
+    "     CLI_BRIDGE_DAILY_CREDIT_CAP = <n>        (hard ceiling on ESTIMATED paid spend/day — "
+    "a safety net so paid lanes can be used WITHOUT agonising over each call)\n"
     "4. Confirm back what you understood. The user stays in control — this just sets your "
-    "default behaviour so they don't have to repeat it each call."
+    "default behaviour so they don't have to repeat it each call. Once set, spend confidently "
+    "within it; don't ask permission for every paid call — the cap protects them."
 )
 
 INSTRUCTIONS = (
-    "cli-bridge lets you consult other AI CLIs (Gemini, GPT, Mistral, opencode, …) as a "
-    "council. Each lane spawns the official CLI (ban-safe, no key extraction), read-only by "
-    "default.\n\n"
-    "FIRST RUN — understand the user's cost situation: if their preferences aren't configured "
-    "(no CLI_BRIDGE_PROFILE / per-lane COST set), call `setup` and have a brief conversation "
-    "to learn what each CLI costs THEM and how freely to use it. Do NOT assume 'free is best' "
-    "— someone on a big plan may want top models by default; someone on metered credits won't. "
-    "Configure to their actual answer.\n\n"
-    "Then: `ask_<lane>` for one model, `ask_all` to poll several in parallel, `ask_cascade` to "
-    "auto-fall-back on failure, `doctor` to see what's installed and the current cost/quota "
-    "stance."
+    "cli-bridge lets you (any MCP host) consult a COUNCIL of other AI CLIs (Gemini, GPT, "
+    "Mistral, opencode, …). Each lane spawns the official CLI — ban-safe, no API keys, no token "
+    "extraction — read-only by default.\n\n"
+    "WHAT YOU CAN DO:\n"
+    "• `ask_<lane>` one model · `ask_all` poll several in parallel · `ask_best` mode="
+    "fast|cheap|deep|code|review|security (let the router pick) · `ask_cascade` cheapest→"
+    "strongest with auto-fallback.\n"
+    "• LEARNS from you: after you judge a delegate's answer, `rate_lane` it 1–5 (with the mode). "
+    "ask_best then prefers the lanes that actually win each task-type ON THIS MACHINE — a local "
+    "signal that persists across sessions, not a guess.\n"
+    "• ROUND-TABLE memory: pass conversation='new' to any `ask_<lane>`, then reuse the returned "
+    "id — even on a DIFFERENT lane — for a multi-turn, multi-model thread that SURVIVES your "
+    "context reset (/compact). `conversations_list` / `conversation_show` to recover and read.\n"
+    "• Delegate REAL WORK safely: `ask_build_isolated` runs a build agent in a throwaway git "
+    "worktree and returns a DIFF — your repo is never touched. Council tools advise; this one "
+    "acts, safely.\n"
+    "• `review_diff` / `security_review` / `debate` / `premortem` / `test_plan` for structured "
+    "workflows. `doctor` to see what's installed.\n\n"
+    "WHEN TO CONSULT: a hard or ambiguous problem, a second opinion before shipping, a domain a "
+    "particular model is strong at, a debugging dead-end. WHEN NOT TO: trivial edits, simple "
+    "library lookups, things you're already sure of — don't convene a council for one-liners.\n\n"
+    "COST — spend with confidence, don't agonise: the user sets a profile (saver/balanced/max) "
+    "and an optional hard daily cap; operate freely within it (the cap stops overspend by "
+    "itself). On FIRST use, if no profile/cost is set, call `setup` once — it detects what's "
+    "installed and recommends a config to confirm — don't assume 'free is best' (someone on a "
+    "big plan may want top models by default). Free lanes never cost anything; the user can "
+    "say 'use the best on this one' or 'keep it cheap' per request."
 )

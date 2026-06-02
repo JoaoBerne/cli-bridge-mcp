@@ -62,43 +62,68 @@ _MODE_POLICY = {
     "security": {"paid": False, "limited": True,  "sort": "capability"},
 }
 _UNKNOWN_LATENCY_MS = 30000   # untried lanes sit between known-fast and known-slow
+MIN_RATINGS = 2               # ratings needed before a lane's quality score steers routing
 
 
 def _fail_bucket(fail_rate: float) -> int:
     return 0 if fail_rate < 0.34 else (1 if fail_rate < 0.67 else 2)
 
 
-def _mode_key(lane: LaneSpec, cd: int, perf: dict, sort: str) -> tuple:
+def _quality_bucket(q: dict) -> int:
+    """Outcome-tracked routing signal: lower sorts first. A lane with enough host ratings is
+    bucketed by its mean score (1..5); below MIN_RATINGS it stays NEUTRAL — so a proven-good lane
+    beats an untried one, an untried one beats a proven-bad one, and zero feedback changes nothing."""
+    n, avg = q.get("n", 0), q.get("avg")
+    if not n or n < MIN_RATINGS or avg is None:
+        return 2                      # unknown / too little data — neutral
+    if avg >= 4.0:
+        return 0                      # strong
+    if avg >= 3.0:
+        return 1                      # decent
+    if avg >= 2.0:
+        return 3                      # weak
+    return 4                          # poor
+
+
+def _mode_key(lane: LaneSpec, cd: int, perf: dict, qual: dict, sort: str) -> tuple:
     cooled = 1 if cd > 0 else 0
     fb = _fail_bucket(perf.get("fail_rate", 0.0))
+    qb = _quality_bucket(qual)
     cost = _COST_RANK.get(lane.cost_label, 3)
     prio = _priority(lane)
     if sort == "latency":
-        return (cooled, fb, perf.get("avg_ms") or _UNKNOWN_LATENCY_MS, cost, prio, lane.key)
+        # asked for fast: measured latency leads; quality only breaks ties (you didn't ask for best).
+        return (cooled, fb, perf.get("avg_ms") or _UNKNOWN_LATENCY_MS, qb, cost, prio, lane.key)
     if sort == "capability":
+        # deep/code/review/security: measured quality is the most task-relevant signal, so it
+        # leads and overrides the effort-capability heuristic when real outcomes disagree with it.
         has_effort = 0 if "effort" in lane.caps else 1   # effort-capable (deep thinkers) first
-        return (cooled, has_effort, fb, cost, prio, lane.key)
-    return (cooled, cost, fb, prio, lane.key)   # "cost"
+        return (cooled, qb, has_effort, fb, cost, prio, lane.key)
+    return (cooled, cost, qb, fb, prio, lane.key)   # "cost": quality breaks cost ties
 
 
 def order_for_mode(lanes: list[LaneSpec], cooldown_of: Callable[[str], int],
                    perf_of: Callable[[str], dict], mode: str, include_paid: bool,
-                   include_limited: bool | None = None) -> list[LaneSpec]:
+                   include_limited: bool | None = None,
+                   quality_of: Callable[[str], dict] | None = None) -> list[LaneSpec]:
     pol = _MODE_POLICY.get(mode, _MODE_POLICY["cheap"])
     if include_limited is None:
         include_limited = include_paid
+    qual_of = quality_of or (lambda _k: {})
     allow_paid = pol["paid"] and include_paid
     allow_limited = pol["limited"] and include_limited
     pool = [ln for ln in lanes
             if (allow_paid or not ln.is_paid) and (allow_limited or not ln.is_limited)]
     return sorted(pool, key=lambda ln: _mode_key(ln, cooldown_of(ln.key), perf_of(ln.key),
-                                                  pol["sort"]))
+                                                  qual_of(ln.key), pol["sort"]))
 
 
 def explain_mode(lanes: list[LaneSpec], cooldown_of: Callable[[str], int],
-                 perf_of: Callable[[str], dict], mode: str, include_paid: bool) -> str:
+                 perf_of: Callable[[str], dict], mode: str, include_paid: bool,
+                 quality_of: Callable[[str], dict] | None = None) -> str:
     pol = _MODE_POLICY.get(mode, _MODE_POLICY["cheap"])
-    ordered = order_for_mode(lanes, cooldown_of, perf_of, mode, include_paid)
+    qual_of = quality_of or (lambda _k: {})
+    ordered = order_for_mode(lanes, cooldown_of, perf_of, mode, include_paid, quality_of=quality_of)
     if not ordered:
         return f"No eligible lanes for mode '{mode}'."
     rows = []
@@ -109,6 +134,9 @@ def explain_mode(lanes: list[LaneSpec], cooldown_of: Callable[[str], int],
             bits.append(f"cooldown {cooldown_of(ln.key)}s")
         if p.get("runs"):
             bits.append(f"~{p['avg_ms']}ms, {int(p['fail_rate'] * 100)}% fail")
+        q = qual_of(ln.key)
+        if q.get("n"):
+            bits.append(f"rated {q['avg']}/5 (n={q['n']})")
         rows.append(f"{i}. {ln.key} ({', '.join(bits)})")
     return (f"Mode '{mode}' (sort: {pol['sort']}) order — would try:\n" + "\n".join(rows))
 

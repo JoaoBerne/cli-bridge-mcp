@@ -125,6 +125,71 @@ def test_qwen_and_copilot_build_flags():
     assert "--allow-all-tools" in _lane("copilot").build_ask("t", "", "", "build")
 
 
+# ── Grok built-in lane (experimental; no hardcoded model) ──────────────────────────────
+
+def test_grok_lane_exists_no_hardcoded_model():
+    lane = _lane("grok")
+    assert lane.experimental and "model" in lane.caps
+    assert lane.default_model == ""                       # never pin a model that can age out
+    argv = lane.build_ask("hi", "", "", "")
+    assert argv == ["--prompt", "hi"]                     # empty model -> CLI's own default
+    argv2 = lane.build_ask("hi", "grok-x", "", "")
+    assert "--model" in argv2 and "grok-x" in argv2
+
+
+# ── opencode free-model discovery is PATTERN-based, not a pinned name ───────────────────
+
+def test_opencode_default_never_picks_a_paid_model(monkeypatch):
+    # Cost-safety: a bare `opencode/*` Zen model bills per-token and `opencode-go/*` spends
+    # credits. With NO `-free` model listed, the empty-model default must NOT silently select a
+    # paid one — it falls to the free seed instead.
+    lanes._opencode_model_cache.clear()
+    monkeypatch.setattr(lanes.subprocess, "run", lambda *a, **k: SimpleNamespace(
+        returncode=0, stdout="opencode/zen-next\nopencode-go/paid-pro\n"))
+    try:
+        picked = _lane("opencode").model_for("")
+        assert picked.endswith("-free")                       # never the paid zen / go model
+        assert picked not in {"opencode/zen-next", "opencode-go/paid-pro"}
+    finally:
+        lanes._opencode_model_cache.clear()
+
+
+def test_opencode_default_de_pinned_picks_any_free(monkeypatch):
+    # Future-proof: not tied to a specific name. If deepseek-* is gone, another `-free` is picked.
+    lanes._opencode_model_cache.clear()
+    monkeypatch.setattr(lanes.subprocess, "run", lambda *a, **k: SimpleNamespace(
+        returncode=0, stdout="opencode/new-mini-free\nopencode/zen-paid\nopencode-go/pro\n"))
+    try:
+        assert _lane("opencode").model_for("") == "opencode/new-mini-free"
+    finally:
+        lanes._opencode_model_cache.clear()
+
+
+# ── flag-drift health check (pure part) + custom-lane probe derivation ──────────────────
+
+def test_missing_flags_pure():
+    help_text = "Usage: codex exec [--sandbox MODE] [-m MODEL]"
+    assert lanes.missing_flags(help_text, ("--sandbox", "-m")) == []
+    assert lanes.missing_flags(help_text, ("--sandbox", "--gone")) == ["--gone"]
+    assert lanes.missing_flags("", ("-m",)) == []          # no help -> can't tell -> no alarm
+    assert lanes.missing_flags(help_text, ()) == []        # nothing to probe
+
+
+def test_builtin_lanes_declare_probe_flags():
+    for key in ("claude", "gpt", "gemini", "mistral", "opencode", "grok"):
+        assert _lane(key).probe_flags, f"{key} should declare probe_flags for drift detection"
+
+
+def test_custom_lane_derives_probe_flags(tmp_path, monkeypatch):
+    cfg = tmp_path / "lanes.json"
+    cfg.write_text(json.dumps([{
+        "key": "grok2", "display": "Grok2", "bin": "grok", "model_flag": "-m",
+        "ask": ["chat", "--json", "{task}"]}]))
+    monkeypatch.setenv("CLI_BRIDGE_LANES_FILE", str(cfg))
+    lane = next(ln for ln in lanes.load_custom_lanes() if ln.key == "grok2")
+    assert lane.probe_flags == ("-m", "--json")            # model flag + dash-args from template
+
+
 def test_env_bin_override(monkeypatch):
     monkeypatch.setenv("CLI_BRIDGE_GEMINI_BIN", "agy")
     assert _lane("gemini").bin == "agy"

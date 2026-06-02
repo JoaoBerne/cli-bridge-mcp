@@ -93,6 +93,25 @@ CREATE TABLE IF NOT EXISTS jobs (
   created_at REAL NOT NULL,
   updated_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS conversation_turns (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  conversation_id TEXT NOT NULL,
+  turn_number INTEGER NOT NULL,
+  lane TEXT,
+  role TEXT NOT NULL,
+  content TEXT NOT NULL,
+  created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_convo_turns ON conversation_turns(conversation_id, turn_number);
+CREATE TABLE IF NOT EXISTS lane_ratings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  lane TEXT NOT NULL,
+  mode TEXT NOT NULL DEFAULT '',
+  score REAL NOT NULL,
+  note TEXT,
+  created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_lane_ratings ON lane_ratings(lane, mode);
 """
 
 
@@ -257,6 +276,50 @@ def lane_perf() -> dict:
         out[lane] = {"runs": n, "avg_ms": int(avg or 0),
                      "fail_rate": (1 - (ok or 0) / n) if n else 0.0}
     return out
+
+
+def rate_lane(lane: str, mode: str, score: float, note: str = "") -> dict:
+    """Record the host's quality score for a lane on a task-type (mode), then return that lane's
+    new {n, avg} for the mode. This is the outcome signal the router learns from — it personalizes
+    ask_best to which lane actually wins which task ON THIS MACHINE, and survives restarts. Score
+    scale is the caller's (server uses 1..5). Best-effort: {} if telemetry is unavailable."""
+    conn = _connect()
+    if conn is None or not lane:
+        return {}
+    mode = mode or ""
+    try:
+        with _LOCK:
+            conn.execute(
+                "INSERT INTO lane_ratings (lane, mode, score, note, created_at) VALUES (?,?,?,?,?)",
+                (lane, mode, float(score), (note or "")[:200], _now()))
+            row = conn.execute(
+                "SELECT COUNT(*), AVG(score) FROM lane_ratings WHERE lane=? AND mode=?",
+                (lane, mode)).fetchone()
+            conn.commit()
+    except (sqlite3.Error, ValueError):
+        return {}
+    return {"n": int(row[0] or 0), "avg": round(row[1], 2) if row[1] is not None else None}
+
+
+def lane_quality(mode: str = "") -> dict:
+    """{lane: {"n", "avg"}} of host-given quality scores. With a mode, ratings for THAT task-type
+    only (the per-task routing signal); empty mode pools every rating. Best-effort: {} on error."""
+    conn = _connect()
+    if conn is None:
+        return {}
+    try:
+        with _LOCK:
+            if mode:
+                rows = conn.execute(
+                    "SELECT lane, COUNT(*), AVG(score) FROM lane_ratings WHERE mode=? "
+                    "GROUP BY lane", (mode,)).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT lane, COUNT(*), AVG(score) FROM lane_ratings GROUP BY lane").fetchall()
+    except sqlite3.Error:
+        return {}
+    return {lane: {"n": int(n or 0), "avg": round(avg, 2) if avg is not None else None}
+            for lane, n, avg in rows}
 
 
 def _est_credits(lane: str, total_tokens: float) -> float | None:
@@ -455,6 +518,91 @@ def jobs_mark_running_interrupted() -> int:
             return cur.rowcount
     except sqlite3.Error:
         return 0
+
+
+# ── round-table conversations (full transcript stored locally; never leaves the machine) ──
+# Unlike runs/cache these store the FULL turn text by necessity — that IS the feature, and it
+# stays local like response_cache. conversations.py builds the recipient-aware replay from
+# these rows; the sliding window bounds what gets replayed, not what's stored.
+
+def convo_append(conversation_id: str, lane: str, role: str, content: str) -> int:
+    """Append a turn; return its 1-based turn_number (0 if telemetry is unavailable). Prunes
+    conversations beyond config.convo_max_stored(). Best-effort: never raises."""
+    conn = _connect()
+    if conn is None or not conversation_id:
+        return 0
+    try:
+        with _LOCK:
+            row = conn.execute(
+                "SELECT COALESCE(MAX(turn_number), 0) FROM conversation_turns "
+                "WHERE conversation_id=?", (conversation_id,)).fetchone()
+            turn_number = int(row[0]) + 1
+            conn.execute(
+                "INSERT INTO conversation_turns (conversation_id, turn_number, lane, role, "
+                "content, created_at) VALUES (?,?,?,?,?,?)",
+                (conversation_id, turn_number, lane or "", role, content, _now()))
+            _prune_conversations(conn)
+            conn.commit()
+            return turn_number
+    except sqlite3.Error:
+        return 0
+
+
+def convo_turns(conversation_id: str) -> list[dict]:
+    """All turns for a conversation, oldest-first. Best-effort: [] on any error."""
+    conn = _connect()
+    if conn is None or not conversation_id:
+        return []
+    try:
+        with _LOCK:
+            rows = conn.execute(
+                "SELECT turn_number, lane, role, content, created_at FROM conversation_turns "
+                "WHERE conversation_id=? ORDER BY turn_number", (conversation_id,)).fetchall()
+    except sqlite3.Error:
+        return []
+    return [{"turn_number": r[0], "lane": r[1], "role": r[2], "content": r[3], "created_at": r[4]}
+            for r in rows]
+
+
+def convo_list(limit: int = 30) -> list[dict]:
+    """Recent conversations (most-recently-active first): id, lanes involved, turn count, last
+    activity, short preview of the latest turn. Lets a host recover a thread id after a context
+    reset / compaction. Best-effort: [] on any error."""
+    conn = _connect()
+    if conn is None:
+        return []
+    try:
+        with _LOCK:
+            rows = conn.execute(
+                "SELECT conversation_id, COUNT(*), MAX(created_at), "
+                "GROUP_CONCAT(DISTINCT lane) FROM conversation_turns "
+                "GROUP BY conversation_id ORDER BY MAX(created_at) DESC LIMIT ?",
+                (max(1, limit),)).fetchall()
+            out = []
+            for cid, n, last, lanes in rows:
+                prev = conn.execute(
+                    "SELECT content FROM conversation_turns WHERE conversation_id=? "
+                    "ORDER BY turn_number DESC LIMIT 1", (cid,)).fetchone()
+                lane_list = sorted(p for p in (lanes or "").split(",") if p)
+                out.append({"conversation_id": cid, "turns": n, "last_at": last,
+                            "lanes": lane_list,
+                            "preview": ((prev[0] if prev else "")[:80]).replace("\n", " ")})
+            return out
+    except sqlite3.Error:
+        return []
+
+
+def _prune_conversations(conn: sqlite3.Connection) -> None:
+    """Keep only the newest config.convo_max_stored() conversations; delete older ones whole."""
+    keep = config.convo_max_stored()
+    try:
+        rows = conn.execute(
+            "SELECT conversation_id FROM conversation_turns GROUP BY conversation_id "
+            "ORDER BY MAX(created_at) DESC").fetchall()
+        for (cid,) in rows[keep:]:
+            conn.execute("DELETE FROM conversation_turns WHERE conversation_id=?", (cid,))
+    except sqlite3.Error:
+        pass
 
 
 def _reset_for_tests() -> None:

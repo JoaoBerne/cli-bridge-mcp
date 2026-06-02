@@ -41,6 +41,19 @@ def test_empty_command():
     assert not r.ok and r.kind == "spawn"
 
 
+def test_empty_exit0_is_soft_failure():
+    # A CLI that exits clean but prints nothing (e.g. agy in print mode) must NOT count as a
+    # successful answer — it's a soft failure so ask_cascade/ask_best fall through to a real one.
+    r = runner.run(["sh", "-c", "exit 0"], 30)
+    assert not r.ok and r.kind == "empty"
+
+
+def test_exit0_stderr_only_still_answers():
+    # A short answer on stderr with exit 0 is still a real answer (not empty).
+    r = runner.run(["sh", "-c", "echo theanswer 1>&2"], 30)
+    assert r.ok and r.output == "theanswer"
+
+
 def test_timeout_kills_grandchild():
     marker = "/tmp/cli_bridge_orphan_marker"
     if os.path.exists(marker):
