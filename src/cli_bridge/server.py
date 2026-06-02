@@ -31,6 +31,7 @@ from mcp.types import (
 
 from . import (
     config,
+    conversations,
     findings,
     guards,
     jobs,
@@ -40,6 +41,9 @@ from . import (
     telemetry,
     workflows,
     worktrees,
+)
+from . import (
+    lanes as lanes_mod,
 )
 from .config import (
     ASK_ALL_DEFAULT_TIMEOUT_S,
@@ -137,6 +141,41 @@ def _emit(text: str, label: str = "answer", guard: bool = True) -> TextContent:
         return TextContent(type="text", text=text[:INLINE_MAX_CHARS] + "\n\n[... clipped]")
 
 
+async def _emit_progress(done: int, total: int, msg: str = "") -> None:
+    """Stream an MCP progress notification during a slow fan-out — so the host shows live "3/5
+    lanes done" instead of a frozen spinner. No-op when the host sent no progress token, or
+    outside a request context (async jobs / human CLI / tests). NEVER raises into a delegation."""
+    try:
+        ctx = server.request_context
+        token = ctx.meta.progressToken if ctx.meta else None
+        if token is None:
+            return
+        await ctx.session.send_progress_notification(
+            progress_token=token, progress=done, total=total,
+            message=(f"{msg} ({done}/{total})" if msg else f"{done}/{total}"))
+    except Exception:
+        return
+
+
+async def _host_sample(prompt: str, max_tokens: int = 1024) -> str | None:
+    """Ask the HOST's own model to complete a prompt via MCP 'sampling' — a FREE judge /
+    synthesizer: no lane spawned, no API key, no quota burned. Returns the text, or None if the
+    host doesn't support sampling or anything goes wrong (the caller then falls back to a lane).
+    Never raises. This is cli-bridge's zero-cost edge: reuse the model you're already running."""
+    try:
+        from mcp.types import SamplingMessage
+        from mcp.types import TextContent as _TC
+        ctx = server.request_context
+        result = await ctx.session.create_message(
+            messages=[SamplingMessage(role="user", content=_TC(type="text", text=prompt))],
+            max_tokens=max_tokens,
+        )
+        text = getattr(getattr(result, "content", None), "text", None)
+        return text.strip() if isinstance(text, str) and text.strip() else None
+    except Exception:
+        return None
+
+
 # ─────────────────────────────── host detection (self-hide) ───────────────────────────────
 
 def _slug(name: str) -> str:
@@ -192,6 +231,11 @@ def _ask_schema(lane: LaneSpec) -> dict:
         "timeout_s": {"type": "integer",
                       "description": f"Seconds before kill (default {DEFAULT_TIMEOUT_S}, "
                                      f"max {MAX_TIMEOUT_S})."},
+        "conversation": {"type": "string",
+                         "description": "Round-table thread (multi-turn memory). Omit = "
+                         "stateless (default). 'new' = start a thread; the returned id can be "
+                         "reused — even on a DIFFERENT lane — to continue. Or pass an existing "
+                         "id to keep going. Survives the host's context reset (/compact)."},
     }
     if "model" in lane.caps:
         props["model"] = {"type": "string",
@@ -317,6 +361,33 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             inputSchema={"type": "object", "properties": {}},
             annotations={"readOnlyHint": True, "destructiveHint": False},
         ))
+        tools.append(Tool(
+            name="conversations_list",
+            description="List recent round-table threads (id, lanes involved, turn count, last "
+                        "activity, preview). Use it to recover a conversation id and continue a "
+                        "thread after a context reset.",
+            inputSchema={"type": "object", "properties": {}},
+            annotations={"readOnlyHint": True, "destructiveHint": False},
+        ))
+        tools.append(Tool(
+            name="conversation_show",
+            description="Show the full transcript of one round-table thread — every turn, "
+                        "attributed by lane. Pass the conversation id.",
+            inputSchema={"type": "object", "properties": {
+                "conversation": {"type": "string", "description": "The thread id."}},
+                "required": ["conversation"]},
+            annotations={"readOnlyHint": True, "destructiveHint": False},
+        ))
+        tools.append(Tool(
+            name="list_models",
+            description="List the models reachable through a lane so you can pick one. If that "
+                        "CLI has no list command, shows its default model + how to choose. Pass "
+                        "`lane` (e.g. opencode, mistral, gpt).",
+            inputSchema={"type": "object", "properties": {
+                "lane": {"type": "string", "description": "Lane key to inspect."}},
+                "required": ["lane"]},
+            annotations={"readOnlyHint": True, "destructiveHint": False},
+        ))
     tools.append(Tool(
         name="doctor",
         description="Health check: which CLIs are installed, which is the host (hidden), paid lanes, "
@@ -431,6 +502,32 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             annotations={"readOnlyHint": True, "openWorldHint": True, "destructiveHint": False},
         ))
         tools.append(Tool(
+            name="rate_lane",
+            description=("Teach the router. Score how good a lane's answer was for a task-type "
+                         "(mode) and `ask_best` will prefer the lanes that score well for that mode "
+                         "ON THIS MACHINE — a local, personalized quality signal that outlives the "
+                         "session (stored in sqlite, survives /compact and restart). Call it after "
+                         "you've judged or acted on a delegate's answer; the ask_best trace shows "
+                         "the exact call."),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "lane": {"type": "string",
+                             "description": "Lane key that answered (e.g. gemini, gpt, mistral)."},
+                    "score": {"type": "integer",
+                              "description": "Quality 1 (poor) .. 5 (excellent)."},
+                    "mode": {"type": "string", "enum": list(router.MODES),
+                             "description": "Task-type this score is for — match the ask_best mode "
+                                            "(fast/cheap/deep/code/review/security). Omit for a "
+                                            "general score not tied to a mode."},
+                    "note": {"type": "string",
+                             "description": "Optional short reason, stored locally (≤200 chars)."},
+                },
+                "required": ["lane", "score"],
+            },
+            annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
+        ))
+        tools.append(Tool(
             name="review_diff",
             description=("Multi-model code review of a git diff: several lanes review in parallel "
                          "with DIFFERENT focuses (correctness/security/tests/maintainability), "
@@ -453,6 +550,9 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                     "output_format": {"type": "string", "enum": ["markdown", "json"],
                                       "description": "markdown (default, PR-friendly) or json "
                                                      "(structured findings)."},
+                    "severity_filter": {"type": "string", "enum": list(findings.SEVERITIES),
+                                        "description": "Only show findings at or above this "
+                                        "severity (blocker>high>medium>low>info). Default: all."},
                     "timeout_s": {"type": "integer",
                                   "description": f"Per-reviewer timeout (max {MAX_TIMEOUT_S}, "
                                                  f"default {config.REVIEW_DEFAULT_TIMEOUT_S})."},
@@ -477,6 +577,9 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                     "include_paid": {"type": "boolean", "description": "Allow limited/paid lanes."},
                     "output_format": {"type": "string", "enum": ["markdown", "json"],
                                       "description": "markdown (default) or json."},
+                    "severity_filter": {"type": "string", "enum": list(findings.SEVERITIES),
+                                        "description": "Only show findings at or above this "
+                                        "severity (blocker>high>medium>low>info). Default: all."},
                     "timeout_s": {"type": "integer",
                                   "description": f"Per-reviewer timeout (max {MAX_TIMEOUT_S})."},
                 },
@@ -527,10 +630,53 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                     "rounds": {"type": "integer",
                                "description": "Revision rounds after the opening answers "
                                               "(default 1, max 3)."},
+                    "adversarial": {"type": "boolean",
+                                    "description": "Assign for/against/neutral stances to the "
+                                    "openings (sharper disagreement). Default false."},
                     "include_paid": {"type": "boolean", "description": "Allow limited/paid lanes."},
                     "cwd": {"type": "string", "description": "Directory the CLIs run in."},
                     "timeout_s": {"type": "integer",
                                   "description": f"Per-turn timeout (max {MAX_TIMEOUT_S})."},
+                },
+                "required": ["task"],
+            },
+            annotations={"readOnlyHint": True, "openWorldHint": True, "destructiveHint": False},
+        ))
+        tools.append(Tool(
+            name="consensus",
+            description=("Council CONSENSUS: every lane answers blind, then each RANKS the "
+                         "ANONYMIZED answers (no model can favour its own), the votes are "
+                         "aggregated deterministically (Borda count), and a chairman synthesizes "
+                         "the winner. Use it for 'what's the right answer?' when you want a "
+                         "peer-vetted result, not an open debate. Free/non-limited unless "
+                         "include_paid."),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "task": {"type": "string", "description": "The question to resolve."},
+                    "include_paid": {"type": "boolean", "description": "Allow limited/paid lanes."},
+                    "cwd": {"type": "string", "description": "Directory the CLIs run in."},
+                    "timeout_s": {"type": "integer",
+                                  "description": f"Per-call timeout (max {MAX_TIMEOUT_S})."},
+                },
+                "required": ["task"],
+            },
+            annotations={"readOnlyHint": True, "openWorldHint": True, "destructiveHint": False},
+        ))
+        tools.append(Tool(
+            name="challenge",
+            description=("Anti-sycophancy: hand a CLAIM to one OUTSIDE lane with a critical-"
+                         "reassessment prompt and get its skeptical review — does it actually "
+                         "hold up? Pressure-test your OWN conclusion before acting (an "
+                         "independent skeptic, not a yes-man). Optional `lane` to choose who."),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "task": {"type": "string", "description": "The claim/conclusion to challenge."},
+                    "lane": {"type": "string",
+                             "description": "Which lane plays skeptic (default: a free one)."},
+                    "timeout_s": {"type": "integer",
+                                  "description": f"Timeout (max {MAX_TIMEOUT_S})."},
                 },
                 "required": ["task"],
             },
@@ -569,6 +715,42 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                     "include_paid": {"type": "boolean", "description": "Allow limited/paid lanes."},
                     "timeout_s": {"type": "integer",
                                   "description": f"Per-lane timeout (max {MAX_TIMEOUT_S})."},
+                },
+                "required": [],
+            },
+            annotations={"readOnlyHint": True, "openWorldHint": True, "destructiveHint": False},
+        ))
+        tools.append(Tool(
+            name="commit_msg",
+            description=("Generate a Conventional Commit message from your STAGED diff (falls "
+                         "back to the working tree if nothing is staged). Read-only — returns "
+                         "text, never commits. Optional `lane`, `cwd`."),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "cwd": {"type": "string", "description": "Repo dir (default: launch dir)."},
+                    "lane": {"type": "string", "description": "Which lane (default: a free one)."},
+                    "timeout_s": {"type": "integer",
+                                  "description": f"Timeout (max {MAX_TIMEOUT_S})."},
+                },
+                "required": [],
+            },
+            annotations={"readOnlyHint": True, "openWorldHint": True, "destructiveHint": False},
+        ))
+        tools.append(Tool(
+            name="pr_describe",
+            description=("Generate a PR title + description (Summary / Changes / Testing) from the "
+                         "branch's diff and commit log vs a base (default origin/main, then main). "
+                         "Read-only. Optional `base`, `lane`, `cwd`."),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "base": {"type": "string",
+                             "description": "Base ref to diff against (default origin/main)."},
+                    "cwd": {"type": "string", "description": "Repo dir (default: launch dir)."},
+                    "lane": {"type": "string", "description": "Which lane (default: a free one)."},
+                    "timeout_s": {"type": "integer",
+                                  "description": f"Timeout (max {MAX_TIMEOUT_S})."},
                 },
                 "required": [],
             },
@@ -836,15 +1018,16 @@ def _cache_key(lane: LaneSpec, model: str, effort: str, agent: str, cwd: str,
 _RETRYABLE = {"failed", "spawn"}
 
 
-async def _spawn_with_retry(argv: list[str], timeout: int, cwd: str | None) -> runner.RunResult:
+async def _spawn_with_retry(argv: list[str], timeout: int, cwd: str | None,
+                            env: dict | None = None) -> runner.RunResult:
     """Run the CLI, retrying a TRANSIENT failure up to CLI_BRIDGE_RETRIES times with backoff —
     so an occasionally-flaky lane 'works the first time' from the caller's point of view."""
     attempts = config.retries() + 1
-    res = await runner.arun(argv, timeout, cwd)
+    res = await runner.arun(argv, timeout, cwd, env)
     n = 1
     while not res.ok and res.kind in _RETRYABLE and n < attempts:
         await asyncio.sleep(min(0.4 * (2 ** (n - 1)), 3.0))
-        res = await runner.arun(argv, timeout, cwd)
+        res = await runner.arun(argv, timeout, cwd, env)
         n += 1
     return res
 
@@ -918,10 +1101,14 @@ async def _run_lane(lane: LaneSpec, args: dict, *, tool: str = "ask",
     # task, not the prefixed prompt.
     prompt = preamble.apply(task) if terse else task
     argv = [lane.bin] + lane.build_ask(prompt, model, effort, agent, lane.bin)
+    # Some lanes select the model via ENV (e.g. vibe's VIBE_ACTIVE_MODEL), not a flag. Merge any
+    # such overrides onto a COPY of the environment (a bare dict would drop the CLI's own PATH/auth).
+    extra_env = lane.env_ask(model, effort, agent) if lane.env_ask else {}
+    spawn_env = {**os.environ, **extra_env} if extra_env else None
     rec = telemetry.start(tool, lane.key, model, task)
     timeout = _timeout(args.get("timeout_s"))
     t0 = time.monotonic()
-    res = await _spawn_with_retry(argv, timeout, expanded)
+    res = await _spawn_with_retry(argv, timeout, expanded, spawn_env)
     res.latency_ms = int((time.monotonic() - t0) * 1000)
     telemetry.record(rec, res.ok, res.kind, len(res.output), input_chars=len(prompt))
     _write_trace(lane, model, argv, expanded, timeout, res)
@@ -930,8 +1117,88 @@ async def _run_lane(lane: LaneSpec, args: dict, *, tool: str = "ask",
     return res
 
 
+async def _run_lane_maybe_convo(lane: LaneSpec, args: dict) -> tuple[runner.RunResult, str]:
+    """Round-table wrapper around _run_lane. With no `conversation` it's a plain ask (zero
+    change). With one, it replays the thread's recipient-aware history before the task, runs the
+    lane, then records the exchange so the NEXT turn — on this or another lane — sees it.
+    Returns (result, conversation_id) where the id is "" when no thread is in play."""
+    cid = _str(args, "conversation").strip()
+    if not cid:
+        return await _run_lane(lane, args), ""
+    if cid.lower() == "new":
+        cid = conversations.new_id()
+    elif not conversations.is_valid_id(cid):
+        return runner.RunResult(False, f"invalid conversation id: {cid!r}", "failed"), ""
+    task = _str(args, "task")
+    prefix, _trimmed = conversations.build_history_prefix(cid, lane.key, config.convo_max_chars())
+    sub = dict(args)
+    if prefix:
+        sub["task"] = f"{prefix}\n{task}"
+    res = await _run_lane(lane, sub)
+    if task and res.ok:                        # only record a real exchange
+        conversations.record_turn(cid, lane.key, "user", task)
+        conversations.record_turn(cid, lane.key, "assistant", res.output)
+    return res, cid
+
+
+def _rel_time(ts: float | None) -> str:
+    if not ts:
+        return "?"
+    s = max(0, int(time.time() - ts))
+    if s < 60:
+        return f"{s}s ago"
+    if s < 3600:
+        return f"{s // 60}m ago"
+    if s < 86400:
+        return f"{s // 3600}h ago"
+    return f"{s // 86400}d ago"
+
+
 def _lane_by_key(key: str, lanes: list[LaneSpec]) -> LaneSpec | None:
     return next((ln for ln in lanes if ln.key == key), None)
+
+
+def _setup_recommendation(lanes: list[LaneSpec]) -> str:
+    """Beginner-proof onboarding: detect what's installed, sort it by what it costs the user,
+    and RECOMMEND a concrete profile + cap they can accept or tweak — so nobody has to pick a
+    profile in the abstract."""
+    if not lanes:
+        return ("No delegate CLIs detected on PATH yet. Install one (run `doctor` for hints) or "
+                "set CLI_BRIDGE_MOCK=1 to explore cli-bridge without any CLI.")
+    free = [ln.key for ln in lanes if not ln.is_paid and not ln.is_limited]
+    limited = [ln.key for ln in lanes if ln.is_limited]
+    paid = [ln.key for ln in lanes if ln.is_paid]
+    lines = [
+        "**Detected lanes — by what they cost YOU:**",
+        f"- free (use freely): {', '.join(free) or '—'}",
+        f"- limited (scarce quota): {', '.join(limited) or '—'}",
+        f"- paid (money/credits): {', '.join(paid) or '—'}",
+        "",
+    ]
+    if config.profile_is_set():
+        lines.append(f"Profile already set to **{config.profile()}** — you're configured. Adjust "
+                     "any lane with CLI_BRIDGE_<LANE>_COST=free|limited|paid.")
+        return "\n".join(lines)
+    if paid or limited:
+        lines.append(
+            "**Recommended: `balanced` + a daily cap.** Free lanes handle routine work; a "
+            "paid/limited lane is used only when a task earns it, and the cap is a hard safety "
+            "net so you never overspend by surprise:\n"
+            "    CLI_BRIDGE_PROFILE=balanced\n"
+            "    CLI_BRIDGE_DAILY_CREDIT_CAP=5      # est. paid 'credits'/day — tune to you\n"
+            "(Set CLI_BRIDGE_<LANE>_CREDITS_PER_1K so the cap can estimate spend.)")
+    else:
+        lines.append(
+            "**Recommended: `balanced`** (or `max`). Everything installed is free — nothing to "
+            "overspend, so balanced already uses it all freely:\n"
+            "    CLI_BRIDGE_PROFILE=balanced")
+    lines += [
+        "",
+        "Profiles in plain terms: **saver**=free only, never spends · **balanced**=free by "
+        "default, paid when you ask (include_paid) · **max**=best by default, paid lanes join "
+        "automatically.",
+    ]
+    return "\n".join(lines)
 
 
 # ─────────────────────────────── tool dispatch ───────────────────────────────
@@ -942,7 +1209,9 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
 
     if name == "setup":
         cur = _profile() + ("" if _profile_is_set() else " (default — not explicitly set)")
-        return [TextContent(type="text", text=f"Current profile: **{cur}**\n\n{SETUP_TEXT}")]
+        reco = _setup_recommendation(lanes)
+        return [_emit(f"Current profile: **{cur}**\n\n{reco}\n\n---\n{SETUP_TEXT}",
+                      label="setup", guard=False)]
 
     if name == "doctor":
         text = await _doctor_deep(host, lanes) if bool(args.get("deep")) else _doctor(host)
@@ -974,14 +1243,19 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
     if name == "ask_best":
         return await _ask_best(lanes, args)
 
+    if name == "rate_lane":
+        return _rate_lane(lanes, args)
+
     if name == "route_plan":
         include_paid = (bool(args["include_paid"]) if args.get("include_paid") is not None
                         else _profile() == "max")
         mode = _str(args, "mode").lower()
         if mode and mode in router.MODES:
             perf = telemetry.lane_perf()
+            quality = telemetry.lane_quality(mode)
             return [TextContent(type="text", text=router.explain_mode(
-                lanes, telemetry.cooldown_remaining, lambda k: perf.get(k, {}), mode, include_paid))]
+                lanes, telemetry.cooldown_remaining, lambda k: perf.get(k, {}), mode, include_paid,
+                quality_of=lambda k: quality.get(k, {})))]
         return [TextContent(type="text", text=router.explain(
             lanes, telemetry.cooldown_remaining, include_paid))]
 
@@ -1036,7 +1310,32 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
 
     if name == "debate":
         targets = _ask_all_targets(lanes, _ask_all_include_paid(args))
-        return [_emit(await workflows.debate(targets, args, _run_lane), label="debate")]
+        return [_emit(await workflows.debate(targets, args, _run_lane, progress=_emit_progress),
+                      label="debate")]
+
+    if name == "consensus":
+        targets = _ask_all_targets(lanes, _ask_all_include_paid(args))
+        return [_emit(await workflows.consensus(targets, args, _run_lane, progress=_emit_progress),
+                      label="consensus")]
+
+    if name == "challenge":
+        key = _str(args, "lane")
+        if key:
+            ln = _lane_by_key(key, lanes)
+            targets = [ln] if ln else []
+        else:
+            targets = _ask_all_targets(lanes, _ask_all_include_paid(args))
+        return [_emit(await workflows.challenge(targets, args, _run_lane), label="challenge")]
+
+    if name in ("commit_msg", "pr_describe"):
+        key = _str(args, "lane")
+        if key:
+            ln = _lane_by_key(key, lanes)
+            targets = [ln] if ln else []
+        else:
+            targets = _ask_all_targets(lanes, _ask_all_include_paid(args))
+        fn = workflows.commit_msg if name == "commit_msg" else workflows.pr_describe
+        return [_emit(await fn(targets, args, _run_lane), label=name)]
 
     if name == "premortem":
         targets = _ask_all_targets(lanes, _ask_all_include_paid(args))
@@ -1058,6 +1357,32 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
         return [_emit(await worktrees.ask_build_isolated(lane, args, _run_lane),
                       label="ask_build_isolated")]
 
+    if name == "conversations_list":
+        rows = telemetry.convo_list()
+        if not rows:
+            return [_emit("No round-table threads yet. Start one: call any ask_<lane> with "
+                          "conversation='new', then reuse the returned id (on any lane).",
+                          label="conversations_list", guard=False)]
+        lines = ["# Round-table conversations", ""]
+        for r in rows:
+            lanes_txt = ", ".join(r["lanes"]) or "—"
+            lines.append(f"- **{r['conversation_id']}** · {r['turns']} turns · {lanes_txt} · "
+                         f"{_rel_time(r['last_at'])}\n      {r['preview']}")
+        return [_emit("\n".join(lines), label="conversations_list", guard=False)]
+
+    if name == "conversation_show":
+        cid = _str(args, "conversation").strip()
+        turns = telemetry.convo_turns(cid)
+        if not turns:
+            return [_emit(f"[conversation: {cid or '(none)'}] no turns found. "
+                          "List threads with conversations_list.",
+                          label="conversation_show", guard=False)]
+        parts = [f"# Conversation {cid}", ""]
+        for t in turns:
+            who = "User" if t["role"] == "user" else (t["lane"] or "assistant")
+            parts.append(f"## Turn {t['turn_number']} — {who}\n{t['content']}")
+        return [_emit("\n\n".join(parts), label="conversation_show")]
+
     if name.startswith("ask_"):
         key = name[4:]
         lane = _lane_by_key(key, lanes)
@@ -1077,8 +1402,29 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
                 return [TextContent(type="text", text=(
                     f"[error] no such lane: {key}. Available: {avail}. Run `doctor` for install "
                     "hints, or set CLI_BRIDGE_MOCK=1 to try without any CLI."))]
-        res = await _run_lane(lane, args)
-        return [_emit(res.render(), label=f"ask_{lane.key}")]
+        res, cid = await _run_lane_maybe_convo(lane, args)
+        out = res.render()
+        if cid:
+            out = f"[conversation: {cid}] — reuse this id (on any lane) to continue the thread.\n\n{out}"
+        return [_emit(out, label=f"ask_{lane.key}")]
+
+    if name == "list_models":
+        key = _str(args, "lane")
+        lane = _lane_by_key(key, lanes)
+        if not lane:
+            avail = ", ".join(ln.key for ln in lanes) or "none installed"
+            return [TextContent(type="text",
+                                text=f"[error] no such lane: {key or '(none)'}. Available: {avail}.")]
+        if lane.models_args is not None:
+            res = await runner.arun([lane.bin] + lane.models_args, 60)
+            return [_emit(res.render(), label=f"list_models:{lane.key}")]
+        # No list command on this CLI — surface the resolved default + how to choose.
+        dm = lane.model_for("")
+        how = (f"pass model=… per call, or set CLI_BRIDGE_{lane.key.upper()}_MODEL"
+               if "model" in lane.caps else "this lane uses its own model (not selectable here)")
+        return [_emit(f"{lane.display}: no model-list command exposed by the CLI. "
+                      f"Default model: {dm or '(the CLI default)'}. To choose: {how}.",
+                      label=f"list_models:{lane.key}", guard=False)]
 
     if name.startswith("list_") and name.endswith("_models"):
         lane = _lane_by_key(name[5:-7], lanes)
@@ -1136,8 +1482,9 @@ async def _ask_best(lanes: list[LaneSpec], args: dict) -> list[TextContent]:
     include_paid = (bool(args["include_paid"]) if args.get("include_paid") is not None
                     else _profile() == "max")
     perf = telemetry.lane_perf()
+    quality = telemetry.lane_quality(mode)
     ordered = router.order_for_mode(lanes, telemetry.cooldown_remaining, lambda k: perf.get(k, {}),
-                                    mode, include_paid)
+                                    mode, include_paid, quality_of=lambda k: quality.get(k, {}))
     if not ordered:
         return [TextContent(type="text", text=(
             f"[error] no lanes eligible for mode '{mode}'. Install/login a CLI, or widen with "
@@ -1147,11 +1494,41 @@ async def _ask_best(lanes: list[LaneSpec], args: dict) -> list[TextContent]:
     if chosen is not None:
         res = next(r for ln, r in attempts if ln is chosen)
         trace = _cascade_trace(attempts, chosen=chosen).replace("cheapest→strongest", f"mode '{mode}'")
-        return [_emit(f"{res.output}\n\n{trace}", label="ask_best")]
+        hint = (f"\n_Tip: `rate_lane(lane=\"{chosen.key}\", mode=\"{mode}\", score=1..5)` to teach "
+                "the router which lane wins this kind of task on your machine._")
+        return [_emit(f"{res.output}\n\n{trace}{hint}", label="ask_best")]
     return [TextContent(type="text", text=(
         f"[error] all lanes failed for mode '{mode}': "
         + ", ".join(f"{ln.key}={r.kind}" for ln, r in attempts)
         + ". Check `doctor`.\n\n" + _cascade_trace(attempts, chosen=None)))]
+
+
+def _rate_lane(lanes: list[LaneSpec], args: dict) -> list[TextContent]:
+    """Record the host's quality score for a lane on a task-type (outcome-tracked routing). Pure
+    dispatch glue: validates, writes via telemetry, reports the lane's new running average."""
+    ln = _lane_by_key(_str(args, "lane"), lanes)
+    if ln is None:
+        return [TextContent(type="text", text=(
+            f"[error] unknown lane '{_str(args, 'lane')}'. See `doctor` for lane keys."))]
+    try:
+        score = int(args.get("score"))
+    except (TypeError, ValueError):
+        return [TextContent(type="text", text="[error] score must be an integer 1..5.")]
+    if not 1 <= score <= 5:
+        return [TextContent(type="text", text="[error] score must be between 1 and 5.")]
+    mode = _str(args, "mode").lower()
+    if mode and mode not in router.MODES:
+        return [TextContent(type="text", text=(
+            f"[error] unknown mode '{mode}'. One of: {', '.join(router.MODES)} — or omit it."))]
+    res = telemetry.rate_lane(ln.key, mode, score, _str(args, "note"))
+    where = f" for mode '{mode}'" if mode else ""
+    if res.get("n"):
+        return [TextContent(type="text", text=(
+            f"Recorded {score}/5 for {ln.key}{where}. Now {res['n']} rating(s), avg "
+            f"{res['avg']}/5 — ask_best will weight {ln.key} accordingly for {mode or 'this'} tasks."))]
+    return [TextContent(type="text", text=(
+        f"Recorded {score}/5 for {ln.key}{where}, but telemetry is off "
+        "(CLI_BRIDGE_TELEMETRY) so it won't steer routing."))]
 
 
 def _cascade_trace(attempts: list[tuple[LaneSpec, runner.RunResult]],
@@ -1196,10 +1573,19 @@ async def _ask_all_body(lanes: list[LaneSpec], args: dict) -> str:
     # or burst quota. Default high enough that a normal free council is unaffected. The semaphore
     # is created in the running loop (per call) to stay safe across separate event loops.
     sem = asyncio.Semaphore(config.max_parallel())
+    total = len(targets)
+    done = 0
+    prog_lock = asyncio.Lock()
 
     async def _capped(ln):
         async with sem:
-            return await _run_lane(ln, sub)
+            r = await _run_lane(ln, sub)
+        nonlocal done
+        async with prog_lock:
+            done += 1
+            d = done
+        await _emit_progress(d, total, ln.display)   # live "k/N lanes done" if host asked
+        return r
     # return_exceptions: one broken lane must not sink the whole fan-out.
     results = await asyncio.gather(*[_capped(ln) for ln in targets], return_exceptions=True)
     blocks = []
@@ -1276,19 +1662,24 @@ async def _review_diff(lanes: list[LaneSpec], args: dict) -> list[TextContent]:
 
 
 async def _synthesize(question, answered, targets) -> str:
-    """Second pass: a free lane reads all answers and flags agreement/disagreement. Picks the
-    cheapest free non-paid lane available; returns '' if none can do it."""
+    """Second pass: read all answers and flag agreement/disagreement. Prefers the HOST's own
+    model (MCP sampling — free, no lane spent); falls back to the cheapest free lane. Returns ''
+    if neither can do it."""
     if len(answered) < 2:
-        return ""
-    judge = next((ln for ln in targets
-                  if not ln.is_paid and not ln.is_limited and not ln.experimental), None)
-    if judge is None:
         return ""
     transcript = "\n\n".join(f"### {lane.display}\n{res.output}" for lane, res in answered)
     prompt = (
         "Several AI models answered the same question. Summarize concisely: (1) where they "
         "AGREE, (2) where they DISAGREE (name which model said what), (3) the most reliable "
         f"takeaway. Be brief.\n\nQUESTION:\n{question}\n\nANSWERS:\n{transcript}")
+    # Prefer the host's own model — free, no lane spawned, no quota.
+    via_host = await _host_sample(prompt, max_tokens=800)
+    if via_host:
+        return f"{via_host}\n\n_(synthesized by your host model via MCP sampling — no lane spent)_"
+    judge = next((ln for ln in targets
+                  if not ln.is_paid and not ln.is_limited and not ln.experimental), None)
+    if judge is None:
+        return ""
     res = await _run_lane(judge, {"task": prompt, "timeout_s": ASK_ALL_SYNTH_TIMEOUT_S})
     return res.output if res.ok else ""
 
@@ -1307,9 +1698,38 @@ async def _doctor_deep(host: str, lanes: list[LaneSpec]) -> str:
         ver = await _lane_version(ln)
         return f"- **{ln.key}**: {mark}{f' · v: {ver}' if ver else ''}"
     results = await asyncio.gather(*[_probe(ln) for ln in probes])
+    flags = await _flag_drift_section(lanes)
     return (base + "\n\n## Deep probe (live auth check + CLI version, free lanes)\n\n"
             + "\n".join(results)
-            + "\n\n_Versions help spot drift: if a CLI bumped and a lane breaks, file a `[drift]` issue._")
+            + "\n\n_Versions help spot drift: if a CLI bumped and a lane breaks, file a `[drift]` issue._"
+            + flags)
+
+
+async def _lane_flag_drift(lane: LaneSpec) -> list[str]:
+    """Flags this lane EMITS that are now MISSING from its `--help` (likely renamed/removed
+    upstream → the invocation would break). Cheap: one `--help` spawn, no model call / quota.
+    [] when there's nothing to check or help can't be read (never a false alarm)."""
+    if not lane.help_args or not lane.probe_flags:
+        return []
+    res = await runner.arun([lane.bin, *lane.help_args], 15)
+    if not res.ok:
+        return []
+    return lanes_mod.missing_flags(res.output, lane.probe_flags)
+
+
+async def _flag_drift_section(lanes: list[LaneSpec]) -> str:
+    """Check EVERY installed lane's flags against its CLI help (incl. limited/paid — it costs no
+    quota, just `--help`). Surfaces a broken invocation BEFORE it fails silently at call time."""
+    drifts = await asyncio.gather(*[_lane_flag_drift(ln) for ln in lanes])
+    bad = [(ln, miss) for ln, miss in zip(lanes, drifts, strict=True) if miss]
+    if not bad:
+        return "\n\n## Flag check\n\n_All installed lanes' flags still present in their `--help`._"
+    rows = [f"- ⚠️ **{ln.key}**: `{', '.join(miss)}` missing from `{ln.bin} "
+            f"{' '.join(ln.help_args)}` — invocation may be broken (upstream flag change?)."
+            for ln, miss in bad]
+    return ("\n\n## ⚠️ Flag drift — lane invocation may be broken\n\n" + "\n".join(rows)
+            + "\n\n_The CLI changed the flags this lane relies on. Update the lane (or pin an old "
+            "CLI via `CLI_BRIDGE_<LANE>_BIN`), or file a `[drift]` issue._")
 
 
 async def _lane_version(lane: LaneSpec) -> str:

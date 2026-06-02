@@ -208,6 +208,15 @@ def merge_findings(findings: list[Finding]) -> list[Finding]:
                   key=lambda f: (_SEV_RANK[f.severity], f.file or "~", f.line or 0, f.title))
 
 
+def filter_by_severity(items: list[Finding], min_severity: str) -> list[Finding]:
+    """Keep only findings at or above `min_severity` (blocker>high>medium>low>info). An empty
+    or unknown threshold keeps everything."""
+    floor = _SEV_RANK.get((min_severity or "").strip().lower())
+    if floor is None:
+        return items
+    return [f for f in items if _SEV_RANK[f.severity] <= floor]
+
+
 def confidence(f: Finding, total_reviewers: int) -> str:
     """single / majority / consensus from how many distinct models raised the finding."""
     n = len(f.models)

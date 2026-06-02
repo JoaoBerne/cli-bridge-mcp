@@ -22,6 +22,12 @@ Claude → cli-bridge → [ Gemini ] [ GPT ] [ Mistral ] [ Qwen ] … in paralle
             ← three independent reviews + a synthesis of where they agree & disagree
 ```
 
+> **Why it's different in one breath:** it never holds an API key and never extracts a token — it
+> drives the official CLIs you've **already installed and logged into**. A free-lane council costs
+> **$0.00** (the receipts are in `usage_report`); paid lanes only ever run inside a hard daily cap
+> *you* set. And when you ask it to *do* work, it edits in a throwaway git worktree and hands back
+> a **diff** — your live repo is never touched.
+
 ---
 
 ## Why this one
@@ -40,8 +46,8 @@ There are other "call other models" MCPs. Here's what makes cli-bridge different
   and exposes the rest. Driving Codex or opencode instead? Same deal, detected automatically from
   the MCP handshake.
 - 🧩 **Add any CLI — or your own API — without forking.** Built-in lanes for Claude, GPT, Gemini,
-  Mistral, Qwen, Copilot and opencode. Register **your own CLI from a JSON file**, or wrap **your
-  own API** by spawning `curl`. Zero code.
+  Mistral, Qwen, Copilot, Grok and opencode. Register **your own CLI from a JSON file**, or wrap
+  **your own API** by spawning `curl`. Zero code.
 - 🧠 **Council synthesis.** `ask_all` can have a free model summarize where the others *agree* and
   *disagree* — turn three opinions into one decision.
 - 🔬 **Multi-model workflows.** `review_diff` and `security_review` fan **role-diverse** reviewers
@@ -56,6 +62,9 @@ There are other "call other models" MCPs. Here's what makes cli-bridge different
   one hits quota/auth/timeout — so a dead lane degrades gracefully instead of failing you.
 - 🩺 **Self-aware.** Local telemetry tracks each lane's health and puts a lane in cooldown
   after repeated quota/auth/timeout failures, so `ask_all`/`ask_cascade` route around it.
+- 🎯 **Learns your stack.** Rate a lane's answer 1–5 with `rate_lane` and `ask_best` prefers the
+  models that actually win each task-type **on your machine** — a local quality signal stored in
+  sqlite that survives `/compact` and restarts. Not a public leaderboard; *your* outcomes.
 - 🧱 **Hardened.** Timeouts kill the whole process tree (no orphans burning quota), host
   cancellation kills the delegate, secrets are redacted, errors are classified
   (`quota` / `auth` / `timeout`) so your assistant knows what to do next. Works on
@@ -67,11 +76,14 @@ There are other "call other models" MCPs. Here's what makes cli-bridge different
 |---|:---:|:---:|:---:|
 | Ban-safe (spawns official CLI) | ✅ | ➖ (your keys) | ❌ (ToS risk) |
 | No API keys to manage | ✅ | ❌ | ✅ |
-| Uses your existing subscriptions | ✅ | ❌ | ✅ |
-| Per-plan cost tiers + cooldown | ✅ | ➖ | ❌ |
+| Uses your existing subscriptions ($0.00 free council) | ✅ | ❌ | ✅ |
+| Per-plan cost tiers + hard daily cap + cooldown | ✅ | ➖ | ❌ |
 | Automatic fallback (cascade) | ✅ | some | ❌ |
+| Routing that **learns from your outcomes** | ✅ | ❌ | ❌ |
 | Add any CLI / your own API, no fork | ✅ | ➖ | ❌ |
 | Self-hides the calling host | ✅ | n/a | ➖ |
+| Round-table memory that survives a restart | ✅ | ➖ (in-memory) | ➖ |
+| Safe agentic write (worktree → diff) | ✅ | ➖ | ❌ |
 
 ---
 
@@ -99,6 +111,7 @@ live-checks each login).
 | `ask_mistral`  | Mistral Vibe | free tier |
 | `ask_qwen` ⚗️  | Qwen Code | free / subscription |
 | `ask_copilot` ⚗️ | GitHub Copilot CLI | subscription |
+| `ask_grok` ⚗️  | xAI Grok CLI | free / subscription |
 | `ask_opencode` | [opencode](https://opencode.ai) gateway (deepseek, qwen, glm, kimi…) | free by default; some models use credits |
 
 ⚗️ = experimental (flags not yet verified live — please report breakage).
@@ -138,6 +151,7 @@ Just talk to your assistant:
 > *"Make the models debate whether we need this abstraction."* (→ `debate`)
 > *"Ask gpt to implement this function."* (→ `agent: build`, edits files)
 > *"Ask Opus 4.6 to double-check my reasoning."* (sibling model, from Claude Code)
+> *"Pick the best lane for a deep review — and remember that one nailed it."* (→ `ask_best` + `rate_lane`; next time it routes there first)
 
 Hosts that support MCP prompts also surface `review_diff`, `security_review`, `debate`, and
 `cost_setup` as native slash commands.
@@ -148,25 +162,31 @@ Hosts that support MCP prompts also surface `review_diff`, `security_review`, `d
 
 | Tool | What it does |
 |------|--------------|
-| `ask_<lane>` | Ask one model. Params: `task`, optional `model`, `effort`, `agent`, `cwd`, `timeout_s`. |
+| `ask_<lane>` | Ask one model. Params: `task`, optional `model`, `effort`, `agent`, `cwd`, `timeout_s`, **`conversation`** (start/continue a round-table thread — see below). |
 | `ask_all` | Fan-out the same question to every free, non-limited lane in parallel. `synthesize: true` adds an agreement/disagreement summary. `include_paid: true` to also query limited/paid lanes. |
 | `ask_cascade` | Ask one model **with automatic fallback** — tries lanes cheapest→strongest, skipping cooled ones, moving on at quota/auth/timeout. Returns the first success + a trace of what was tried (cost tier, latency, why skipped). |
-| `ask_best` | Pick **one lane by mode** (`fast`/`cheap`/`deep`/`code`/`review`/`security`) from cost, health and measured latency, then run it with fallback. For "just use the right model" — `ask_all` compares, `ask_cascade` is plain cheapest-first. |
-| `route_plan` | Show the order `ask_cascade` would try, given your profile + current cooldowns (read-only, runs nothing). Pass `mode` to preview `ask_best`. |
+| `ask_best` | Pick **one lane by mode** (`fast`/`cheap`/`deep`/`code`/`review`/`security`) from cost, health, measured latency **and your own `rate_lane` scores**, then run it with fallback. For "just use the right model" — `ask_all` compares, `ask_cascade` is plain cheapest-first. |
+| `rate_lane` | **Teach the router.** Score a lane's answer 1–5 for a task-type (`mode`) → `ask_best` then prefers the lanes that win that mode **on your machine**. Stored in sqlite (survives `/compact`/restart); a two-rating floor before any lane steers, so feedback is honest, not noisy. Every `ask_best` answer prints the exact call. |
+| `route_plan` | Show the order `ask_cascade` would try, given your profile + current cooldowns (read-only, runs nothing). Pass `mode` to preview `ask_best` — including each lane's running rating. |
 | `ask_all_async` / `job_status` / `job_result` / `job_cancel` / `jobs_list` | Run a fan-out as a **background job** that returns a job id in <1s, so a slow council run can't hit the host's tool-call deadline. Cancel kills the delegates' process groups. |
 | `review_diff` | Multi-model code review of a git diff: lanes review in parallel with **different focuses** (correctness / security / tests / maintainability), each returning JSON findings; deterministic prechecks (secrets, dangerous shell) seed them; findings **merge by file/line/title** with agreement-based confidence (single/majority/consensus). `output_format: markdown` (default) or `json`. Params: `cwd`, `base` (default HEAD), `diff`, `include_paid`, `timeout_s`. |
 | `security_review` | OWASP-aware **security-only** review of a git diff (injection / auth & access control / secrets & crypto / data exposure & SSRF) → severity-ranked findings + a `residual_risk` section. |
-| `debate` | Several models answer a question, **see each other's answers and revise** over bounded rounds (default 1, max 3), then a judge writes the final consensus + remaining disagreement. Params: `task`, `rounds`, `include_paid`, `timeout_s`. |
+| `debate` | Several models answer a question, **see each other's answers and revise** over bounded rounds (default 1, max 3), then a judge writes the final consensus + remaining disagreement. `adversarial: true` assigns for/against/neutral stances to the openings for sharper disagreement. Params: `task`, `rounds`, `adversarial`, `include_paid`, `timeout_s`. |
+| `consensus` | The "LLM council" done better: each lane answers blind, then **ranks the anonymized answers** (no self-favouring), votes are aggregated **deterministically** (Borda count), and a chairman synthesizes the winner. Returns the final answer + a peer-vote ranking table. Params: `task`, `include_paid`, `timeout_s`. |
+| `challenge` | Hand a claim to **one outside lane** with a critical-reassessment prompt → an independent skeptical review (with an integrity guardrail — it won't manufacture disagreement). Pressure-test your own conclusion before acting. Optional `lane`. |
 | `premortem` | Each lane imagines the plan **already failed** and lists likely failure modes + mitigations; merged into a prioritized risk list. Run it before building. |
 | `test_plan` | Derive a prioritized **test plan** (behaviors, edge cases, concrete cases) from a git diff or a description. |
+| `commit_msg` | Generate a **Conventional Commit** message from your staged diff (falls back to the working tree). Read-only — emits text, never commits. Optional `lane`, `cwd`. |
+| `pr_describe` | Generate a **PR title + description** (Summary / Changes / Testing) from the branch's diff + commit log vs a base (default origin/main → main). Read-only. Optional `base`, `lane`, `cwd`. |
 | `ask_build_isolated` | **Safe write mode**: run a build-capable lane in a throwaway git worktree at HEAD and get the **diff** to review — your real repo is never modified. |
-| `list_<lane>_models` | List the models that lane can reach (where supported). |
-| `doctor` | Health check: installed CLIs, detected host, cost/quota stance, cooldowns, defaults. `deep: true` live-probes each free, non-limited lane's auth. |
+| `list_models` | List a lane's available models (`lane` param) where the CLI exposes them; otherwise shows the resolved default model + how to choose one. (`list_<lane>_models` also exists for lanes with a native list command.) |
+| `conversations_list` / `conversation_show` | List recent **round-table threads** (recover an id after a context reset) / show one thread's full transcript, attributed by lane. |
+| `doctor` | Health check: installed CLIs, detected host, cost/quota stance, cooldowns, defaults. `deep: true` live-probes each free lane's auth **and checks every lane's flags against its `--help`** — warns if a CLI renamed/removed a flag cli-bridge relies on (drift) before the lane fails silently. |
 | `usage_report` | Local-only stats: runs, per-lane success/latency, and **estimated** tokens (chars/4) + credits (per-lane `CREDITS_PER_1K`). `since`, `format=text\|json`. |
 | `usage_budget` | Today's runs per lane vs `CLI_BRIDGE_<LANE>_DAILY_LIMIT` + estimated spend; flags lanes over their limit. |
 | `lane_stats` | Per-lane health: runs, failures, consecutive failures/timeouts, active cooldown. |
 | `reset_lane_state` | Clear a lane's cooldown/failure counters (after re-login or quota reset). |
-| `setup` | Walk the user through configuring cost preferences to their own subscriptions. |
+| `setup` | Detect installed lanes, sort them by what they cost you (free/limited/paid) and **recommend a profile + daily cap** to confirm — then walk the user through it. |
 
 There's also a **human CLI** — the same engine from your terminal or CI:
 `cli-bridge init` (detect CLIs + print MCP wiring), `doctor`, `ask <lane> <task>`, `ask-all`,
@@ -186,9 +206,21 @@ can even consult a **sibling model of your own family** — `ask_<your-host>` ap
 tool that requires an explicit `model`, so from Claude Code you can ask Opus 4.6 while running 4.8.
 (Antigravity's `agy` has no per-call model flag — it uses whatever its own settings select.)
 
-For opencode, an empty `model` asks `opencode models` for the current `opencode/*-free` model list
-and uses a free Zen model. If that lookup fails, cli-bridge falls back to
-`opencode/deepseek-v4-flash-free`. Set `CLI_BRIDGE_OPENCODE_MODEL` to pin a different default.
+**Round-table conversations.** Pass `conversation: "new"` to any `ask_<lane>` to start a multi-turn
+thread; reuse the returned id — **even on a different lane** — to continue. Each lane sees the
+shared transcript with your own turns marked "You" and the others named, so a council can build on
+each other instead of starting cold every time. The transcript is stored locally (sqlite), so a
+thread **survives the host's context reset (`/compact`) and a server restart** — recover one with
+`conversations_list`, read it with `conversation_show`. A sliding window
+(`CLI_BRIDGE_CONVO_MAX_CHARS`, default 32000) keeps the newest turns and drops the oldest, so the
+per-turn cost stays bounded however long the thread runs.
+
+For opencode, an empty `model` asks `opencode models` for the current `opencode/*-free` list and
+uses one (the $0 rate-limited tier), chosen by pattern + sorted — never a pinned name, so a retired
+free model is replaced automatically. It's **cost-safe**: a bare `opencode/*` Zen model bills
+per-token (API cost) and `opencode-go/*` spends prepaid credits, so the default never silently
+selects a paid model — pass those explicitly when you want them. If the lookup fails it falls back
+to a free seed; set `CLI_BRIDGE_OPENCODE_MODEL` to pin your own default.
 
 `ask_all` keeps per-lane calls short (45s default, 60s max) so the MCP host gets a response before
 its own tool-call deadline. For a slow/deep answer, call that lane directly with a longer

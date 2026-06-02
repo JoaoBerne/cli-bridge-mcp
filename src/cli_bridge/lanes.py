@@ -41,12 +41,18 @@ class LaneSpec:
     models_args: list[str] | None = None  # argv to list models, or None
     help_args: list[str] | None = None    # argv to print CLI help, or None
     version_args: tuple[str, ...] = ("--version",)   # argv to print the CLI's version (drift check)
+    probe_flags: tuple[str, ...] = ()     # flags this lane EMITS that must still exist in the
+                                          # CLI's --help; if one vanishes the invocation is broken
+                                          # (doctor deep flags the drift before a silent failure)
     caps: frozenset[str] = field(default_factory=frozenset)        # {"model","effort","agent"}
     client_ids: frozenset[str] = field(default_factory=frozenset)  # MCP clientInfo.name == host
     bin_alts: tuple[str, ...] = ()        # fallback binaries if the default isn't on PATH
     experimental: bool = False            # flags not verified live — caller is warned
     install_hint: str = ""                # shown by doctor when the CLI isn't installed
     note: str = ""
+    # Some CLIs pick a model via an ENV var, not a flag (e.g. vibe reads VIBE_ACTIVE_MODEL). A
+    # lane may supply extra env vars for the spawn via this builder; default = none.
+    env_ask: Callable[..., dict] | None = None
 
     def _env(self, suffix: str) -> str:
         # Env vars can't contain '-', but tool keys can; map so a 'my-lane' key still reads
@@ -152,9 +158,15 @@ def _gemini_ask(task, model, effort, agent, bin=""):
 
 def _mistral_ask(task, model, effort, agent, bin=""):
     # vibe: prompt before --agent; --trust skips the per-dir trust prompt. accept-edits agent
-    # auto-applies edits for build; plan stays read-only.
+    # auto-applies edits for build; plan stays read-only. Model isn't a flag — see _mistral_env.
     ag = "accept-edits" if _is_build(agent) else "plan"
     return ["-p", task, "--agent", ag, "--trust"]
+
+
+def _mistral_env(model, effort="", agent=""):
+    # vibe has no --model flag; it reads the active model from VIBE_ACTIVE_MODEL. So a per-call
+    # model= is honoured by setting that env for this spawn only (empty = vibe's own default).
+    return {"VIBE_ACTIVE_MODEL": model.strip()} if (model or "").strip() else {}
 
 
 def _opencode_ask(task, model, effort, agent, bin=""):
@@ -187,14 +199,28 @@ def _copilot_ask(task, model, effort, agent, bin=""):  # GitHub Copilot CLI (bes
     return cmd + ["-p", task]
 
 
-# opencode's bare default can resolve to a PAID model; prefer a currently listed free Zen
-# model unless the caller explicitly asks for a model. Env-overridable.
-_OPENCODE_FREE_DEFAULT = "opencode/deepseek-v4-flash-free"
+def _grok_ask(task, model, effort, agent, bin=""):  # xAI Grok CLI (best-effort flags — experimental)
+    # No hardcoded model: empty model = the CLI's own default. The flags here are a best guess
+    # for the official `grok` CLI; `doctor deep` checks them against `grok --help` and warns on
+    # drift rather than letting the call fail silently. Build/write flag is unknown, so build
+    # falls back to default mode (read-only-ish) until verified live.
+    cmd = []
+    if model:
+        cmd += ["--model", model]
+    return cmd + ["--prompt", task]
+
+
+# opencode's bare default can resolve to a PAID model, so we pick a free one. The pick is
+# DISCOVERED live and chosen by PATTERN, never by a hardcoded model id — the "best free" model
+# churns and any pinned name eventually 404s (the whole reason this is dynamic). The seed below
+# is a LAST RESORT used only if `opencode models` itself fails; override it with
+# CLI_BRIDGE_OPENCODE_MODEL if it ever ages out before you update.
+_OPENCODE_FREE_SEED = "opencode/deepseek-v4-flash-free"
 _OPENCODE_MODELS_TIMEOUT_S = 5
 
 
 def _opencode_default_model(bin_name: str) -> str:
-    return _current_opencode_free_model(bin_name) or _OPENCODE_FREE_DEFAULT
+    return _current_opencode_free_model(bin_name) or _OPENCODE_FREE_SEED
 
 
 # TTL cache instead of @lru_cache: lru_cache would memoize a "no free model" result forever,
@@ -223,8 +249,13 @@ def _current_opencode_free_model(bin_name: str) -> str:
     if proc.returncode != 0:
         return ""
     models = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
-    free = [m for m in models if m.startswith("opencode/") and m.endswith("-free")]
-    result = _OPENCODE_FREE_DEFAULT if _OPENCODE_FREE_DEFAULT in free else (free[0] if free else "")
+    # Cost-safety: ONLY the `-free` Zen tier is $0. A bare `opencode/<model>` (Zen) bills
+    # per-token at API cost, and `opencode-go/*` spends prepaid credits — neither is a safe
+    # DEFAULT. So an empty model resolves only to a `-free` model, never silently to a paid one.
+    # De-pinned + future-proof: pick by PATTERN (any `-free`), sorted for a stable choice — so a
+    # retired free model is replaced by whatever `-free` model exists THEN, with no code change.
+    free = sorted(m for m in models if m.startswith("opencode/") and m.endswith("-free"))
+    result = free[0] if free else ""
     _opencode_model_cache[bin_name] = (now, result)
     return result
 
@@ -237,6 +268,7 @@ BUILTIN_LANES: list[LaneSpec] = [
     LaneSpec("claude", "Claude (Claude Code CLI)", "claude", _claude_ask,
              cost_default="limited",
              models_args=None, help_args=["--help"], caps=frozenset({"model", "agent"}),
+             probe_flags=("--print", "--permission-mode"),
              client_ids=frozenset({"claude-code", "claude", "claude-desktop"}),
              install_hint="npm i -g @anthropic-ai/claude-code  (then `claude` to log in)",
              note="Anthropic. Strong all-round reasoning. model=claude-opus-4-6/claude-sonnet-4-6 "
@@ -244,6 +276,7 @@ BUILTIN_LANES: list[LaneSpec] = [
     LaneSpec("gpt", "GPT (OpenAI Codex CLI)", "codex", _codex_ask,
              cost_default="limited",
              help_args=["exec", "--help"], caps=frozenset({"model", "effort", "agent"}),
+             probe_flags=("--sandbox", "-m"),
              client_ids=frozenset({"codex", "codex-mcp-client", "codex-cli"}),
              install_hint="npm i -g @openai/codex  (then `codex` to log in)",
              note="OpenAI. effort=high for hard reasoning, low/empty for quick; agent='build' "
@@ -251,6 +284,7 @@ BUILTIN_LANES: list[LaneSpec] = [
     LaneSpec("gemini", "Gemini (Google Gemini CLI / Antigravity)", "gemini", _gemini_ask,
              cost_default="free",
              help_args=["--help"], caps=frozenset({"model", "agent"}), bin_alts=("agy",),
+             probe_flags=("-p",),   # common to gemini & agy; -m differs by binary, so not probed
              client_ids=frozenset({"gemini-cli-mcp-client", "gemini", "antigravity"}),
              install_hint="npm i -g @google/gemini-cli  (free tier; then log in)",
              note="Google. Fast, broad, multimodal/web. Uses `gemini`, or falls back to `agy` "
@@ -258,23 +292,29 @@ BUILTIN_LANES: list[LaneSpec] = [
                   "--dangerously-skip-permissions). Note: `agy` ignores model (uses its own)."),
     LaneSpec("mistral", "Mistral (Vibe CLI)", "vibe", _mistral_ask,
              cost_default="free",
-             help_args=["--help"], caps=frozenset({"agent"}),
+             help_args=["--help"], caps=frozenset({"model", "agent"}), env_ask=_mistral_env,
+             probe_flags=("-p", "--agent", "--trust"),
              client_ids=frozenset({"vibe", "mistral"}),
              install_hint="see Mistral Vibe CLI docs (`vibe`)",
-             note="Mistral free tier. Lightweight quick takes. agent='build' EDITS files "
-                  "(--agent accept-edits). Default plan = read-only."),
+             note="Mistral free tier. Lightweight quick takes. model=<id> selects via "
+                  "VIBE_ACTIVE_MODEL (e.g. a devstral coding model, if your vibe exposes it); "
+                  "empty = vibe's default. agent='build' EDITS files. Default plan = read-only."),
     LaneSpec("opencode", "OpenCode (gateway to many models)", "opencode", _opencode_ask,
-             cost_default="free", default_model=_OPENCODE_FREE_DEFAULT,
+             cost_default="free", default_model=_OPENCODE_FREE_SEED,
              models_args=["models"], help_args=["run", "--help"],
              caps=frozenset({"model", "effort", "agent"}),
+             probe_flags=("--agent", "-m"),
              client_ids=frozenset({"opencode"}),
              install_hint="curl -fsSL https://opencode.ai/install | bash",
-             note=("Gateway to deepseek/qwen/glm/kimi/minimax/... Empty model = a FREE default "
-                   "(never costs credits). Pass a paid 'opencode-go/*' model only when the task "
-                   "earns it. agent='build' lets it EDIT files directly (default 'plan' is read-only).")),
+             note=("Gateway to deepseek/qwen/glm/kimi/minimax/... Empty model = a discovered "
+                   "'opencode/*-free' model ($0, rate-limited). PAID otherwise: a bare 'opencode/*' "
+                   "Zen model bills per-token (API cost), 'opencode-go/*' spends prepaid credits — "
+                   "pass those only when the task earns it. agent='build' EDITS files (default "
+                   "'plan' is read-only).")),
     LaneSpec("qwen", "Qwen (Qwen Code CLI)", "qwen", _qwen_ask,
              cost_default="free",
              help_args=["--help"], caps=frozenset({"model", "agent"}),
+             probe_flags=("-p",),
              client_ids=frozenset({"qwen", "qwen-code"}),
              experimental=True,
              install_hint="npm i -g @qwen-code/qwen-code",
@@ -283,11 +323,22 @@ BUILTIN_LANES: list[LaneSpec] = [
     LaneSpec("copilot", "GitHub Copilot CLI", "copilot", _copilot_ask,
              cost_default="limited",
              help_args=["--help"], caps=frozenset({"model", "agent"}),
+             probe_flags=("-p",),
              client_ids=frozenset({"copilot", "github-copilot"}),
              experimental=True,
              install_hint="gh extension install github/gh-copilot  (subscription)",
              note="GitHub Copilot. agent='build' EDITS files (--allow-all-tools). Flags unverified; "
                   "if your install is `gh copilot`, set CLI_BRIDGE_COPILOT_BIN and a custom lane."),
+    LaneSpec("grok", "Grok (xAI CLI)", "grok", _grok_ask,
+             cost_default="free",
+             help_args=["--help"], caps=frozenset({"model"}),
+             probe_flags=("--model", "--prompt"),
+             client_ids=frozenset({"grok", "grok-cli", "xai"}),
+             experimental=True,
+             install_hint="see xAI Grok CLI docs (`grok`) — npm/install per xAI",
+             note="xAI Grok. Fast, web-aware, strong reasoning. No model hardcoded (empty = the "
+                  "CLI's own default; pass model=<id> to pick one). Flags best-effort and "
+                  "experimental — run `doctor deep` to check them against `grok --help`."),
 ]
 
 
@@ -376,6 +427,11 @@ def load_custom_lanes(path: str | None = None) -> list[LaneSpec]:
         if cost not in {"free", "limited", "paid"}:
             cost = "paid" if bool(item.get("paid", False)) else "free"
         model_flag = str(item.get("model_flag", "")).strip()
+        # Derive the drift-check flags from the template itself: the model flag + any dash-args
+        # in the ask template (e.g. a subcommand flag). So custom lanes get the same `doctor deep`
+        # breakage warning as built-ins, with no extra config.
+        probe = tuple(dict.fromkeys(
+            ([model_flag] if model_flag else []) + [t for t in ask if t.startswith("-")]))
         lanes.append(LaneSpec(
             key=key,
             display=str(item.get("display", key)),
@@ -385,6 +441,7 @@ def load_custom_lanes(path: str | None = None) -> list[LaneSpec]:
             default_model=str(item.get("default_model", "")),
             models_args=_str_list(item.get("models")),
             help_args=_str_list(item.get("help")),
+            probe_flags=probe,
             caps=frozenset({"model"}) if model_flag else frozenset(),
             client_ids=frozenset(c for c in item.get("client_ids", []) if isinstance(c, str)),
             experimental=bool(item.get("experimental", False)),
@@ -393,6 +450,16 @@ def load_custom_lanes(path: str | None = None) -> list[LaneSpec]:
         ))
     LANES_LOAD_STATUS.update({"loaded": len(lanes), "skipped": skipped})
     return lanes
+
+
+def missing_flags(help_text: str, probe_flags) -> list[str]:
+    """Which of a lane's required flags are ABSENT from its CLI help text — i.e. likely removed or
+    renamed upstream, so the lane's invocation would break. Plain substring match (a flag like
+    `-m` / `--sandbox` appears verbatim in help). Empty help or no probe_flags -> [] (can't tell,
+    so never a false alarm). Pure + offline-testable; the live `--help` spawn lives in the server."""
+    if not probe_flags or not help_text:
+        return []
+    return [f for f in probe_flags if f not in help_text]
 
 
 def all_lanes() -> list[LaneSpec]:

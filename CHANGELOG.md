@@ -6,6 +6,70 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added (Grok lane, drift-proofing)
+- **Grok lane** (`ask_grok`): built-in lane for xAI's `grok` CLI (experimental). No model is
+  hardcoded — empty `model` uses the CLI's own default; pass `model=<id>` to pick one.
+- **Flag-drift detection** (`doctor deep`): each installed lane is checked against its `--help` —
+  if a flag cli-bridge relies on (`--sandbox`, `-m`, `-p`, …) has been renamed/removed upstream,
+  doctor warns *before* the lane fails silently. Costs no quota (just `--help`). Custom JSON lanes
+  derive their checked flags from the template automatically. Lanes declare `probe_flags`.
+
+### Changed (drift-proofing)
+- **opencode's free model is DISCOVERED, never pinned — and cost-safe.** The empty-model default
+  resolves only to a `opencode/*-free` model (the $0 rate-limited tier), discovered live from
+  `opencode models` and chosen by PATTERN, deterministically sorted — never a specific hardcoded
+  id, so a retired free model is replaced automatically. It will NOT silently fall back to a paid
+  model: a bare `opencode/*` Zen model bills per-token (API cost) and `opencode-go/*` spends prepaid
+  credits, so if no `-free` model is listed it uses the free seed rather than a paid one. A pinned
+  id remains only as a last-resort seed if `opencode models` itself fails.
+
+### Added (round-table conversations, model discovery, challenge)
+- **Round-table conversations**: pass `conversation: "new"` to any `ask_<lane>` to start a
+  multi-turn, MULTI-LANE thread; reuse the returned id — even on a different lane — to continue.
+  The shared transcript is stored locally (sqlite), so a thread SURVIVES the host's context
+  reset (`/compact`) and a server restart. Recipient-aware replay (your own turns marked "You",
+  others named) with a sliding-window budget (`CLI_BRIDGE_CONVO_MAX_CHARS`, default 32000) that
+  keeps the newest turns and drops the oldest. New tools `conversations_list` /
+  `conversation_show`; `CLI_BRIDGE_CONVO_MAX_STORED` caps how many threads are retained.
+- **Per-lane model selection, including env-based**: a lane can now pick a model via an env var,
+  not only a flag — Mistral (`vibe`) honours `model=` through `VIBE_ACTIVE_MODEL`. New generic
+  `list_models` tool: lists a lane's models where the CLI exposes that, otherwise shows the
+  resolved default model and how to choose one.
+- **`consensus`**: the "LLM council" pattern, done better. Every lane answers blind, then each
+  RANKS the **anonymized** answers (so no model can favour its own), the votes are aggregated
+  **deterministically** (Borda count — not an LLM's vibe), and a chairman synthesizes the
+  winner. Cost-bounded and ban-safe. Returns the final answer + a peer-vote ranking table.
+- **`challenge`**: hand a claim to one outside lane with a critical-reassessment prompt and get
+  an independent skeptical review (with an integrity guardrail — it won't manufacture
+  disagreement). Pressure-test your own conclusion before acting.
+- **Onboarding & guidance**: `setup` now detects installed lanes, sorts them by what they cost
+  you (free / limited / paid) and recommends a concrete profile + daily cap to confirm. The MCP
+  `instructions` were rewritten as a host-agnostic playbook: when to consult / when not, the
+  round-table, safe delegation (`ask_build_isolated`), and spending with confidence.
+- **Live progress streaming**: slow fan-outs (`ask_all`, `consensus`, `debate`) now emit MCP
+  progress notifications ("3/5 lanes done"), so the host can show a live indicator instead of a
+  frozen spinner — done the MCP-native way (no tmux), and a no-op when the host sends no progress
+  token.
+- **Git-workflow tools**: `commit_msg` (a Conventional Commit message from the staged diff, or
+  the working tree if nothing is staged) and `pr_describe` (PR title + Summary/Changes/Testing
+  from the branch diff + commit log vs a base). Both read-only — they emit text, never commit.
+- **Debate stances + consensus agreement**: `debate` gains `adversarial: true`, which assigns
+  for/against/neutral stances to the opening answers (sharper disagreement, with an integrity
+  guardrail so a stance never forces a dishonest position). `consensus` now reports an agreement
+  metric (how many rankers placed the winner first).
+- **Review triage**: `review_diff` / `security_review` accept `severity_filter` — show only
+  findings at or above a threshold (blocker > high > medium > low > info).
+- **Outcome-tracked routing (`rate_lane`)**: the router LEARNS. Score a lane's answer 1–5 for a
+  task-type (mode) and `ask_best` then prefers the lanes that actually win that mode **on this
+  machine** — a local quality signal, stored in sqlite, that outlives the session (survives
+  `/compact` and restart). Proven-good lanes jump ahead of untried ones; proven-bad sink below;
+  zero feedback changes nothing (a two-rating floor before any lane steers). Every `ask_best`
+  answer prints the exact `rate_lane(...)` call, and `route_plan` shows each lane's running score.
+- **Free synthesis via the host (MCP sampling)**: when the host supports it, `ask_all`'s
+  synthesis uses the host's OWN model as the judge — no lane spawned, no API key, no quota —
+  and transparently falls back to a free lane otherwise. cli-bridge's zero-cost edge: reuse the
+  model you're already running.
+
 ### Added
 - **Council recap**: every `ask_all` / review / debate / premortem / test_plan result opens with
   a one-line-per-delegate digest — who answered, latency, a one-line gist — so no voice is hidden.
@@ -58,6 +122,10 @@ All notable changes to this project are documented here. The format follows
   lanes). SECURITY.md notes the BYO-API curl key-in-argv exposure + mitigation.
 
 ### Changed
+- **Empty answers fall through.** A delegate that exits 0 but prints NOTHING (seen with `agy` /
+  Antigravity in print mode) is now a soft failure (`kind="empty"`) instead of a "successful"
+  blank — so `ask_cascade` / `ask_best` skip it and return a lane that actually answers, and it's
+  never cached. Not retried, not a cooldown (it's per-call, not lane health).
 - Findings merge now also collapses **similarly-worded** findings at the same `file:line`
   (token-overlap similarity), not just exact-title matches — so two models describing the same
   bug differently merge into one entry with higher confidence. None-location findings stay
