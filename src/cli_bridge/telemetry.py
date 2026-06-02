@@ -314,6 +314,14 @@ def _utc_day_start() -> float:
     return t - (g.tm_hour * 3600 + g.tm_min * 60 + g.tm_sec)
 
 
+def est_credits_today() -> float:
+    """Total ESTIMATED paid credits spent since UTC midnight (for the hard budget cap)."""
+    rep = usage_budget()
+    if not rep.get("enabled"):
+        return 0.0
+    return round(sum(r["est_credits_today"] or 0 for r in rep["by_lane"]), 4)
+
+
 def usage_budget() -> dict:
     """Per-lane runs since UTC midnight vs an optional CLI_BRIDGE_<LANE>_DAILY_LIMIT, plus the
     estimated credits spent today. All token/credit figures are estimates."""

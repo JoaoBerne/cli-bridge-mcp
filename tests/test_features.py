@@ -120,3 +120,58 @@ def test_ask_all_respects_max_parallel(monkeypatch):
     asyncio.run(server._ask_all_body(lanes, {"task": "hi"}))
     assert state["max"] <= 2              # never more than the cap ran at once
 
+
+# ── cost-safety + team controls (cluster 1) ─────────────────────────────────────────────────
+
+def _paid_lane():
+    return LaneSpec("p", "Paid", "echo", lambda *a: [], paid=True)
+
+
+def test_daily_credit_cap_blocks_paid(monkeypatch):
+    monkeypatch.setenv("CLI_BRIDGE_DAILY_CREDIT_CAP", "1.0")
+    monkeypatch.setattr(server.telemetry, "est_credits_today", lambda: 1.5)  # already over
+    spawned = {"n": 0}
+
+    async def boom(*a, **k):
+        spawned["n"] += 1
+        return RunResult(True, "x", "ok")
+    monkeypatch.setattr(server.runner, "arun", boom)
+
+    r = asyncio.run(server._run_lane(_paid_lane(), {"task": "hi"}))
+    assert not r.ok and r.kind == "blocked" and spawned["n"] == 0
+
+
+def test_daily_credit_cap_allows_free(monkeypatch):
+    monkeypatch.setenv("CLI_BRIDGE_DAILY_CREDIT_CAP", "1.0")
+    monkeypatch.setattr(server.telemetry, "est_credits_today", lambda: 99.0)
+
+    async def ok(*a, **k):
+        return RunResult(True, "free answer", "ok")
+    monkeypatch.setattr(server.runner, "arun", ok)
+    r = asyncio.run(server._run_lane(_lane(), {"task": "hi"}))   # _lane() is free
+    assert r.ok                                                   # cap only gates paid lanes
+
+
+def test_build_disabled_forces_plan(monkeypatch):
+    monkeypatch.setenv("CLI_BRIDGE_DISABLE_BUILD", "1")
+    captured = {}
+
+    async def cap(argv, timeout, cwd=None, env=None):
+        captured["argv"] = argv
+        return RunResult(True, "ok", "ok")
+    monkeypatch.setattr(server.runner, "arun", cap)
+    lane = LaneSpec("x", "X", "echo", lambda task, m, e, agent, b="": [f"agent={agent}"],
+                    caps=("agent",))
+    asyncio.run(server._run_lane(lane, {"task": "hi", "agent": "build"}))
+    assert "agent=plan" in captured["argv"]      # build downgraded to plan
+
+
+def test_allowlist_filters_lanes(monkeypatch):
+    a = LaneSpec("a", "A", "echo", lambda *x: [])
+    b = LaneSpec("b", "B", "echo", lambda *x: [])
+    monkeypatch.setattr(server, "installed_lanes", lambda lst: [a, b])
+    monkeypatch.setenv("CLI_BRIDGE_HOST", "claude-code")
+    monkeypatch.setenv("CLI_BRIDGE_ALLOW_LANES", "b")
+    lanes, _ = server._active_lanes()
+    assert [ln.key for ln in lanes] == ["b"]     # only allowlisted lane exposed
+

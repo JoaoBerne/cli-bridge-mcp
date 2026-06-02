@@ -58,6 +58,29 @@ def lane_env_int(lane_key: str, suffix: str) -> int | None:
         return None
 
 
+def daily_credit_cap() -> float:
+    """Hard ceiling on ESTIMATED paid spend per UTC day. 0 = off (default). When >0, a paid lane
+    is refused once today's estimated credits reach the cap — makes 'cost-safe' enforceable, not
+    just reported."""
+    try:
+        return max(0.0, float(os.environ.get("CLI_BRIDGE_DAILY_CREDIT_CAP", "").strip() or 0))
+    except ValueError:
+        return 0.0
+
+
+def allowed_lanes() -> set[str]:
+    """Optional allowlist (CLI_BRIDGE_ALLOW_LANES=gemini,gpt). Empty = all. For locked-down /
+    team setups: only these lane keys are exposed/usable."""
+    raw = os.environ.get("CLI_BRIDGE_ALLOW_LANES", "").strip()
+    return {p.strip() for p in raw.split(",") if p.strip()} if raw else set()
+
+
+def build_disabled() -> bool:
+    """CLI_BRIDGE_DISABLE_BUILD=1 forces every delegate to read-only (plan), even if a caller
+    asks agent='build'. For shared/team machines where no delegate should edit files."""
+    return os.environ.get("CLI_BRIDGE_DISABLE_BUILD", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def max_parallel() -> int:
     """Cap on simultaneous delegate spawns in a fan-out (ask_all). Default 6 — high enough that
     a normal free council never hits it, low enough that many custom lanes can't OOM a small
