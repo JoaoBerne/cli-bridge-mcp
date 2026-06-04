@@ -435,7 +435,22 @@ def _template_builder(ask_tmpl: list[str], model_flag: str):
 
 
 # Last custom-lanes load status, so `doctor` can surface a broken file instead of staying silent.
-LANES_LOAD_STATUS: dict = {"path": "", "loaded": 0, "skipped": 0, "error": ""}
+# argv_secret_risk lists lanes whose template would expand a ${SECRET} into a credential-bearing
+# argv part (visible in `ps` for the duration of the call) — doctor warns with the safe pattern.
+LANES_LOAD_STATUS: dict = {"path": "", "loaded": 0, "skipped": 0, "error": "",
+                           "argv_secret_risk": []}
+
+# A template arg is argv-secret-risky when it BOTH expands an env var and looks like it carries a
+# credential. The safe pattern keeps the secret out of argv entirely: curl ≥ 8.3's
+#   --variable %MY_KEY --expand-header "Authorization: Bearer {{MY_KEY}}"
+# imports the env var INSIDE curl — `ps` only ever shows the variable's NAME.
+_CRED_HINT = __import__("re").compile(
+    r"(?i)authorization|bearer|api[-_]?key|x-api-key|token|secret")
+
+
+def argv_secret_risk(ask_tmpl: list[str]) -> bool:
+    """True when this ask template would put an expanded ${ENV} secret into argv."""
+    return any("${" in part and _CRED_HINT.search(part) for part in ask_tmpl)
 
 _RESERVED_KEYS = {"all", "doctor", "setup"}
 
@@ -453,7 +468,8 @@ def _valid_key(key: str) -> bool:
 
 def load_custom_lanes(path: str | None = None) -> list[LaneSpec]:
     path = path or os.environ.get("CLI_BRIDGE_LANES_FILE", "").strip()
-    LANES_LOAD_STATUS.update({"path": path, "loaded": 0, "skipped": 0, "error": ""})
+    LANES_LOAD_STATUS.update({"path": path, "loaded": 0, "skipped": 0, "error": "",
+                              "argv_secret_risk": []})
     if not path:
         return []
     if not os.path.isfile(path):
@@ -490,6 +506,8 @@ def load_custom_lanes(path: str | None = None) -> list[LaneSpec]:
         # breakage warning as built-ins, with no extra config.
         probe = tuple(dict.fromkeys(
             ([model_flag] if model_flag else []) + [t for t in ask if t.startswith("-")]))
+        if argv_secret_risk(ask):
+            LANES_LOAD_STATUS["argv_secret_risk"].append(key)
         lanes.append(LaneSpec(
             key=key,
             display=str(item.get("display", key)),

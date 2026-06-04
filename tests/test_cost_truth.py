@@ -125,3 +125,24 @@ def test_free_apis_example_loads_as_free_curl_lanes(monkeypatch):
         assert any("chat/completions" in part for part in argv)
         body = argv[-1]
         assert ln.default_model in body and '"hi"' in body  # {model} + {task_json} expanded
+    assert lanes.LANES_LOAD_STATUS["argv_secret_risk"] == []   # keys imported INSIDE curl
+
+
+# ── argv secrets stay out of `ps` (council blocker M11-1) ────────────────────────────────
+
+def test_argv_secret_risk_detector():
+    risky = ["-H", "Authorization: Bearer ${KEY}"]
+    safe = ["--variable", "%KEY", "--expand-header", "Authorization: Bearer {{KEY}}"]
+    assert lanes.argv_secret_risk(risky) is True
+    assert lanes.argv_secret_risk(safe) is False               # curl expands internally
+    assert lanes.argv_secret_risk(["${HOME}/x", "{task}"]) is False  # env ≠ credential
+
+
+def test_doctor_warns_on_argv_secret_lane(tmp_path, monkeypatch):
+    cfg = tmp_path / "lanes.json"
+    cfg.write_text(json.dumps([{
+        "key": "leaky", "bin": "curl",
+        "ask": ["-H", "Authorization: Bearer ${LEAK_KEY}", "https://x", "{task}"]}]))
+    monkeypatch.setenv("CLI_BRIDGE_LANES_FILE", str(cfg))
+    text = server._doctor("")
+    assert "Secret in argv" in text and "leaky" in text and "--expand-header" in text

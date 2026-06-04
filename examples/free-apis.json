@@ -4,6 +4,8 @@
     "//1": "card-free, hard-stop tier (verified June 2026 against vendor docs — see docs/COSTS.md).",
     "//2": "Hard-stop = exhaustion returns HTTP 429, never a surprise bill.",
     "//3": "Point CLI_BRIDGE_LANES_FILE at this file and export the listed env keys.",
+    "//4": "SECRET-SAFE: keys are imported INSIDE curl via --variable %ENV + --expand-header",
+    "//5": "(curl >= 8.3, 2023) — the key never appears in argv, so `ps` only shows its NAME.",
 
     "key": "groq",
     "display": "Groq (free tier, hard-stop)",
@@ -16,9 +18,10 @@
     "note": "Groq free plan, June 2026: llama-3.3-70b-versatile 30 req/min / 1k req/day; llama-3.1-8b-instant 30/14.4k; gpt-oss-120b 30/1k. 429 on exhaustion (no card on file = no billing possible). Limits churn — recheck console.groq.com/docs/rate-limits.",
     "ask": [
       "-sS",
+      "--variable", "%GROQ_API_KEY",
+      "--expand-header", "Authorization: Bearer {{GROQ_API_KEY}}",
       "https://api.groq.com/openai/v1/chat/completions",
       "-H", "Content-Type: application/json",
-      "-H", "Authorization: Bearer ${GROQ_API_KEY}",
       "-d", "{\"model\":\"{model}\",\"messages\":[{\"role\":\"user\",\"content\":\"{task_json}\"}]}"
     ]
   },
@@ -34,9 +37,10 @@
     "note": "Cerebras Free Trial, June 2026: gpt-oss-120b and zai-glm-4.7 at 5 req/min / 1M tokens/day each; ~8k-token context cap on free tier. 429 on exhaustion, no card required. Source: inference-docs.cerebras.ai/support/rate-limits.",
     "ask": [
       "-sS",
+      "--variable", "%CEREBRAS_API_KEY",
+      "--expand-header", "Authorization: Bearer {{CEREBRAS_API_KEY}}",
       "https://api.cerebras.ai/v1/chat/completions",
       "-H", "Content-Type: application/json",
-      "-H", "Authorization: Bearer ${CEREBRAS_API_KEY}",
       "-d", "{\"model\":\"{model}\",\"messages\":[{\"role\":\"user\",\"content\":\"{task_json}\"}]}"
     ]
   },
@@ -52,9 +56,10 @@
     "note": "GitHub Models, June 2026: 'All GitHub accounts have rate-limited access at no cost' (official). Limits vary by model; usage is BLOCKED (hard stop) once quota is spent unless you opt into paid. OpenAI-compatible endpoint. Source: docs.github.com (about-billing-for-github-models).",
     "ask": [
       "-sS",
+      "--variable", "%GITHUB_MODELS_TOKEN",
+      "--expand-header", "Authorization: Bearer {{GITHUB_MODELS_TOKEN}}",
       "https://models.github.ai/inference/chat/completions",
       "-H", "Content-Type: application/json",
-      "-H", "Authorization: Bearer ${GITHUB_MODELS_TOKEN}",
       "-d", "{\"model\":\"{model}\",\"messages\":[{\"role\":\"user\",\"content\":\"{task_json}\"}]}"
     ]
   },
@@ -70,9 +75,10 @@
     "note": "openrouter/free routes to a random free model (~24 ':free' variants, June 2026). Always $0, hard stop on rate limit — but exact req/day limits are UNCONFIRMED (official docs show placeholders) and quality varies per routed model. Upstream providers' data policies apply unless opted out in settings.",
     "ask": [
       "-sS",
+      "--variable", "%OPENROUTER_API_KEY",
+      "--expand-header", "Authorization: Bearer {{OPENROUTER_API_KEY}}",
       "https://openrouter.ai/api/v1/chat/completions",
       "-H", "Content-Type: application/json",
-      "-H", "Authorization: Bearer ${OPENROUTER_API_KEY}",
       "-d", "{\"model\":\"{model}\",\"messages\":[{\"role\":\"user\",\"content\":\"{task_json}\"}]}"
     ]
   }

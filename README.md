@@ -348,13 +348,19 @@ file. `{task_json}` is the prompt, JSON-escaped:
     "key": "myapi", "display": "My API", "bin": "curl", "default_model": "gpt-4o-mini",
     "paid": true,
     "ask": [
-      "-sS", "https://api.openai.com/v1/chat/completions",
-      "-H", "Authorization: Bearer ${MY_API_KEY}",
+      "-sS",
+      "--variable", "%MY_API_KEY",
+      "--expand-header", "Authorization: Bearer {{MY_API_KEY}}",
+      "https://api.openai.com/v1/chat/completions",
       "-d", "{\"model\":\"{model}\",\"messages\":[{\"role\":\"user\",\"content\":\"{task_json}\"}]}"
     ]
   }
 ]
 ```
+
+The `--variable %MY_API_KEY` + `--expand-header` pair (curl ≥ 8.3) imports the key *inside*
+curl — it never appears in the process list. `doctor` warns if a custom lane expands a `${ENV}`
+secret into argv instead.
 
 (See `examples/` for both, ready to copy.)
 

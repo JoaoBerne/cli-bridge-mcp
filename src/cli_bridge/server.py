@@ -1961,6 +1961,13 @@ def _doctor(host: str) -> str:
         lines.append(f"- **{lane.key}** ({lane.bin}) - {mark}{paid}{exp}{hidden}{default}")
         if installed and lane.cost_note_effective:
             lines.append(f"  - _{lane.cost_note_effective}_")
+    risky = lanes_mod.LANES_LOAD_STATUS.get("argv_secret_risk") or []
+    if risky:
+        lines.append(f"\n⚠️ **Secret in argv** — custom lane(s) {', '.join(risky)} expand a "
+                     "${ENV} key into the command line, visible in `ps` while the call runs. "
+                     "Safe pattern (curl ≥ 8.3): `--variable %MY_KEY` + `--expand-header "
+                     "\"Authorization: Bearer {{MY_KEY}}\"` keeps the secret out of argv — "
+                     "see examples/free-apis.json.")
     lines.append("\nPer-lane config (your plan): CLI_BRIDGE_<LANE>_COST=free|limited|paid, "
                  "_ENABLED=false, _BIN=<path>, _MODEL=<id>.")
     lines.append("Add your own CLI via a JSON file in CLI_BRIDGE_LANES_FILE - no code changes.")

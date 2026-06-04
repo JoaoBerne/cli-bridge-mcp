@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Security (council blocker M11-1)
+- **BYO-API keys never touch argv anymore.** The shipped curl-lane examples now use curl ≥ 8.3's
+  `--variable %MY_KEY` + `--expand-header "Authorization: Bearer {{MY_KEY}}"`, which imports the
+  key *inside* curl — `ps` only ever shows the variable's NAME. New `argv_secret_risk` validator:
+  a custom lane that still expands a `${ENV}` secret into a credential-bearing argv part gets a
+  ⚠️ warning in `doctor` with the safe pattern. (Unanimous blocker from the council's
+  self-critique; SECURITY.md updated.)
+
 ### Added (debate/consensus hardening — from a production field report)
 - **Grounding contract** (`context_files`, debate + consensus): the tool reads up to 5 key files
   (per-file truncation, unreadable files noted, never fatal) into a CONTEXT PACK injected into
