@@ -6,7 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-### Security (council blocker M11-1)
+### Security (council blockers M11-1, M11-4)
+- **`set_lane_cost` now REQUIRES a provenance note.** Every cost write must state its one-line
+  why ('user: on the Go plan', 'vendor: tier sunset') — a delegate's output can't quietly steer
+  the host into rewriting the cost policy, and doctor shows the note next to the tier.
 - **BYO-API keys never touch argv anymore.** The shipped curl-lane examples now use curl ≥ 8.3's
   `--variable %MY_KEY` + `--expand-header "Authorization: Bearer {{MY_KEY}}"`, which imports the
   key *inside* curl — `ps` only ever shows the variable's NAME. New `argv_secret_risk` validator:

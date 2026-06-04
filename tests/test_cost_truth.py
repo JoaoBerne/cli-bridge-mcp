@@ -68,6 +68,12 @@ def test_set_lane_cost_validates_lane_and_tier():
     assert "[error]" in out[0].text
 
 
+def test_set_lane_cost_requires_provenance_note():
+    # anti-injection friction: no silent policy rewrites — every write states its why
+    out = asyncio.run(server.call_tool("set_lane_cost", {"lane": "gemini", "cost": "free"}))
+    assert "[error]" in out[0].text and "note is required" in out[0].text
+
+
 def test_update_config_file_merges_without_clobbering(tmp_path, monkeypatch):
     p = tmp_path / "config.json"
     p.write_text(json.dumps({"profile": "max", "lanes": {"gpt": {"daily_limit": 50}}}))

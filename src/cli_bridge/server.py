@@ -545,11 +545,13 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                                             "limited=scarce quota (skip broad fan-out); "
                                             "paid=money/credits."},
                     "note": {"type": "string",
-                             "description": "Optional one-line WHY (shown by doctor) — e.g. "
-                                            "'user has the Go plan' or 'free tier sunset "
-                                            "2026-06-18'. ≤200 chars."},
+                             "description": "REQUIRED one-line provenance/WHY (shown by doctor) "
+                                            "— e.g. 'user: has the Go plan' or 'vendor: free "
+                                            "tier sunset 2026-06-18'. ≤200 chars. Required so a "
+                                            "delegate's output can't quietly rewrite the cost "
+                                            "policy without a stated why."},
                 },
-                "required": ["lane", "cost"],
+                "required": ["lane", "cost", "note"],
             },
             annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
         ))
@@ -1618,12 +1620,16 @@ def _set_lane_cost(args: dict) -> list[TextContent]:
     if cost not in {"free", "limited", "paid"}:
         return [TextContent(type="text", text="[error] cost must be free, limited or paid.")]
     note = _str(args, "note")[:200]
+    if not note:
+        # Anti-injection friction: every cost write must state its provenance. A delegate's
+        # output can't quietly rewrite the policy through the host without leaving a why.
+        return [TextContent(type="text", text=(
+            "[error] note is required — one line saying who/what established this, e.g. "
+            "'user: on the Go plan' or 'vendor: free tier sunset 2026-06-18'."))]
     env_key = ln.key.upper().replace("-", "_")
     os.environ[f"CLI_BRIDGE_{env_key}_COST"] = cost          # effective immediately
-    fields: dict = {"cost": cost}
-    if note:
-        os.environ[f"CLI_BRIDGE_{env_key}_COST_NOTE"] = note
-        fields["cost_note"] = note
+    os.environ[f"CLI_BRIDGE_{env_key}_COST_NOTE"] = note
+    fields: dict = {"cost": cost, "cost_note": note}
     path = config.update_config_file({ln.key: fields})
     persisted = (f"persisted to `{path}`" if path
                  else "applied for THIS session only — config file not writable")

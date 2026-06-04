@@ -28,7 +28,7 @@ night; what remains, by ROI:
 | M11-1 | ✅ DONE 2026-06-05 — Ban argv secrets | Shipped: curl `--variable %KEY` + `--expand-header` in all examples (key imported inside curl, never in `ps`) + `argv_secret_risk` validator surfaced by doctor. | S/M |
 | M11-2 | Preflight manifest | Before any fan-out with cwd/context: "these N files/chars go to THESE vendors" — cheapest real data-governance win; extends `dry_run`. | M |
 | M11-3 | Warm lane pool (opt-in) | Persist top-2 lanes as subprocesses, TTL ~60s, clean kill. Cold start 0.5–15s is the #1 UX complaint (3/4 debaters). | M/L |
-| M11-4 | Harden set_lane_cost | Prompt-injection vector (host writes config on a delegate's say-so): require a non-empty note + list recent cost writes in doctor. Keep the tool — "observed cost" can't replace a declared tier. | S |
+| M11-4 | ✅ DONE 2026-06-05 — Harden set_lane_cost | Shipped: `note` (provenance) is now REQUIRED on every cost write — no silent policy rewrites; doctor shows the note next to the tier. "Observed cost" can't replace a declared tier. | S |
 | M11-5 | Per-lane env scrub + path allowlist | `CLI_BRIDGE_<LANE>_ENV_ALLOW` / `_PATHS`; proportionate alternative to full OS sandboxing for an advisory tool. | M |
 | M11-6 | Observed chars/token calibration | Calibrate the /4 ratio per lane from actual outputs; keeps "estimated" honest. | S |
 
