@@ -25,7 +25,7 @@ night; what remains, by ROI:
 
 | # | Item | Detail | Size |
 |---|---|---|---:|
-| M11-1 | Ban argv secrets | curl lanes expand `${KEY}` into argv → visible in `ps`. Lane validator rejects secret-looking resolved argv; pass curl headers via stdin (`--config -` / `--header @-`) instead. Unanimous blocker. | S/M |
+| M11-1 | ✅ DONE 2026-06-05 — Ban argv secrets | Shipped: curl `--variable %KEY` + `--expand-header` in all examples (key imported inside curl, never in `ps`) + `argv_secret_risk` validator surfaced by doctor. | S/M |
 | M11-2 | Preflight manifest | Before any fan-out with cwd/context: "these N files/chars go to THESE vendors" — cheapest real data-governance win; extends `dry_run`. | M |
 | M11-3 | Warm lane pool (opt-in) | Persist top-2 lanes as subprocesses, TTL ~60s, clean kill. Cold start 0.5–15s is the #1 UX complaint (3/4 debaters). | M/L |
 | M11-4 | Harden set_lane_cost | Prompt-injection vector (host writes config on a delegate's say-so): require a non-empty note + list recent cost writes in doctor. Keep the tool — "observed cost" can't replace a declared tier. | S |
