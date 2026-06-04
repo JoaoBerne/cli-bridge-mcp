@@ -70,6 +70,21 @@ def test_context_pack_relative_resolves_against_cwd(tmp_path):
     assert "relative fact" in pack
 
 
+# ── M11-2 preflight data manifest (debate) ───────────────────────────────────────────────
+
+def test_debate_dry_run_manifest_spawns_nothing(tmp_path):
+    f = tmp_path / "facts.md"
+    f.write_text("verified: 3 OOMs on 16GB")
+    rec = []
+    out = asyncio.run(workflows.debate(
+        _panel(3), {"task": "q?", "context_files": [str(f)], "dry_run": True}, _recorder(rec)))
+    assert rec == []                                        # no lane spawned
+    assert "Preflight data manifest" in out
+    assert "facts.md" in out
+    # each debater vendor is named as a recipient
+    assert "Gemini" in out and "Gpt" in out
+
+
 # ── FR-2 fact-check pass ─────────────────────────────────────────────────────────────────
 
 def test_fact_check_runs_by_default_and_reports_unverified():

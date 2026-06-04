@@ -31,7 +31,7 @@ def test_consensus_streams_progress():
 
     asyncio.run(workflows.consensus(_panel(), {"task": "q"}, run_lane, progress=prog))
     assert [c[0] for c in calls] == [1, 2, 3]
-    assert calls[-1] == (3, 3, "synthesis")
+    assert calls[-1] == (3, 3, "selection")        # selection is the default (synthesis opt-in)
 
 
 def test_debate_streams_progress():

@@ -37,7 +37,7 @@ def _panel():
             LaneSpec("mistral", "Mistral", "echo", lambda *x: [])]
 
 
-def test_consensus_full_flow_anonymized_and_deterministic():
+def test_consensus_synthesize_opt_in_runs_chairman():
     async def run_lane(lane, args, *, tool="ask", terse=True):
         assert tool == "consensus"
         t = args["task"]
@@ -47,9 +47,10 @@ def test_consensus_full_flow_anonymized_and_deterministic():
             return RunResult(True, "RANKING: A, B, C", "ok")   # everyone prefers A (=Gemini)
         return RunResult(True, f"answer from {lane.display}", "ok")
 
-    out = asyncio.run(workflows.consensus(_panel(), {"task": "what is best?"}, run_lane))
+    out = asyncio.run(workflows.consensus(
+        _panel(), {"task": "what is best?", "synthesize": True}, run_lane))
     assert "# Consensus" in out
-    assert "FINAL: refined winning answer." in out
+    assert "FINAL: refined winning answer." in out          # chairman ran (opt-in)
     assert "Consensus ranking" in out
     # Gemini (answer A) wins the Borda vote -> rank 1 row names Gemini
     rank_section = out.split("Consensus ranking", 1)[1]
@@ -57,6 +58,27 @@ def test_consensus_full_flow_anonymized_and_deterministic():
     assert "Gemini" in first_row
     # answers stay anonymized (A/B/C labels present); panel lists all three
     assert "Gemini" in out and "GPT" in out and "Mistral" in out
+
+
+def test_consensus_selects_winner_verbatim_by_default():
+    # SOTA: judge-SELECTION beats synthesis (arXiv 2603.20324). Default returns the peer-ranked
+    # #1 answer verbatim and does NOT spawn a chairman.
+    chairman_called = []
+
+    async def run_lane(lane, args, *, tool="ask", terse=True):
+        t = args["task"]
+        if "chairman of a model council" in t:
+            chairman_called.append(True)
+            return RunResult(True, "SHOULD NOT APPEAR", "ok")
+        if "Rank them best to worst" in t:
+            return RunResult(True, "RANKING: A, B, C", "ok")   # A (=Gemini) wins
+        return RunResult(True, f"answer from {lane.display}", "ok")
+
+    out = asyncio.run(workflows.consensus(_panel(), {"task": "what is best?"}, run_lane))
+    assert chairman_called == []                            # no synthesis by default
+    assert "SHOULD NOT APPEAR" not in out
+    assert "answer from Gemini" in out                      # the selected #1 answer, verbatim
+    assert "selected:" in out and "synthesis off by default" in out
 
 
 def test_consensus_single_answer_short_circuits():
@@ -76,8 +98,25 @@ def test_consensus_no_parseable_rankings_falls_back():
         if "Rank them best to worst" in args["task"]:
             return RunResult(True, "I refuse to rank", "ok")   # unparseable
         return RunResult(True, f"answer {lane.display}", "ok")
-    out = asyncio.run(workflows.consensus(_panel(), {"task": "q"}, run_lane))
+    out = asyncio.run(workflows.consensus(_panel(), {"task": "q", "synthesize": True}, run_lane))
     assert "No parseable rankings" in out and "chair final" in out
+
+
+def test_consensus_dry_run_manifest_spawns_nothing(tmp_path, monkeypatch):
+    f = tmp_path / "spec.md"
+    f.write_text("secret design notes")
+    spawned = []
+
+    async def run_lane(lane, args, *, tool="ask", terse=True):
+        spawned.append(lane.key)
+        return RunResult(True, "x", "ok")
+
+    out = asyncio.run(workflows.consensus(
+        _panel(), {"task": "q", "context_files": [str(f)], "dry_run": True}, run_lane))
+    assert spawned == []                                    # nothing sent
+    assert "Preflight data manifest" in out
+    assert "spec.md" in out and "Gemini" in out            # file + vendor listed
+    assert "nothing has been sent" in out.lower()
 
 
 @pytest.fixture
@@ -99,5 +138,6 @@ def test_consensus_dispatch(isolate, monkeypatch):
         return RunResult(True, f"ans {lane.display}", "ok")
     monkeypatch.setattr(server, "_run_lane", fake_run_lane)
 
-    out = asyncio.run(server.call_tool("consensus", {"task": "decide"}))[0].text
+    out = asyncio.run(server.call_tool(
+        "consensus", {"task": "decide", "synthesize": True}))[0].text
     assert "# Consensus" in out and "dispatched final" in out

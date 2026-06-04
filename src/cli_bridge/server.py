@@ -683,6 +683,10 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                                  "description": "If the verdict is unanimous, one lane argues "
                                  "the strongest case AGAINST it and the judge re-concludes "
                                  "(anti-echo-chamber bonus round). Default false."},
+                    "dry_run": {"type": "boolean",
+                                "description": "Preflight: return a data manifest — which vendors "
+                                "would be queried and exactly which files/chars would be sent — "
+                                "WITHOUT spawning anything. Default false."},
                     "include_paid": {"type": "boolean", "description": "Allow limited/paid lanes."},
                     "cwd": {"type": "string", "description": "Directory the CLIs run in."},
                     "timeout_s": {"type": "integer",
@@ -696,10 +700,10 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             name="consensus",
             description=("Council CONSENSUS: every lane answers blind, then each RANKS the "
                          "ANONYMIZED answers (no model can favour its own), the votes are "
-                         "aggregated deterministically (Borda count), and a chairman synthesizes "
-                         "the winner. Use it for 'what's the right answer?' when you want a "
-                         "peer-vetted result, not an open debate. Free/non-limited unless "
-                         "include_paid."),
+                         "aggregated deterministically (Borda count), and the peer-ranked #1 "
+                         "answer is returned (SELECTION — research shows it beats blending). "
+                         "Use it for 'what's the right answer?' when you want a peer-vetted "
+                         "result, not an open debate. Free/non-limited unless include_paid."),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -708,9 +712,17 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                                       "description": "Up to 5 key file paths read into every "
                                       "panelist prompt (grounding). Relative paths resolve "
                                       "against cwd."},
+                    "synthesize": {"type": "boolean",
+                                   "description": "Have a chairman BLEND the answers instead of "
+                                   "returning the peer-ranked best one verbatim. Default false: "
+                                   "synthesis empirically loses to selection (it averages away "
+                                   "the variance that makes a council useful)."},
                     "summary_only": {"type": "boolean",
                                      "description": "Return the final answer + vote table only; "
                                      "drop the full per-model answers."},
+                    "dry_run": {"type": "boolean",
+                                "description": "Preflight data manifest (vendors + files/chars "
+                                "that would be sent) without spawning anything. Default false."},
                     "include_paid": {"type": "boolean", "description": "Allow limited/paid lanes."},
                     "cwd": {"type": "string", "description": "Directory the CLIs run in."},
                     "timeout_s": {"type": "integer",

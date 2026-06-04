@@ -340,21 +340,22 @@ async def security_review(targets: list[LaneSpec], args: dict, run_lane) -> str:
 CONTEXT_MAX_FILES = 5
 
 
-def build_context_pack(context_files, cwd: str = "") -> tuple[str, list[str]]:
-    """Read up to CONTEXT_MAX_FILES files into a 'CONTEXT PACK' block injected into debater
-    prompts. Relative paths resolve against cwd; each file is truncated to
-    CLI_BRIDGE_CONTEXT_FILE_MAX_CHARS. An unreadable file becomes a note, never a failure.
-    Returns (pack_text, notes) — pack_text == "" when nothing could be read."""
+def _read_context_files(context_files, cwd: str = ""):
+    """Read up to CONTEXT_MAX_FILES files once, for BOTH the context pack and the preflight
+    manifest (so they never disagree about what would be sent). Returns (rows, notes) where each
+    row is {path, chars, truncated, error}: error set + chars 0 when unreadable. Relative paths
+    resolve against cwd; each file is read up to CLI_BRIDGE_CONTEXT_FILE_MAX_CHARS (+1 to detect
+    truncation). Pure-ish (filesystem read only); never raises."""
     notes: list[str] = []
+    rows: list[dict] = []
     if not isinstance(context_files, list):
-        return "", notes
+        return rows, notes
     paths = [str(p).strip() for p in context_files if str(p).strip()]
     if len(paths) > CONTEXT_MAX_FILES:
         notes.append(f"{len(paths) - CONTEXT_MAX_FILES} context file(s) dropped "
                      f"(cap {CONTEXT_MAX_FILES})")
         paths = paths[:CONTEXT_MAX_FILES]
     cap = config.CONTEXT_FILE_MAX_CHARS
-    blocks: list[str] = []
     for p in paths:
         full = p if os.path.isabs(p) else os.path.join(cwd or ".", p)
         try:
@@ -362,15 +363,60 @@ def build_context_pack(context_files, cwd: str = "") -> tuple[str, list[str]]:
                 text = fh.read(cap + 1)
         except OSError as e:
             notes.append(f"unreadable context file '{p}' ({e.__class__.__name__})")
+            rows.append({"path": p, "chars": 0, "truncated": False, "text": None,
+                         "error": e.__class__.__name__})
             continue
-        marker = f" (truncated at {cap} chars)" if len(text) > cap else ""
-        blocks.append(f"--- file: {p}{marker} ---\n{text[:cap]}")
+        truncated = len(text) > cap
+        rows.append({"path": p, "chars": min(len(text), cap), "truncated": truncated,
+                     "text": text[:cap], "error": None})
+    return rows, notes
+
+
+def build_context_pack(context_files, cwd: str = "") -> tuple[str, list[str]]:
+    """Read up to CONTEXT_MAX_FILES files into a 'CONTEXT PACK' block injected into debater
+    prompts. An unreadable file becomes a note, never a failure. Returns (pack_text, notes) —
+    pack_text == "" when nothing could be read."""
+    rows, notes = _read_context_files(context_files, cwd)
+    blocks = []
+    for r in rows:
+        if r["text"] is None:
+            continue
+        marker = f" (truncated at {config.CONTEXT_FILE_MAX_CHARS} chars)" if r["truncated"] else ""
+        blocks.append(f"--- file: {r['path']}{marker} ---\n{r['text']}")
     if not blocks:
         return "", notes
     pack = ("CONTEXT PACK — ground truth for this debate. Read it BEFORE opining and cite the "
             "file when it supports a claim. If the brief contradicts these files, the files "
             "win.\n\n" + "\n\n".join(blocks))
     return pack, notes
+
+
+def data_manifest(targets, question: str, context_files, cwd: str = "") -> str:
+    """PREFLIGHT data manifest (M11-2): show EXACTLY what would leave this machine and to which
+    vendors BEFORE spawning anything — the cheapest data-governance control. Pure (only reads the
+    listed files). `targets` = the lanes that would be queried (each = a separate vendor)."""
+    rows, notes = _read_context_files(context_files, cwd)
+    brief_chars = len(question or "")
+    files_chars = sum(r["chars"] for r in rows)
+    total = brief_chars + files_chars
+    est_tok = max(1, total // config.CHARS_PER_TOKEN)
+    lines = ["# Preflight data manifest — nothing has been sent", "",
+             "_What WOULD be sent to each vendor if you run this. No CLI was spawned._\n",
+             f"**Recipients ({len(targets)} vendor process(es), each gets the same payload):**"]
+    for ln in targets:
+        lines.append(f"- {ln.display} (`{ln.bin}`) — {ln.cost_label}")
+    lines.append(f"\n**Payload:** brief {brief_chars} chars + {len(rows)} context file(s) "
+                 f"{files_chars} chars = **{total} chars (~{est_tok} tok)** per vendor.")
+    if rows:
+        lines.append("\n| context file | chars | note |\n|---|---|---|")
+        for r in rows:
+            note = r["error"] or ("truncated" if r["truncated"] else "")
+            lines.append(f"| {r['path']} | {r['chars']} | {note} |")
+    for n in notes:
+        lines.append(f"\n⚠️ {n}")
+    lines.append("\n_Re-run without `dry_run` to send. Drop a file from `context_files` to "
+                 "withhold it._")
+    return "\n".join(lines)
 
 
 # ── brief linter: thin brief → thin consensus, with the same look of authority ───────────
@@ -493,6 +539,9 @@ async def debate(targets: list[LaneSpec], args: dict, run_lane, progress=None) -
     summary_only = bool(args.get("summary_only"))
     steelman = bool(args.get("steelman"))
     cwd = (args.get("cwd") or "").strip()
+    if bool(args.get("dry_run")):              # preflight: show what would be sent, spawn nothing
+        return data_manifest(targets[:DEBATE_MAX_DEBATERS], question,
+                             args.get("context_files"), cwd)
     pack, pack_notes = build_context_pack(args.get("context_files"), cwd)
     lint = brief_lint(question)
     _stance_cycle = ("for", "against", "neutral")
@@ -753,8 +802,15 @@ async def consensus(targets: list[LaneSpec], args: dict, run_lane, progress=None
     timeout = _timeout(args.get("timeout_s"))
     panel = targets[:CONSENSUS_MAX_LANES]
     summary_only = bool(args.get("summary_only"))
-    pack, _pack_notes = build_context_pack(args.get("context_files"),
-                                           (args.get("cwd") or "").strip())
+    cwd = (args.get("cwd") or "").strip()
+    if bool(args.get("dry_run")):              # preflight manifest — spawn nothing
+        return data_manifest(panel, question, args.get("context_files"), cwd)
+    # Selection beats synthesis: judge-SELECTING the single best answer wins; blending it away
+    # ("chairman synthesis") destroys the variance that makes a council useful (arXiv 2603.20324,
+    # g=3.86). So the DEFAULT returns the Borda winner verbatim + the vote table; the chairman
+    # rewrite is opt-in (synthesize=true) and labeled as the weaker mode.
+    synthesize = bool(args.get("synthesize"))
+    pack, _pack_notes = build_context_pack(args.get("context_files"), cwd)
 
     async def _ask(lane: LaneSpec, prompt: str):
         res = await run_lane(lane, {"task": prompt, "timeout_s": timeout}, tool="consensus")
@@ -804,25 +860,34 @@ async def consensus(targets: list[LaneSpec], args: dict, run_lane, progress=None
     if progress:
         await progress(2, 3, "rankings")
 
-    # 3. Chairman synthesis (free non-experimental lane, else the first answerer).
+    # 3. SELECT the winner (default) or, if synthesize=true, have a chairman blend it.
     if agg:
         win_label = agg["order"][0]
         winner_text = text_by_label[win_label]
+        winner_lane = label_to_lane[win_label].display
+        winner_key = label_to_lane[win_label].key
     else:
         winner_text = answers[0][1]
-    chair = next((ln for ln in targets
-                  if not ln.is_paid and not ln.is_limited and not ln.experimental), answers[0][0])
-    cr = await run_lane(chair, {"task": consensus_synth_prompt(question, winner_text, labeled),
-                                "timeout_s": timeout}, tool="consensus")
-    final = cr.output.strip() if cr.ok else winner_text
+        winner_lane = answers[0][0].display
+        winner_key = answers[0][0].key
+    if synthesize:
+        chair = next((ln for ln in targets if not ln.is_paid and not ln.is_limited
+                      and not ln.experimental), answers[0][0])
+        cr = await run_lane(chair, {"task": consensus_synth_prompt(question, winner_text, labeled),
+                                    "timeout_s": timeout}, tool="consensus")
+        final = cr.output.strip() if cr.ok else winner_text
+        mode_line = f"chairman: {chair.display} (synthesis — the weaker aggregation; see docs)"
+    else:
+        final = winner_text                       # the peer-selected best answer, verbatim
+        mode_line = f"selected: {winner_lane}'s answer (peer-ranked #1; synthesis off by default)"
     if progress:
-        await progress(3, 3, "synthesis")
+        await progress(3, 3, "synthesis" if synthesize else "selection")
 
     lines = ["# Consensus", ""]
     lines.append(f"_Panel: {', '.join(ln.display for ln, _ in answers)} · rankings: "
-                 f"{len(rankings)} · chairman: {chair.display}_\n")
+                 f"{len(rankings)} · {mode_line}_\n")
     lines.append("## Final answer\n")
-    lines.append(final or "_(chairman produced no output)_")
+    lines.append(final or "_(no answer)_")
     if agg:
         lines.append("\n## Consensus ranking (anonymized peer vote, Borda)\n")
         lines.append("| rank | answer | model | score | 1st-place |")
@@ -840,7 +905,7 @@ async def consensus(targets: list[LaneSpec], args: dict, run_lane, progress=None
         for lab, txt in labeled:
             lines.append(f"<details><summary>{lab} — {label_to_lane[lab].display}</summary>\n\n"
                          f"{txt}\n\n</details>")
-    lines.append(f"\n_Tip: judge this session → `rate_lane(lane=\"{chair.key}\", mode=\"deep\", "
+    lines.append(f"\n_Tip: judge this session → `rate_lane(lane=\"{winner_key}\", mode=\"deep\", "
                  "score=1..5)` so ask_best learns which lanes earn a council seat._")
     return "\n".join(lines)
 
