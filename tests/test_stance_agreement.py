@@ -19,7 +19,9 @@ def test_debate_adversarial_assigns_for_against_neutral():
         seen.append(args["task"])
         return RunResult(True, f"pos {lane.display}", "ok")
 
-    asyncio.run(workflows.debate(_panel(), {"task": "X?", "rounds": 0, "adversarial": True},
+    # 4 lanes: one is held out as the independent judge, the other 3 open with stances
+    panel = _panel() + [LaneSpec("opencode", "OpenCode", "echo", lambda *x: [])]
+    asyncio.run(workflows.debate(panel, {"task": "X?", "rounds": 0, "adversarial": True},
                                  run_lane))
     openings = " ".join(seen[:3])      # the 3 opening prompts (judge call comes after)
     assert "FOR position" in openings

@@ -177,8 +177,8 @@ def test_debate_rounds_and_report():
                                           _fake_run_lane(rec)))
     assert "# Debate" in report and "## Final answer" in report and "## Final positions" in report
     assert "rounds: 1" in report
-    # 2 openers + 2 revisions + 1 judge
-    assert len(rec) == 5
+    # 2 openers + 2 revisions + 1 judge + 1 fact-check (free lane present → default on)
+    assert len(rec) == 6
     assert all(c["tool"] == "debate" for c in rec)
 
 
@@ -186,7 +186,7 @@ def test_debate_zero_rounds_skips_revision():
     rec = []
     targets = [_lane("a"), _lane("b")]
     asyncio.run(workflows.debate(targets, {"task": "q", "rounds": 0}, _fake_run_lane(rec)))
-    assert len(rec) == 3            # 2 openers + judge, no revision round
+    assert len(rec) == 4            # 2 openers + judge + fact-check, no revision round
 
 
 def test_debate_single_debater_no_judge():
@@ -206,7 +206,7 @@ def test_debate_caps_debaters():
     rec = []
     targets = [_lane(f"l{i}") for i in range(8)]   # 8 lanes, cap is 4
     asyncio.run(workflows.debate(targets, {"task": "q", "rounds": 0}, _fake_run_lane(rec)))
-    assert len(rec) == workflows.DEBATE_MAX_DEBATERS + 1   # 4 openers + judge
+    assert len(rec) == workflows.DEBATE_MAX_DEBATERS + 2   # 4 openers + judge + fact-check
 
 
 # ── premortem / test_plan (M7) ──
