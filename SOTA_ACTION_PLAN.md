@@ -17,6 +17,28 @@ Date: 2026-06-01
 **Still open / deferred:** async durable job system, web dashboard, OTel export, semantic
 cache, worktree-isolated writers, retries w/ backoff, PyPI publish (user action).
 
+## Field Report Findings (2026-06-04): `debate` hardening
+
+Source: first production use of `debate` for a contested architecture decision (host agent had
+full code context; 4 debaters + judge, adversarial, 1 round). Verdict was adopted, but the run
+exposed structural gaps. Full report lives in the private overlay. Distilled backlog, by ROI:
+
+| # | Item | Detail | Size |
+|---|---|---|---:|
+| FR-1 | Grounding contract | When `cwd` is set, debaters never read a single file — the council argues purely from the brief (echo chamber). Add `context_files=[...]` param: tool inlines/points debaters at 3-5 key paths, prompt says "read before opining". | M |
+| FR-2 | Fact-check pass | Judge let a hallucinated `ollama pull <nonexistent-tag>` through into the action plan. Post-judge step: cheapest lane verifies extracted checkable claims (commands, model tags, versions); report gains a "⚠️ unverified claims" section. | M |
+| FR-3 | `summary_only` for debate/consensus | 4 final positions restating the brief ≈ 80% redundant tokens for the host. Render verdict + disagreements + plan; full positions on demand. (Same win already planned for `ask_all`.) | S |
+| FR-4 | Judge ∉ debaters | GPT judged a debate GPT argued in. Default-exclude judge from the pool; `allow_self_judge` escape hatch for sparse setups. | S |
+| FR-5 | Brief linter | Brief quality is an invisible single point of failure. Non-blocking warning when task lacks enumerated options / decision criteria / minimum substance. | S |
+| FR-6 | Provenance tags | Ask debaters to tag claims `[brief]` / `[own-knowledge]` / `[verified]` — makes the echo chamber visible in the output. | S |
+| FR-7 | Anti-unanimity guard | 100% convergence at round 1 is suspicious by construction. Optional bonus round: one lane re-prompted to steelman the losing option. | M |
+| FR-8 | `rate_lane` post-debate hook | Report ends with a pre-filled rating reminder so the learning router actually gets fed. | S |
+
+What worked (preserve): adversarial stances produced genuinely differentiated openings; the
+judge corrected one debater's overreach; unanimous third-party verdict resolved a human↔agent
+deadlock no amount of host arguing had moved. The decision-arbitration value is the killer
+feature — protect it while fixing grounding.
+
 ---
 
 Goal: turn `cli-bridge` from a useful MCP bridge into a high-trust, cost-aware, workflow-ready

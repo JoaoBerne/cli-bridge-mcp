@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import subprocess
 
@@ -332,6 +333,95 @@ async def security_review(targets: list[LaneSpec], args: dict, run_lane) -> str:
                               residual=True)
 
 
+# ── grounding contract: an explicit context pack beats a cwd nobody reads ────────────────
+# Field-tested (June 2026): with only `cwd`, debaters read NOTHING and the council becomes an
+# echo chamber of the brief — if the brief is wrong, unanimity amplifies the error with false
+# authority. So the HOST names the key files and the TOOL reads them into every debater prompt.
+CONTEXT_MAX_FILES = 5
+
+
+def build_context_pack(context_files, cwd: str = "") -> tuple[str, list[str]]:
+    """Read up to CONTEXT_MAX_FILES files into a 'CONTEXT PACK' block injected into debater
+    prompts. Relative paths resolve against cwd; each file is truncated to
+    CLI_BRIDGE_CONTEXT_FILE_MAX_CHARS. An unreadable file becomes a note, never a failure.
+    Returns (pack_text, notes) — pack_text == "" when nothing could be read."""
+    notes: list[str] = []
+    if not isinstance(context_files, list):
+        return "", notes
+    paths = [str(p).strip() for p in context_files if str(p).strip()]
+    if len(paths) > CONTEXT_MAX_FILES:
+        notes.append(f"{len(paths) - CONTEXT_MAX_FILES} context file(s) dropped "
+                     f"(cap {CONTEXT_MAX_FILES})")
+        paths = paths[:CONTEXT_MAX_FILES]
+    cap = config.CONTEXT_FILE_MAX_CHARS
+    blocks: list[str] = []
+    for p in paths:
+        full = p if os.path.isabs(p) else os.path.join(cwd or ".", p)
+        try:
+            with open(full, encoding="utf-8", errors="replace") as fh:
+                text = fh.read(cap + 1)
+        except OSError as e:
+            notes.append(f"unreadable context file '{p}' ({e.__class__.__name__})")
+            continue
+        marker = f" (truncated at {cap} chars)" if len(text) > cap else ""
+        blocks.append(f"--- file: {p}{marker} ---\n{text[:cap]}")
+    if not blocks:
+        return "", notes
+    pack = ("CONTEXT PACK — ground truth for this debate. Read it BEFORE opining and cite the "
+            "file when it supports a claim. If the brief contradicts these files, the files "
+            "win.\n\n" + "\n\n".join(blocks))
+    return pack, notes
+
+
+# ── brief linter: thin brief → thin consensus, with the same look of authority ───────────
+_BRIEF_MIN_WORDS = 40
+_OPTIONS_RE = re.compile(r"(?im)(?:^|[\s:])[A-H][).]\s|(?:^|\s)\d+[).]\s|\boptions?\s*:")
+_CRITERIA_RE = re.compile(r"(?i)crit[eè]r|criteria|weigh|trade-?off|constraint|priorit")
+
+
+def brief_lint(task: str) -> list[str]:
+    """Non-blocking warnings when a debate brief looks too thin to anchor a council. The tool
+    can't fix a lazy brief, but it can refuse to let one masquerade as a solid one. Pure."""
+    warns: list[str] = []
+    words = len(task.split())
+    if words < _BRIEF_MIN_WORDS:
+        warns.append(f"short brief ({words} words) — add verified facts and constraints")
+    if not _OPTIONS_RE.search(task):
+        warns.append("no enumerated options (A) / B) / 1.) — debaters will invent the "
+                     "option space")
+    if not _CRITERIA_RE.search(task):
+        warns.append("no decision criteria — say how the options should be weighed")
+    return warns
+
+
+# Provenance tags make the echo chamber VISIBLE: a council that only restates the brief now
+# says so in its own output.
+_PROVENANCE_RULE = (
+    "Tag each substantive claim with its provenance: [brief] (asserted by the brief), "
+    "[context] (seen in the context pack), [own-knowledge] (from your training — may be "
+    "stale), or [verified] (you actually checked it here).")
+
+
+def fact_check_prompt(verdict: str) -> str:
+    return (
+        "You are a fact-checker. From the verdict/plan below, extract every VERIFIABLE claim — "
+        "shell commands, model tags/ids, package/API names, version numbers, URLs, flags. For "
+        "each, mark it CONFIRMED (you know it exists and is correct) or UNVERIFIED (you cannot "
+        "confirm it). Never guess a confirmation — 'unverified' is a valid, useful answer. End "
+        "with a line 'UNVERIFIED:' listing everything not confirmed, or 'UNVERIFIED: none'.\n\n"
+        f"VERDICT/PLAN:\n{verdict}")
+
+
+def steelman_prompt(question: str, transcript: str, verdict: str) -> str:
+    return (
+        "This debate converged UNANIMOUSLY on the verdict below. Fast unanimity is suspect by "
+        "construction, so your job is to STEELMAN the rejected (or uncovered) option: make the "
+        "strongest honest case AGAINST the verdict — risks, conditions under which it is wrong, "
+        "what every debater may have missed. Do not manufacture objections; if the verdict "
+        "truly survives your best counter-case, concede that at the end.\n\n"
+        f"QUESTION:\n{question}\n\nDEBATE:\n{transcript}\n\nVERDICT:\n{verdict}")
+
+
 # ── debate: lanes answer, see each other, revise over bounded rounds, a judge concludes ──
 DEBATE_DEFAULT_ROUNDS = 1
 DEBATE_MAX_ROUNDS = 3
@@ -367,16 +457,27 @@ def debate_judge_prompt(question: str, transcript: str) -> str:
     return (
         "Several AIs debated the question below. Produce the best FINAL answer: state the "
         "consensus, flag any remaining disagreement (name who held what), and give the most "
-        f"reliable conclusion. Be precise.\n\nQUESTION:\n{question}\n\nDEBATE:\n{transcript}")
+        "reliable conclusion. Be precise. Start your reply with EXACTLY one line — "
+        "'UNANIMOUS: yes' if every debater reached the same conclusion, else 'UNANIMOUS: no' — "
+        f"then the answer.\n\nQUESTION:\n{question}\n\nDEBATE:\n{transcript}")
 
 
 def _debate_transcript(positions: list[tuple[str, str]]) -> str:
     return "\n\n".join(f"### {display}\n{text}" for display, text in positions)
 
 
+def _pick_judge(targets: list[LaneSpec], fallback: LaneSpec) -> LaneSpec:
+    """Prefer a free, non-experimental lane as judge; else the given fallback."""
+    return next((ln for ln in targets
+                 if not ln.is_paid and not ln.is_limited and not ln.experimental), fallback)
+
+
 async def debate(targets: list[LaneSpec], args: dict, run_lane, progress=None) -> str:
     """Multi-lane debate: each lane answers, then sees the others and revises over a bounded
-    number of rounds, then a judge writes the final conclusion. `run_lane` injected for tests."""
+    number of rounds, then a judge writes the final conclusion. Hardened from field use:
+    grounding via context_files, an independent judge, a fact-check pass on the verdict, an
+    optional anti-unanimity steelman round, and provenance-tagged claims. `run_lane` injected
+    for tests."""
     question = (args.get("task") or args.get("question") or "").strip()
     if not question:
         return "[error] task (the debate question) is required"
@@ -388,19 +489,40 @@ async def debate(targets: list[LaneSpec], args: dict, run_lane, progress=None) -
     except (TypeError, ValueError):
         rounds = DEBATE_DEFAULT_ROUNDS
     timeout = _timeout(args.get("timeout_s"))
-    debaters = targets[:DEBATE_MAX_DEBATERS]
     adversarial = bool(args.get("adversarial"))
+    summary_only = bool(args.get("summary_only"))
+    steelman = bool(args.get("steelman"))
+    cwd = (args.get("cwd") or "").strip()
+    pack, pack_notes = build_context_pack(args.get("context_files"), cwd)
+    lint = brief_lint(question)
     _stance_cycle = ("for", "against", "neutral")
+
+    # Judge ∉ debaters whenever the pool allows it (a judge grading a debate it argued in is
+    # structurally weak). With 3+ lanes, ONE is held out to judge; with fewer, the judge also
+    # debated — allowed automatically and labeled in the report. allow_self_judge forces the
+    # old everyone-debates behaviour.
+    if not bool(args.get("allow_self_judge")) and len(targets) >= 3:
+        judge = _pick_judge(targets, targets[-1])
+        debaters = [ln for ln in targets if ln.key != judge.key][:DEBATE_MAX_DEBATERS]
+        self_judged = False
+    else:
+        debaters = targets[:DEBATE_MAX_DEBATERS]
+        judge = _pick_judge(targets, debaters[0])
+        self_judged = judge.key in {ln.key for ln in debaters}
 
     async def _ask(lane: LaneSpec, prompt: str):
         res = await run_lane(lane, {"task": prompt, "timeout_s": timeout}, tool="debate")
         return lane, res
 
+    def _ground(prompt: str) -> str:
+        parts = ([pack] if pack else []) + [prompt, _PROVENANCE_RULE]
+        return "\n\n".join(parts)
+
     def _open(i: int) -> str:
         if adversarial:
-            return (f"{_stance_preamble(_stance_cycle[i % len(_stance_cycle)])}\n\n"
-                    f"{debate_open_prompt(question)}")
-        return debate_open_prompt(question)
+            return _ground(f"{_stance_preamble(_stance_cycle[i % len(_stance_cycle)])}\n\n"
+                           f"{debate_open_prompt(question)}")
+        return _ground(debate_open_prompt(question))
 
     # Round 0: independent answers (optionally with assigned for/against/neutral stances).
     raw = await asyncio.gather(*[_ask(ln, _open(i)) for i, ln in enumerate(debaters)],
@@ -425,7 +547,7 @@ async def debate(targets: list[LaneSpec], args: dict, run_lane, progress=None) -
         transcript = _debate_transcript(list(positions.values()))
         live = [ln for ln in debaters if ln.key in positions]
         raw = await asyncio.gather(
-            *[_ask(ln, debate_revise_prompt(question, transcript)) for ln in live],
+            *[_ask(ln, _ground(debate_revise_prompt(question, transcript))) for ln in live],
             return_exceptions=True)
         for item in raw:
             if isinstance(item, BaseException):
@@ -442,33 +564,84 @@ async def debate(targets: list[LaneSpec], args: dict, run_lane, progress=None) -
         "debaters": [d for d, _ in final_positions],
         "rounds": rounds_run,
         "adversarial": adversarial,
+        "context_files": (f"{pack.count('--- file:')} loaded" if pack else "none"),
+        "judge_independent": not self_judged,
     }
-    # Judge: prefer a free non-experimental lane; fall back to the first debater.
-    judge = next((ln for ln in targets
-                  if not ln.is_paid and not ln.is_limited and not ln.experimental), debaters[0])
+    if pack_notes:
+        meta["context_notes"] = pack_notes
+
+    judged_ok = False
     if len(final_positions) >= 2:
         jr = await run_lane(judge, {"task": debate_judge_prompt(question, transcript),
                                     "timeout_s": timeout}, tool="debate")
+        judged_ok = jr.ok
         final = jr.output if jr.ok else transcript
         meta["judge"] = judge.display if jr.ok else f"FAILED ({jr.kind}) — showing raw positions"
+        if self_judged and jr.ok:
+            meta["judge"] += " (also debated — sparse pool)"
     else:
         final = final_positions[0][1]
         meta["judge"] = "n/a (single debater)"
+
+    # Anti-unanimity: parse the judge's marker; on unanimity (opt-in steelman) ONE lane argues
+    # the strongest case AGAINST the verdict and the judge re-concludes. Fast 4-0s get pushback.
+    m = re.search(r"(?im)^\s*UNANIMOUS:\s*(yes|no)\b", final)
+    meta["unanimous"] = (m.group(1).lower() == "yes") if m else None
+    if judged_ok and steelman and meta["unanimous"]:
+        contrarian = debaters[-1]
+        sr = await run_lane(contrarian, {
+            "task": steelman_prompt(question, transcript, final), "timeout_s": timeout},
+            tool="debate")
+        if sr.ok:
+            transcript += f"\n\n### STEELMAN — {contrarian.display} (bonus round)\n{sr.output}"
+            jr2 = await run_lane(judge, {"task": debate_judge_prompt(question, transcript),
+                                         "timeout_s": timeout}, tool="debate")
+            if jr2.ok:
+                final = jr2.output
+            meta["steelman_round"] = contrarian.display + ("" if jr2.ok else
+                                                           " (re-judge failed — verdict kept)")
+    final_display = re.sub(r"(?im)^\s*UNANIMOUS:\s*(yes|no)\s*\n?", "", final, count=1)
+
+    # Fact-check pass: the verdict's verifiable claims (commands, model tags, versions, APIs)
+    # go to a free lane with licence to say "cannot confirm" — catches a judge-approved
+    # hallucination before the host copy-pastes it. Default ON when a free lane exists.
+    fact_section = ""
+    fc_arg = args.get("fact_check")
+    free_pool = [ln for ln in targets if not ln.is_paid and not ln.is_limited]
+    if (bool(fc_arg) if fc_arg is not None else bool(free_pool)) and judged_ok:
+        checker = next((ln for ln in free_pool if ln.key != judge.key),
+                       free_pool[0] if free_pool else targets[0])
+        fr = await run_lane(checker, {"task": fact_check_prompt(final_display),
+                                      "timeout_s": timeout}, tool="debate")
+        if fr.ok:
+            fact_section = f"\n## ⚠️ Fact-check ({checker.display})\n\n{fr.output.strip()}"
+            meta["fact_check"] = checker.display
+        else:
+            meta["fact_check"] = f"FAILED ({fr.kind})"
+    else:
+        meta["fact_check"] = "off"
     if progress:
         await progress(2, 2, "final")
 
     lines = ["# Debate", ""]
+    if lint:
+        lines.append("> ⚠️ _Thin brief → thin consensus:_ " + "; ".join(lint) + "\n")
     lines.append(f"_Debaters: {', '.join(meta['debaters'])} · rounds: {rounds_run} · "
                  f"judge: {meta['judge']}_\n")
     lines.append(council_recap([(d, True, 0, t) for d, t in final_positions],
                                title="Final positions"))
     lines.append("")
     lines.append("## Final answer\n")
-    lines.append(final.strip() or "_(judge produced no output)_")
-    lines.append("\n## Final positions\n")
-    for display, text in final_positions:
-        lines.append(f"<details><summary>{display}</summary>\n\n{text.strip()}\n\n</details>")
+    lines.append(final_display.strip() or "_(judge produced no output)_")
+    if fact_section:
+        lines.append(fact_section)
+    if not summary_only:
+        lines.append("\n## Full positions\n")
+        for display, text in final_positions:
+            lines.append(f"<details><summary>{display}</summary>\n\n{text.strip()}\n\n</details>")
     lines.append("\n## Trace\n```json\n" + json.dumps(meta, indent=2) + "\n```")
+    lines.append(f"\n_Tip: judge this session → `rate_lane(lane=\"{judge.key}\", mode=\"deep\", "
+                 "score=1..5)` so ask_best learns which lanes earn a council seat._")
     return "\n".join(lines)
 
 
@@ -579,13 +752,20 @@ async def consensus(targets: list[LaneSpec], args: dict, run_lane, progress=None
                 "include_paid=true / CLI_BRIDGE_PROFILE=max to allow limited/paid lanes.")
     timeout = _timeout(args.get("timeout_s"))
     panel = targets[:CONSENSUS_MAX_LANES]
+    summary_only = bool(args.get("summary_only"))
+    pack, _pack_notes = build_context_pack(args.get("context_files"),
+                                           (args.get("cwd") or "").strip())
 
     async def _ask(lane: LaneSpec, prompt: str):
         res = await run_lane(lane, {"task": prompt, "timeout_s": timeout}, tool="consensus")
         return lane, res
 
-    # 1. Blind independent answers.
-    raw = await asyncio.gather(*[_ask(ln, consensus_answer_prompt(question)) for ln in panel],
+    def _grounded(prompt: str) -> str:
+        return f"{pack}\n\n{prompt}" if pack else prompt
+
+    # 1. Blind independent answers (grounded in the context pack when the host provides one).
+    raw = await asyncio.gather(*[_ask(ln, _grounded(consensus_answer_prompt(question)))
+                                 for ln in panel],
                                return_exceptions=True)
     answers: list[tuple[LaneSpec, str]] = []
     for item in raw:
@@ -655,10 +835,13 @@ async def consensus(targets: list[LaneSpec], args: dict, run_lane, progress=None
                      "winner first._")
     else:
         lines.append("\n_No parseable rankings — showing answers without a peer vote._")
-    lines.append("\n## All answers\n")
-    for lab, txt in labeled:
-        lines.append(f"<details><summary>{lab} — {label_to_lane[lab].display}</summary>\n\n"
-                     f"{txt}\n\n</details>")
+    if not summary_only:
+        lines.append("\n## All answers\n")
+        for lab, txt in labeled:
+            lines.append(f"<details><summary>{lab} — {label_to_lane[lab].display}</summary>\n\n"
+                         f"{txt}\n\n</details>")
+    lines.append(f"\n_Tip: judge this session → `rate_lane(lane=\"{chair.key}\", mode=\"deep\", "
+                 "score=1..5)` so ask_best learns which lanes earn a council seat._")
     return "\n".join(lines)
 
 
