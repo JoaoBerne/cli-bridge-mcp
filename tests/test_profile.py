@@ -24,7 +24,8 @@ def test_profile_invalid_falls_back(monkeypatch):
 def test_setup_text_is_conversational_not_a_locked_menu():
     # must guide an actual conversation, not force one of N presets
     assert "doctor" in server.SETUP_TEXT
-    assert "EACH installed lane" in server.SETUP_TEXT
+    assert "ONE question" in server.SETUP_TEXT        # opens with flat/metered/mix, not a menu
+    assert "set_lane_cost" in server.SETUP_TEXT       # answers are persisted, not re-asked
     assert "CLI_BRIDGE_<LANE>_COST" in server.SETUP_TEXT
     assert "limited" in server.SETUP_TEXT
 

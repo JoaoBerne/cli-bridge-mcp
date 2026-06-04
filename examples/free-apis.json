@@ -1,0 +1,79 @@
+[
+  {
+    "//": "The $0 council — ready-to-use BYO-API curl lanes for providers with a GENUINELY free,",
+    "//1": "card-free, hard-stop tier (verified June 2026 against vendor docs — see docs/COSTS.md).",
+    "//2": "Hard-stop = exhaustion returns HTTP 429, never a surprise bill.",
+    "//3": "Point CLI_BRIDGE_LANES_FILE at this file and export the listed env keys.",
+
+    "key": "groq",
+    "display": "Groq (free tier, hard-stop)",
+    "bin": "curl",
+    "default_model": "llama-3.3-70b-versatile",
+    "model_flag": "",
+    "cost": "free",
+    "client_ids": [],
+    "install_hint": "Free API key at https://console.groq.com (no card). export GROQ_API_KEY=...",
+    "note": "Groq free plan, June 2026: llama-3.3-70b-versatile 30 req/min / 1k req/day; llama-3.1-8b-instant 30/14.4k; gpt-oss-120b 30/1k. 429 on exhaustion (no card on file = no billing possible). Limits churn — recheck console.groq.com/docs/rate-limits.",
+    "ask": [
+      "-sS",
+      "https://api.groq.com/openai/v1/chat/completions",
+      "-H", "Content-Type: application/json",
+      "-H", "Authorization: Bearer ${GROQ_API_KEY}",
+      "-d", "{\"model\":\"{model}\",\"messages\":[{\"role\":\"user\",\"content\":\"{task_json}\"}]}"
+    ]
+  },
+  {
+    "key": "cerebras",
+    "display": "Cerebras (free tier, hard-stop)",
+    "bin": "curl",
+    "default_model": "gpt-oss-120b",
+    "model_flag": "",
+    "cost": "free",
+    "client_ids": [],
+    "install_hint": "Free API key at https://cloud.cerebras.ai (no card). export CEREBRAS_API_KEY=...",
+    "note": "Cerebras Free Trial, June 2026: gpt-oss-120b and zai-glm-4.7 at 5 req/min / 1M tokens/day each; ~8k-token context cap on free tier. 429 on exhaustion, no card required. Source: inference-docs.cerebras.ai/support/rate-limits.",
+    "ask": [
+      "-sS",
+      "https://api.cerebras.ai/v1/chat/completions",
+      "-H", "Content-Type: application/json",
+      "-H", "Authorization: Bearer ${CEREBRAS_API_KEY}",
+      "-d", "{\"model\":\"{model}\",\"messages\":[{\"role\":\"user\",\"content\":\"{task_json}\"}]}"
+    ]
+  },
+  {
+    "key": "ghmodels",
+    "display": "GitHub Models (free for every GitHub account)",
+    "bin": "curl",
+    "default_model": "openai/gpt-oss-120b",
+    "model_flag": "",
+    "cost": "free",
+    "client_ids": [],
+    "install_hint": "Any GitHub account: create a PAT with 'models' scope. export GITHUB_MODELS_TOKEN=...",
+    "note": "GitHub Models, June 2026: 'All GitHub accounts have rate-limited access at no cost' (official). Limits vary by model; usage is BLOCKED (hard stop) once quota is spent unless you opt into paid. OpenAI-compatible endpoint. Source: docs.github.com (about-billing-for-github-models).",
+    "ask": [
+      "-sS",
+      "https://models.github.ai/inference/chat/completions",
+      "-H", "Content-Type: application/json",
+      "-H", "Authorization: Bearer ${GITHUB_MODELS_TOKEN}",
+      "-d", "{\"model\":\"{model}\",\"messages\":[{\"role\":\"user\",\"content\":\"{task_json}\"}]}"
+    ]
+  },
+  {
+    "key": "openrouter-free",
+    "display": "OpenRouter :free router (breadth, low limits)",
+    "bin": "curl",
+    "default_model": "openrouter/free",
+    "model_flag": "",
+    "cost": "free",
+    "client_ids": [],
+    "install_hint": "Free key at https://openrouter.ai/keys. export OPENROUTER_API_KEY=...",
+    "note": "openrouter/free routes to a random free model (~24 ':free' variants, June 2026). Always $0, hard stop on rate limit — but exact req/day limits are UNCONFIRMED (official docs show placeholders) and quality varies per routed model. Upstream providers' data policies apply unless opted out in settings.",
+    "ask": [
+      "-sS",
+      "https://openrouter.ai/api/v1/chat/completions",
+      "-H", "Content-Type: application/json",
+      "-H", "Authorization: Bearer ${OPENROUTER_API_KEY}",
+      "-d", "{\"model\":\"{model}\",\"messages\":[{\"role\":\"user\",\"content\":\"{task_json}\"}]}"
+    ]
+  }
+]

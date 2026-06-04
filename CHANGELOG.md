@@ -6,6 +6,64 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added (debate/consensus hardening — from a production field report)
+- **Grounding contract** (`context_files`, debate + consensus): the tool reads up to 5 key files
+  (per-file truncation, unreadable files noted, never fatal) into a CONTEXT PACK injected into
+  every debater/panelist prompt. Field-tested finding: with only `cwd`, no debater reads
+  anything and the council is an echo chamber of the brief.
+- **Fact-check pass** (debate, default ON when a free lane exists): after the judge, a free lane
+  extracts the verdict's verifiable claims (commands, model tags, versions, APIs) and reports
+  what it cannot confirm under "⚠️ Fact-check" — catches a judge-approved hallucinated command
+  before the host copy-pastes it.
+- **Independent judge** (debate): with 3+ lanes, one lane is held out of the debate to judge it;
+  with fewer, the self-judge is labeled "(also debated — sparse pool)" in the report.
+  `allow_self_judge: true` restores everyone-debates.
+- **Anti-unanimity steelman** (`steelman: true`): the judge now emits a structured
+  `UNANIMOUS: yes|no` marker; on unanimity one lane argues the strongest case AGAINST the
+  verdict and the judge re-concludes (bonus round traced in meta). Fast 4-0s get pushback.
+- **Provenance tags** (debate): debaters tag claims `[brief]` / `[context]` / `[own-knowledge]`
+  / `[verified]` — the echo chamber becomes visible in the output itself.
+- **Brief linter** (debate): a thin brief (too short / no enumerated options / no decision
+  criteria) gets a non-blocking "thin brief → thin consensus" warning in the report.
+- **`summary_only`** (debate + consensus): verdict + disagreements + fact-check only, full
+  per-model positions dropped (~60-80 % fewer host tokens).
+- **`rate_lane` hook**: debate and consensus reports end with the pre-filled `rate_lane(...)`
+  call, so the routing feedback loop feeds itself.
+- **Community lanes** (`examples/community-lanes.json`): ready-to-edit experimental lanes for
+  Aider, Goose, Plandex, Amp, Crush, Amazon Q CLI and Droid — `limited` by default (cost-safe)
+  and drift-checkable via `doctor deep`.
+
+### Added (honest, self-maintaining cost policy)
+- **`docs/COSTS.md`** — the sourced, dated truth behind every cost tier: free tiers with exact
+  limits (Groq/Cerebras/GitHub Models/OpenRouter), per-token API pricing with a "cost of a 3k/1k
+  review" anchor per model, and subscription mechanics (shared buckets, exhaustion behaviour:
+  hard-stop vs metered overage vs silent downgrade). Verified June 2026 against vendor pages;
+  anything unconfirmable is marked UNCONFIRMED instead of guessed.
+- **`set_lane_cost` tool — the cost policy maintains itself.** The counterpart of `rate_lane` for
+  money: when the user says what a lane costs THEM, or the host knows a vendor changed a tier,
+  one call sets the lane's tier (+ a why-note shown by doctor), effective immediately and
+  persisted to the JSON config file. No code update needed for the policy to track reality.
+- **The $0 council** (`examples/free-apis.json` + README section): ready-to-use BYO-API curl
+  lanes for the providers with a genuinely free, card-free, hard-stop tier (Groq, Cerebras,
+  GitHub Models, OpenRouter `:free`) — a real multi-model council for a user with zero
+  subscriptions, with real limits quoted per lane.
+- **Cost-facts freshness guard**: the verification date ships in the code; `doctor` warns when
+  the snapshot is stale (>90 days) instead of letting old facts pose as current.
+
+### Changed (honest, self-maintaining cost policy)
+- **Cost tiers are now labeled for what they are.** `doctor`/`setup`/`cli-bridge init`/the config
+  resource all distinguish "(set by you)" from "(default — yours may differ)" and state that
+  tiers are sourced typical-plan defaults, NEVER detected from the user's account. The setup
+  flow now opens with one symmetric question (flat subscriptions / metered API / mix) instead of
+  presenting hardcoded guesses as "what lanes cost YOU".
+- **Lane defaults corrected to sourced facts**: `qwen` → `paid` (free OAuth tier closed
+  2026-04-15; the Alibaba Coding Plan ToS prohibits non-interactive use, so the only
+  cli-bridge-compatible path is a metered key); `grok` → `limited` (SuperGrok/X Premium+
+  required) with the documented `-p` headless flag and the official curl installer; `gemini`
+  carries its free-tier sunset (2026-06-18 → Antigravity) in doctor; `opencode` discloses the
+  free-period data-training tradeoff. Every built-in lane now ships a one-line sourced
+  `cost_note` surfaced by doctor.
+
 ### Added (Grok lane, drift-proofing)
 - **Grok lane** (`ask_grok`): built-in lane for xAI's `grok` CLI (experimental). No model is
   hardcoded — empty `model` uses the CLI's own default; pass `model=<id>` to pick one.

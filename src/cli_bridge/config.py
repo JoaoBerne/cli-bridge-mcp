@@ -36,6 +36,7 @@ _TOP_KEYS = {
 _LANE_KEYS = {
     "cost": "COST", "model": "MODEL", "enabled": "ENABLED", "bin": "BIN",
     "credits_per_1k": "CREDITS_PER_1K", "daily_limit": "DAILY_LIMIT", "priority": "PRIORITY",
+    "cost_note": "COST_NOTE",
 }
 
 
@@ -79,6 +80,37 @@ def apply_file_config_to_env() -> int:
             os.environ[env_name] = value
             applied += 1
     return applied
+
+
+def update_config_file(lane_updates: dict) -> str:
+    """Merge {lane: {field: value}} into the config file's `lanes` section and write it back —
+    how the HOST persists cost facts it learns (set_lane_cost), so the policy evolves without
+    anyone editing files. Creates the file/dir if absent; preserves everything else in the file.
+    Returns the path written, or "" on failure (best-effort — caller reports, never raises)."""
+    path = config_file_path()
+    try:
+        with open(path, encoding="utf-8") as fh:
+            cfg = json.load(fh)
+        if not isinstance(cfg, dict):
+            cfg = {}
+    except (OSError, ValueError):
+        cfg = {}
+    lanes_cfg = cfg.get("lanes")
+    if not isinstance(lanes_cfg, dict):
+        lanes_cfg = cfg["lanes"] = {}
+    for lane, fields in lane_updates.items():
+        cur = lanes_cfg.get(lane)
+        if not isinstance(cur, dict):
+            cur = lanes_cfg[lane] = {}
+        cur.update(fields)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(cfg, fh, indent=2)
+            fh.write("\n")
+        return path
+    except OSError:
+        return ""
 
 
 def int_env(name: str, default: int, lo: int, hi: int) -> int:
@@ -183,6 +215,9 @@ REVIEW_DEFAULT_TIMEOUT_S = int_env("CLI_BRIDGE_REVIEW_TIMEOUT_S", 180, 1, MAX_TI
 # Largest diff (chars) fed into a review prompt; bigger diffs are truncated with a note so the
 # prompt stays within model context instead of erroring or getting silently dropped.
 REVIEW_DIFF_MAX_CHARS = int_env("CLI_BRIDGE_REVIEW_DIFF_MAX_CHARS", 60000, 2000, 1_000_000)
+# Per-file cap (chars) for files injected into a debate/consensus CONTEXT PACK (the grounding
+# contract): same truncate-with-a-marker policy as review diffs.
+CONTEXT_FILE_MAX_CHARS = int_env("CLI_BRIDGE_CONTEXT_FILE_MAX_CHARS", 16000, 500, 1_000_000)
 
 
 # ── round-table conversations (multi-turn, multi-lane threads via transcript replay) ──────
@@ -262,16 +297,21 @@ def cost_config_is_set() -> bool:
 SETUP_TEXT = (
     "Help the user configure cli-bridge to THEIR situation. Don't impose a preset — every "
     "person's plans differ (one may have unlimited Gemini but metered opencode credits, "
-    "another a tight GPT quota). Have a short conversation:\n\n"
+    "another a tight GPT quota). IMPORTANT: cli-bridge NEVER detects what a lane costs the "
+    "user — the tiers it shows are sourced typical-plan defaults (docs/COSTS.md). Never "
+    "present a default as a fact about their account, and never single out one lane as "
+    "'paid' when its siblings have paid plans too. Have a short conversation:\n\n"
     "1. Run `doctor` first to see which CLIs they actually have installed.\n"
-    "2. For EACH installed lane, ask what it costs THEM and how freely to use it — e.g. "
-    "\"is your opencode on paid credits or a flat plan?\", \"do you mind me spending GPT quota "
-    "on big tasks?\". Listen to their actual answer; don't assume free=best.\n"
-    "3. Translate their answers into config (env vars on the MCP server entry, or just honour "
-    "them for this session):\n"
+    "2. Open with ONE question: \"do you pay for these as flat subscriptions, metered "
+    "API/credits, or a mix?\" — then, only where it differs per lane, refine: \"is your "
+    "opencode on paid credits or a flat plan?\". Listen to their actual answer; don't "
+    "assume free=best.\n"
+    "3. Record their answers with `set_lane_cost(lane, cost, note)` — it applies immediately "
+    "AND persists to the config file, so they never repeat this and the policy keeps up with "
+    "reality without maintenance. (free=use freely in ask_all; limited=scarce quota, direct "
+    "calls OK but skip ask_all by default; paid=money/credits.) Env vars remain the manual "
+    "alternative / escape hatch:\n"
     "     CLI_BRIDGE_<LANE>_COST = free | limited | paid\n"
-    "          free=use freely in ask_all; limited=scarce quota, direct calls OK but skip "
-    "ask_all by default; paid=money/credits\n"
     "     CLI_BRIDGE_<LANE>_ENABLED = false       (hide a lane they don't want used)\n"
     "     CLI_BRIDGE_<LANE>_MODEL = <id>          (their preferred default model for a lane)\n"
     "     CLI_BRIDGE_PROFILE = saver|balanced|max (optional shorthand if they'd rather not "
@@ -294,6 +334,10 @@ INSTRUCTIONS = (
     "• LEARNS from you: after you judge a delegate's answer, `rate_lane` it 1–5 (with the mode). "
     "ask_best then prefers the lanes that actually win each task-type ON THIS MACHINE — a local "
     "signal that persists across sessions, not a guess.\n"
+    "• SELF-MAINTAINING cost policy: whenever the user mentions what a lane costs THEM ('I'm on "
+    "the Go plan', 'Codex is free on my account') or you know a vendor changed a tier, call "
+    "`set_lane_cost(lane, cost, note)` — effective now, persisted to the config file. Don't wait "
+    "for `setup`; one sentence from the user is enough to record.\n"
     "• ROUND-TABLE memory: pass conversation='new' to any `ask_<lane>`, then reuse the returned "
     "id — even on a DIFFERENT lane — for a multi-turn, multi-model thread that SURVIVES your "
     "context reset (/compact). `conversations_list` / `conversation_show` to recover and read.\n"
@@ -307,7 +351,9 @@ INSTRUCTIONS = (
     "library lookups, things you're already sure of — don't convene a council for one-liners.\n\n"
     "COST — spend with confidence, don't agonise: the user sets a profile (saver/balanced/max) "
     "and an optional hard daily cap; operate freely within it (the cap stops overspend by "
-    "itself). On FIRST use, if no profile/cost is set, call `setup` once — it detects what's "
+    "itself). Cost tiers are sourced defaults (docs/COSTS.md), NEVER detected from the user's "
+    "account — treat an unconfigured tier as a guess about a typical plan, not a fact about "
+    "theirs. On FIRST use, if no profile/cost is set, call `setup` once — it lists what's "
     "installed and recommends a config to confirm — don't assume 'free is best' (someone on a "
     "big plan may want top models by default). Free lanes never cost anything; the user can "
     "say 'use the best on this one' or 'keep it cheap' per request."

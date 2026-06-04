@@ -528,6 +528,32 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
         ))
         tools.append(Tool(
+            name="set_lane_cost",
+            description=("Teach the cost policy — the counterpart of rate_lane for money. When the "
+                         "user tells you what a lane really costs THEM ('my opencode is on the Go "
+                         "plan', 'I have Codex free with ChatGPT') or you KNOW a vendor changed a "
+                         "tier (a free tier died, a plan launched), record it here: it takes effect "
+                         "immediately and persists to the config file, so cli-bridge's cost policy "
+                         "evolves with zero maintenance instead of waiting for a code update."),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "lane": {"type": "string",
+                             "description": "Lane key (e.g. gemini, gpt, opencode)."},
+                    "cost": {"type": "string", "enum": ["free", "limited", "paid"],
+                             "description": "What this lane costs the USER: free=use freely; "
+                                            "limited=scarce quota (skip broad fan-out); "
+                                            "paid=money/credits."},
+                    "note": {"type": "string",
+                             "description": "Optional one-line WHY (shown by doctor) — e.g. "
+                                            "'user has the Go plan' or 'free tier sunset "
+                                            "2026-06-18'. ≤200 chars."},
+                },
+                "required": ["lane", "cost"],
+            },
+            annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
+        ))
+        tools.append(Tool(
             name="review_diff",
             description=("Multi-model code review of a git diff: several lanes review in parallel "
                          "with DIFFERENT focuses (correctness/security/tests/maintainability), "
@@ -633,6 +659,28 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                     "adversarial": {"type": "boolean",
                                     "description": "Assign for/against/neutral stances to the "
                                     "openings (sharper disagreement). Default false."},
+                    "context_files": {"type": "array", "items": {"type": "string"},
+                                      "description": "Up to 5 key file paths the tool reads into "
+                                      "every debater prompt (the grounding contract — without "
+                                      "this the council only paraphrases your brief). Relative "
+                                      "paths resolve against cwd."},
+                    "fact_check": {"type": "boolean",
+                                   "description": "Post-judge pass: a free lane extracts the "
+                                   "verdict's verifiable claims (commands, model tags, versions) "
+                                   "and flags what it cannot confirm. Default ON when a free "
+                                   "lane exists; false to skip."},
+                    "summary_only": {"type": "boolean",
+                                     "description": "Return verdict + disagreements + fact-check "
+                                     "only; drop the full per-debater positions (~60-80% fewer "
+                                     "tokens)."},
+                    "allow_self_judge": {"type": "boolean",
+                                         "description": "Let the judge also debate (default: "
+                                         "with 3+ lanes one lane is held out to judge "
+                                         "independently)."},
+                    "steelman": {"type": "boolean",
+                                 "description": "If the verdict is unanimous, one lane argues "
+                                 "the strongest case AGAINST it and the judge re-concludes "
+                                 "(anti-echo-chamber bonus round). Default false."},
                     "include_paid": {"type": "boolean", "description": "Allow limited/paid lanes."},
                     "cwd": {"type": "string", "description": "Directory the CLIs run in."},
                     "timeout_s": {"type": "integer",
@@ -654,6 +702,13 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "task": {"type": "string", "description": "The question to resolve."},
+                    "context_files": {"type": "array", "items": {"type": "string"},
+                                      "description": "Up to 5 key file paths read into every "
+                                      "panelist prompt (grounding). Relative paths resolve "
+                                      "against cwd."},
+                    "summary_only": {"type": "boolean",
+                                     "description": "Return the final answer + vote table only; "
+                                     "drop the full per-model answers."},
                     "include_paid": {"type": "boolean", "description": "Allow limited/paid lanes."},
                     "cwd": {"type": "string", "description": "Directory the CLIs run in."},
                     "timeout_s": {"type": "integer",
@@ -927,7 +982,9 @@ def _config_snapshot(host: str) -> dict:
         "cache_ttl_s": config.CACHE_TTL_S,
         "lanes": [
             {"key": ln.key, "installed": is_installed(ln), "enabled": ln.enabled,
-             "cost": ln.cost_label, "model": ln.model_for(""), "experimental": ln.experimental,
+             "cost": ln.cost_label,
+             "cost_source": "user" if ln.cost_is_configured else "default",
+             "model": ln.model_for(""), "experimental": ln.experimental,
              "caps": sorted(ln.caps)}
             for ln in all_lanes()
         ],
@@ -1168,11 +1225,24 @@ def _setup_recommendation(lanes: list[LaneSpec]) -> str:
     free = [ln.key for ln in lanes if not ln.is_paid and not ln.is_limited]
     limited = [ln.key for ln in lanes if ln.is_limited]
     paid = [ln.key for ln in lanes if ln.is_paid]
+
+    def _tag(keys: list[str]) -> str:
+        if not keys:
+            return "—"
+        by = {ln.key: ln for ln in lanes}
+        return ", ".join(k + ("" if by[k].cost_is_configured else " (default)") for k in keys)
+
     lines = [
-        "**Detected lanes — by what they cost YOU:**",
-        f"- free (use freely): {', '.join(free) or '—'}",
-        f"- limited (scarce quota): {', '.join(limited) or '—'}",
-        f"- paid (money/credits): {', '.join(paid) or '—'}",
+        "**Installed lanes — typical cost (sourced defaults from docs/COSTS.md, NOT detected; "
+        "'(default)' means the user hasn't told us their plan yet):**",
+        f"- free: {_tag(free)}",
+        f"- limited (scarce quota): {_tag(limited)}",
+        f"- paid (money/credits): {_tag(paid)}",
+        "",
+        "**First, ask the user ONE question:** do you pay for these as flat subscriptions "
+        "(Pro/Max-style plans), metered API/credits, or a mix? Their answer — not our defaults — "
+        "decides each lane's real cost tier. Apply it symmetrically to every installed lane, and "
+        "record each answer with `set_lane_cost(lane, cost, note)` so it persists.",
         "",
     ]
     if config.profile_is_set():
@@ -1245,6 +1315,9 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
 
     if name == "rate_lane":
         return _rate_lane(lanes, args)
+
+    if name == "set_lane_cost":
+        return _set_lane_cost(args)
 
     if name == "route_plan":
         include_paid = (bool(args["include_paid"]) if args.get("include_paid") is not None
@@ -1529,6 +1602,35 @@ def _rate_lane(lanes: list[LaneSpec], args: dict) -> list[TextContent]:
     return [TextContent(type="text", text=(
         f"Recorded {score}/5 for {ln.key}{where}, but telemetry is off "
         "(CLI_BRIDGE_TELEMETRY) so it won't steer routing."))]
+
+
+def _set_lane_cost(args: dict) -> list[TextContent]:
+    """Persist a cost fact the host learned (from the user's words or its own knowledge): set the
+    lane's tier (+ optional why-note) in THIS process now, and merge it into the JSON config file
+    so it survives restarts — the self-maintaining half of the cost policy. Uses all_lanes(), not
+    the host-filtered list: the user may well be telling us about the HOST's own lane."""
+    lane_key = _str(args, "lane")
+    ln = _lane_by_key(lane_key, all_lanes())
+    if ln is None:
+        return [TextContent(type="text", text=(
+            f"[error] unknown lane '{lane_key}'. See `doctor` for lane keys."))]
+    cost = _str(args, "cost").lower()
+    if cost not in {"free", "limited", "paid"}:
+        return [TextContent(type="text", text="[error] cost must be free, limited or paid.")]
+    note = _str(args, "note")[:200]
+    env_key = ln.key.upper().replace("-", "_")
+    os.environ[f"CLI_BRIDGE_{env_key}_COST"] = cost          # effective immediately
+    fields: dict = {"cost": cost}
+    if note:
+        os.environ[f"CLI_BRIDGE_{env_key}_COST_NOTE"] = note
+        fields["cost_note"] = note
+    path = config.update_config_file({ln.key: fields})
+    persisted = (f"persisted to `{path}`" if path
+                 else "applied for THIS session only — config file not writable")
+    why = f" — {note}" if note else ""
+    return [TextContent(type="text", text=(
+        f"Lane **{ln.key}** cost set to **{cost}** (set by you){why}. {persisted}. "
+        "ask_all / ask_cascade / ask_best route on it from the next call."))]
 
 
 def _cascade_trace(attempts: list[tuple[LaneSpec, runner.RunResult]],
@@ -1837,18 +1939,28 @@ def _doctor(host: str) -> str:
     lines = ["# cli-bridge - health check", ""]
     lines.append(f"Host (caller): **{host or 'unknown'}** - its own lane is hidden.")
     prof = _profile() + ("" if _profile_is_set() else " (default — run `setup` to configure)")
-    lines.append(f"Cost profile: **{prof}**\n")
+    lines.append(f"Cost profile: **{prof}**")
+    lines.append("_Cost tiers are NOT detected from your account — '(default)' = a sourced "
+                 "typical-plan default (docs/COSTS.md); '(set by you)' = your own setting._")
+    if lanes_mod.cost_facts_stale():
+        lines.append(f"⚠️ _Cost facts last verified {lanes_mod.COST_FACTS_VERIFIED} "
+                     f"({lanes_mod.cost_facts_age_days()} days ago) — plans/quotas churn fast; "
+                     "re-check docs/COSTS.md against the vendor pages before trusting defaults._")
+    lines.append("")
     for lane in all_lanes():
         installed = is_installed(lane)
         mark = "installed" if installed else "NOT on PATH"
         if not lane.enabled:
             mark += " (disabled by env)"
         hidden = " - hidden (this is the host)" if _is_host(lane, host) else ""
-        paid = f" - {lane.cost_label}"
+        src = "set by you" if lane.cost_is_configured else "default — yours may differ"
+        paid = f" - {lane.cost_label} ({src})"
         exp = " - experimental" if lane.experimental else ""
         model = lane.model_for("")
         default = f" - default model: {model}" if model else ""
         lines.append(f"- **{lane.key}** ({lane.bin}) - {mark}{paid}{exp}{hidden}{default}")
+        if installed and lane.cost_note_effective:
+            lines.append(f"  - _{lane.cost_note_effective}_")
     lines.append("\nPer-lane config (your plan): CLI_BRIDGE_<LANE>_COST=free|limited|paid, "
                  "_ENABLED=false, _BIN=<path>, _MODEL=<id>.")
     lines.append("Add your own CLI via a JSON file in CLI_BRIDGE_LANES_FILE - no code changes.")

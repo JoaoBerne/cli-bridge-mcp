@@ -14,8 +14,41 @@ def test_subscription_lanes_default_limited():
 
 
 def test_free_lanes_default_free():
-    for k in ("gemini", "mistral", "opencode", "qwen"):
+    for k in ("gemini", "mistral", "opencode"):
         assert _lane(k).cost_label == "free", k
+
+
+def test_qwen_defaults_paid_since_oauth_shutdown():
+    # Qwen's OAuth free tier was discontinued 2026-04-15 (docs/COSTS.md) — a metered API key is
+    # the only script-legal path, so the sourced default is paid (user overrides per their plan).
+    assert _lane("qwen").cost_label == "paid"
+    assert "2026" in _lane("qwen").cost_note
+
+
+def test_grok_defaults_limited_subscription():
+    assert _lane("grok").cost_label == "limited"   # SuperGrok / X Premium+ required
+
+
+def test_cost_is_configured_reflects_user_intent(monkeypatch):
+    monkeypatch.delenv("CLI_BRIDGE_GEMINI_COST", raising=False)
+    assert _lane("gemini").cost_is_configured is False        # sourced default, not the user's
+    monkeypatch.setenv("CLI_BRIDGE_GEMINI_COST", "paid")
+    assert _lane("gemini").cost_is_configured is True
+
+
+def test_cost_note_effective_prefers_learned_fact(monkeypatch):
+    lane = _lane("gemini")
+    assert lane.cost_note_effective == lane.cost_note          # shipped default
+    monkeypatch.setenv("CLI_BRIDGE_GEMINI_COST_NOTE", "user migrated to agy")
+    assert lane.cost_note_effective == "user migrated to agy"  # host-learned fact wins
+
+
+def test_cost_facts_staleness_clock():
+    from datetime import date, timedelta
+    verified = date.fromisoformat(lanes.COST_FACTS_VERIFIED)
+    assert lanes.cost_facts_age_days(verified) == 0
+    assert lanes.cost_facts_stale(verified + timedelta(days=30)) is False
+    assert lanes.cost_facts_stale(verified + timedelta(days=120)) is True
 
 
 def test_env_overrides_cost(monkeypatch):

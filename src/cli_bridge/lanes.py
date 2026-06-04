@@ -37,6 +37,9 @@ class LaneSpec:
     build_ask: Callable[..., list[str]]   # (task, model, effort, agent) -> argv after bin
     paid: bool = False                    # DEPRECATED shorthand for cost_default="paid"
     cost_default: str = "free"            # "free" | "limited" | "paid" (user-overridable via env)
+    cost_note: str = ""                   # one-line SOURCED fact about what this lane really
+                                          # costs (see docs/COSTS.md) — shown by doctor/setup so
+                                          # the default is explainable, never presented as detected
     default_model: str = ""               # used when caller omits model (env-overridable)
     models_args: list[str] | None = None  # argv to list models, or None
     help_args: list[str] | None = None    # argv to print CLI help, or None
@@ -87,6 +90,20 @@ class LaneSpec:
         if cost in {"free", "0"}:
             return "free"
         return "paid" if self.paid else self.cost_default
+
+    @property
+    def cost_note_effective(self) -> str:
+        """The note shown next to a lane's cost tier. A fact the HOST learned and persisted
+        (set_lane_cost — from the user's own words or the host's fresher knowledge) wins over
+        the shipped sourced default, so the displayed story evolves without a code change."""
+        return self._env("COST_NOTE") or self.cost_note
+
+    @property
+    def cost_is_configured(self) -> bool:
+        """True when the USER declared this lane's cost (env var, or the config file — which is
+        applied to env at startup). False = we're using the sourced default, which describes a
+        TYPICAL plan, not theirs. Display surfaces must say which one they're showing."""
+        return bool(self._env("COST"))
 
     @property
     def is_paid(self) -> bool:
@@ -199,15 +216,15 @@ def _copilot_ask(task, model, effort, agent, bin=""):  # GitHub Copilot CLI (bes
     return cmd + ["-p", task]
 
 
-def _grok_ask(task, model, effort, agent, bin=""):  # xAI Grok CLI (best-effort flags — experimental)
-    # No hardcoded model: empty model = the CLI's own default. The flags here are a best guess
-    # for the official `grok` CLI; `doctor deep` checks them against `grok --help` and warns on
-    # drift rather than letting the call fail silently. Build/write flag is unknown, so build
-    # falls back to default mode (read-only-ish) until verified live.
+def _grok_ask(task, model, effort, agent, bin=""):  # xAI Grok CLI (experimental)
+    # `-p` is the documented headless flag (xAI docs, June 2026). No hardcoded model: empty
+    # model = the CLI's own default; `--model` is best-effort (unverified — `doctor deep`
+    # checks the flags against `grok --help` and warns on drift rather than failing silently).
+    # Build/write flag is unknown, so build falls back to default mode until verified live.
     cmd = []
     if model:
         cmd += ["--model", model]
-    return cmd + ["--prompt", task]
+    return cmd + ["-p", task]
 
 
 # opencode's bare default can resolve to a PAID model, so we pick a free one. The pick is
@@ -260,13 +277,37 @@ def _current_opencode_free_model(bin_name: str) -> str:
     return result
 
 
-# Cost defaults reflect a typical plan, so out-of-the-box `ask_all` builds a real free council
-# (gemini+mistral+opencode) and never burns subscription quota or money unasked. Subscription
-# CLIs default to "limited" (direct asks still work; skipped by broad fan-out). The user
-# overrides any of these per their own plan with CLI_BRIDGE_<LANE>_COST / _PROFILE=max.
+# Cost facts (cost_default / cost_note / docs/COSTS.md) were last verified against vendor
+# pages on this date. This landscape churns in WEEKS (a free tier died in 48h in Apr 2026),
+# so `doctor` warns when the snapshot goes stale instead of letting old facts pose as current.
+COST_FACTS_VERIFIED = "2026-06-04"
+_COST_FACTS_STALE_DAYS = 90
+
+
+def cost_facts_age_days(today=None) -> int:
+    """Days since the cost facts were verified. `today` injectable for tests."""
+    from datetime import date
+    if today is None:
+        today = date.today()
+    return (today - date.fromisoformat(COST_FACTS_VERIFIED)).days
+
+
+def cost_facts_stale(today=None) -> bool:
+    return cost_facts_age_days(today) > _COST_FACTS_STALE_DAYS
+
+
+# Cost defaults are SOURCED from each vendor's published plans (docs/COSTS.md, verified
+# June 2026) — they describe a TYPICAL plan, they are never detected from the user's account.
+# Out-of-the-box `ask_all` builds a real free council and never burns subscription quota or
+# money unasked. Subscription CLIs default to "limited" (direct asks still work; skipped by
+# broad fan-out). The user overrides any of these per their own plan with
+# CLI_BRIDGE_<LANE>_COST / _PROFILE=max.
 BUILTIN_LANES: list[LaneSpec] = [
     LaneSpec("claude", "Claude (Claude Code CLI)", "claude", _claude_ask,
              cost_default="limited",
+             cost_note="Pro/Max plans share ONE quota bucket across chat+Code; hard stop at the "
+                       "limit (opt-in extra API credits exist). Official-CLI scripting is "
+                       "ToS-permitted.",
              models_args=None, help_args=["--help"], caps=frozenset({"model", "agent"}),
              probe_flags=("--print", "--permission-mode"),
              client_ids=frozenset({"claude-code", "claude", "claude-desktop"}),
@@ -275,6 +316,8 @@ BUILTIN_LANES: list[LaneSpec] = [
                   "etc; agent='build' EDITS files (acceptEdits). Default plan = read-only."),
     LaneSpec("gpt", "GPT (OpenAI Codex CLI)", "codex", _codex_ask,
              cost_default="limited",
+             cost_note="Codex is included on ALL ChatGPT plans (even Free) with plan-scaled "
+                       "quotas from a shared agentic pool — many users have it at no extra cost.",
              help_args=["exec", "--help"], caps=frozenset({"model", "effort", "agent"}),
              probe_flags=("--sandbox", "-m"),
              client_ids=frozenset({"codex", "codex-mcp-client", "codex-cli"}),
@@ -283,6 +326,9 @@ BUILTIN_LANES: list[LaneSpec] = [
                   "EDITS files (sandbox workspace-write). Default plan = read-only."),
     LaneSpec("gemini", "Gemini (Google Gemini CLI / Antigravity)", "gemini", _gemini_ask,
              cost_default="free",
+             cost_note="⚠ Gemini CLI's free personal tier (60 req/min, 1000 req/day) ENDS "
+                       "2026-06-18 (official sunset) — migrate to Antigravity (`agy`); this lane "
+                       "falls back to `agy` automatically when installed.",
              help_args=["--help"], caps=frozenset({"model", "agent"}), bin_alts=("agy",),
              probe_flags=("-p",),   # common to gemini & agy; -m differs by binary, so not probed
              client_ids=frozenset({"gemini-cli-mcp-client", "gemini", "antigravity"}),
@@ -292,6 +338,8 @@ BUILTIN_LANES: list[LaneSpec] = [
                   "--dangerously-skip-permissions). Note: `agy` ignores model (uses its own)."),
     LaneSpec("mistral", "Mistral (Vibe CLI)", "vibe", _mistral_ask,
              cost_default="free",
+             cost_note="Free tier works as of June 2026; paid-plan quotas/limits unverified "
+                       "(docs/COSTS.md).",
              help_args=["--help"], caps=frozenset({"model", "agent"}), env_ask=_mistral_env,
              probe_flags=("-p", "--agent", "--trust"),
              client_ids=frozenset({"vibe", "mistral"}),
@@ -301,27 +349,35 @@ BUILTIN_LANES: list[LaneSpec] = [
                   "empty = vibe's default. agent='build' EDITS files. Default plan = read-only."),
     LaneSpec("opencode", "OpenCode (gateway to many models)", "opencode", _opencode_ask,
              cost_default="free", default_model=_OPENCODE_FREE_SEED,
+             cost_note="'opencode/*-free' = $0 but the model may TRAIN on your prompts during "
+                       "its free period; bare 'opencode/*' (Zen) bills per token; "
+                       "'opencode-go/*' spends subscription credits ($10/mo plan with caps).",
              models_args=["models"], help_args=["run", "--help"],
              caps=frozenset({"model", "effort", "agent"}),
              probe_flags=("--agent", "-m"),
              client_ids=frozenset({"opencode"}),
              install_hint="curl -fsSL https://opencode.ai/install | bash",
              note=("Gateway to deepseek/qwen/glm/kimi/minimax/... Empty model = a discovered "
-                   "'opencode/*-free' model ($0, rate-limited). PAID otherwise: a bare 'opencode/*' "
-                   "Zen model bills per-token (API cost), 'opencode-go/*' spends prepaid credits — "
-                   "pass those only when the task earns it. agent='build' EDITS files (default "
-                   "'plan' is read-only).")),
+                   "'opencode/*-free' model ($0, rate-limited; may train on your data during its "
+                   "free period). PAID otherwise: a bare 'opencode/*' Zen model bills per-token "
+                   "(API cost), 'opencode-go/*' spends prepaid credits — pass those only when the "
+                   "task earns it. agent='build' EDITS files (default 'plan' is read-only).")),
     LaneSpec("qwen", "Qwen (Qwen Code CLI)", "qwen", _qwen_ask,
-             cost_default="free",
+             cost_default="paid",
+             cost_note="Free OAuth tier DISCONTINUED 2026-04-15 — needs a metered API key "
+                       "(e.g. OpenRouter/BYOK). ⚠ Alibaba's Coding Plan ToS prohibits "
+                       "non-interactive use, so that plan is NOT a valid path for cli-bridge.",
              help_args=["--help"], caps=frozenset({"model", "agent"}),
              probe_flags=("-p",),
              client_ids=frozenset({"qwen", "qwen-code"}),
              experimental=True,
-             install_hint="npm i -g @qwen-code/qwen-code",
+             install_hint="npm i -g @qwen-code/qwen-code  (needs a metered API key since Apr 2026)",
              note="Alibaba Qwen. Large context, strong code. agent='build' EDITS files (--yolo). "
                   "Flags assume a gemini-cli fork."),
     LaneSpec("copilot", "GitHub Copilot CLI", "copilot", _copilot_ask,
              cost_default="limited",
+             cost_note="Copilot billing moved to usage-based credits on 2026-06-01 — quota "
+                       "exhaustion can meter, not hard-stop.",
              help_args=["--help"], caps=frozenset({"model", "agent"}),
              probe_flags=("-p",),
              client_ids=frozenset({"copilot", "github-copilot"}),
@@ -330,15 +386,17 @@ BUILTIN_LANES: list[LaneSpec] = [
              note="GitHub Copilot. agent='build' EDITS files (--allow-all-tools). Flags unverified; "
                   "if your install is `gh copilot`, set CLI_BRIDGE_COPILOT_BIN and a custom lane."),
     LaneSpec("grok", "Grok (xAI CLI)", "grok", _grok_ask,
-             cost_default="free",
+             cost_default="limited",
+             cost_note="Requires a SuperGrok / X Premium+ subscription (no free CLI tier as of "
+                       "June 2026); headless via `-p`.",
              help_args=["--help"], caps=frozenset({"model"}),
-             probe_flags=("--model", "--prompt"),
+             probe_flags=("-p",),
              client_ids=frozenset({"grok", "grok-cli", "xai"}),
              experimental=True,
-             install_hint="see xAI Grok CLI docs (`grok`) — npm/install per xAI",
+             install_hint="curl -fsSL https://x.ai/cli/install.sh | bash",
              note="xAI Grok. Fast, web-aware, strong reasoning. No model hardcoded (empty = the "
-                  "CLI's own default; pass model=<id> to pick one). Flags best-effort and "
-                  "experimental — run `doctor deep` to check them against `grok --help`."),
+                  "CLI's own default; pass model=<id> to pick one). `--model` best-effort and "
+                  "experimental — run `doctor deep` to check flags against `grok --help`."),
 ]
 
 

@@ -128,7 +128,8 @@ def _cmd_init(a):
     print("# cli-bridge init\n\nDetected CLIs on this machine:")
     for ln in all_lanes():
         mark = "✓ installed" if is_installed(ln) else "✗ not found"
-        print(f"  {ln.key:9} {mark}  [{ln.cost_label}]"
+        src = "set" if ln.cost_is_configured else "default"
+        print(f"  {ln.key:9} {mark}  [{ln.cost_label} ({src})]"
               + (f"  (model: {ln.model_for('')})" if ln.model_for("") else ""))
     cmd = {"command": sys.executable, "args": ["-m", "cli_bridge"]}
     print("\nWire it into your MCP host over stdio. Claude Code:")
