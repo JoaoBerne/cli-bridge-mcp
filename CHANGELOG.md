@@ -6,6 +6,21 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed (deliberation science — selection beats synthesis)
+- **`consensus` now SELECTS the peer-ranked best answer by default; synthesis is opt-in.**
+  Research flipped against blending: judge-SELECTION of the single best answer wins where
+  MoA-style synthesis loses to baseline (arXiv 2603.20324, effect size g=3.86; Self-MoA arXiv
+  2502.00674). consensus already ranked with a deterministic Borda vote (selection-shaped) but
+  then a chairman REWROTE the winner (synthesis-shaped). The default now returns the #1 answer
+  verbatim + the vote table; pass `synthesize=true` for the chairman blend, labeled the weaker
+  mode. One fewer lane call by default. (`ask_all synthesize` was already opt-in.)
+
+### Added (data governance — preflight manifest M11-2)
+- **`dry_run` on `debate`/`consensus` returns a preflight data manifest** — exactly which vendors
+  would be queried and which files/chars (and est. tokens) would leave the machine — without
+  spawning anything. The cheapest data-governance control before a multi-vendor fan-out. Shared
+  file-reader feeds both the manifest and the debate context pack so they never disagree.
+
 ### Security (council blockers M11-1, M11-4)
 - **`set_lane_cost` now REQUIRES a provenance note.** Every cost write must state its one-line
   why ('user: on the Go plan', 'vendor: tier sunset') — a delegate's output can't quietly steer

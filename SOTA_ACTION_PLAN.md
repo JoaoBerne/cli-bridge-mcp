@@ -17,6 +17,38 @@ Date: 2026-06-01
 **Still open / deferred:** async durable job system, web dashboard, OTel export, semantic
 cache, worktree-isolated writers, retries w/ backoff, PyPI publish (user action).
 
+## SOTA review 2026-06 — decisions (from SOTA_REVIEW_2026-06.md)
+
+The external review's protocol: *act, reject-with-reason, or defer — explicitly.* Done so here.
+
+**DONE 2026-06-05:**
+- ✅ **A.1 selection > synthesis** (arXiv 2603.20324, g=3.86) — `consensus` now SELECTS the
+  Borda-ranked #1 answer verbatim by default; chairman synthesis is opt-in (`synthesize=true`),
+  labeled the weaker mode. `ask_all synthesize` was already opt-in (correct side).
+- ✅ **M11-2 preflight data manifest** — `dry_run` on debate/consensus shows vendors + files/chars
+  that would be sent, spawning nothing.
+
+**REJECTED (verified not applicable, with reason):**
+- ❌ **A.6 worktree branch-collision footgun** (issue #51596) — N/A: `ask_build_isolated` uses
+  `tempfile.mkdtemp` + `worktree add --detach … HEAD` (no derived branch name to collide).
+- ❌ **D.5 "absent = failed"** — already enforced: `return_exceptions=True` + skip on
+  `BaseException`, and consensus only counts `res.ok and res.output.strip()` — a vanished lane
+  never enters the vote.
+- ❌ **A.5 sampling deprecation = urgent** — the MCP-sampling synthesis already
+  *transparently falls back to a free lane*; no code change needed, just track the 12-month
+  window. Logged, not actioned.
+
+**DEFERRED → M12 (need design / eval / user, too big for an autonomous pass):**
+- **A.2 prove-quality eval** (the review's #1) — council vs single-strong + self-consistency on
+  seeded-bug fixtures, scored precision/recall. Highest strategic value; needs a careful harness.
+- **A.3 tool-surface bloat** (~33 tools) — toolsets/lean-default + lean set behind a flag; the
+  leader's #1 complaint. Medium; measure idle `/context` cost first.
+- **Steal-list #1 convergence detection** (offline embeddings, $0) · **#2 structured VOTE footer**
+  · **#5 forced-pacing workflow engine** (their real moat) · **#9 architect/editor split for
+  ask_build_isolated** (Aider, cost+quality lever). All Medium+, want an eval before shipping.
+- **C go-to-market** (PyPI/registry/Reddit, "ask the council" magic phrase) — gated on the
+  user's publication GO; positioning seeded in README.
+
 ## Council Self-Critique Backlog (2026-06-05): M11
 
 Source: the council critiqued cli-bridge itself (4 debaters + judge, adversarial, rich brief).
