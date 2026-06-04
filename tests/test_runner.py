@@ -79,6 +79,25 @@ def test_policy_fingerprint_does_not_misfire():
     assert r.ok and r.kind == "ok"
 
 
+def test_policy_refusal_split_across_streams():
+    # Refusal halves on different streams (exit 0): the combined-blob check must still catch it
+    # (regression for the gap the council's review_diff flagged on this very fix).
+    r = runner.run(["sh", "-c",
+                    "echo 'unable to respond to this request'; "
+                    "echo 'this appears to violate our Usage Policy' 1>&2"], 30)
+    assert not r.ok and r.kind == "policy"
+
+
+def test_failure_kind_unit():
+    # Direct coverage of the shared classifier (council review asked for it).
+    assert runner._failure_kind("", "RESOURCE_EXHAUSTED") == "quota"
+    assert runner._failure_kind("", "not logged in") == "auth"
+    assert runner._failure_kind("boom", "") == "failed"
+    assert runner._failure_kind(_AUP, "") == "policy"
+    # policy wins over a quota-looking word when the refusal envelope is present
+    assert runner._failure_kind(_AUP, "rate limit") == "policy"
+
+
 def test_timeout_kills_grandchild():
     marker = "/tmp/cli_bridge_orphan_marker"
     if os.path.exists(marker):

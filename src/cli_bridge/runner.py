@@ -177,9 +177,10 @@ def _ok_or_empty(out: str, err: str, argv: list[str]) -> RunResult:
     text = out or err
     if not text:
         return RunResult(False, f"`{argv[0]}` returned no output (exit 0)", "empty", 0)
-    if _is_policy_refusal(text):
-        # Exit 0 but the delegate REFUSED on policy grounds — a soft failure, like "empty":
-        # cascade/ask_best fall through to a lane that answers, and it is never cached.
+    # Exit 0 but the delegate REFUSED on policy grounds — a soft failure, like "empty":
+    # cascade/ask_best fall through to a lane that answers, and it is never cached. Check both
+    # streams AND the combined blob so a refusal split across stdout+stderr is still caught.
+    if _is_policy_refusal(out) or _is_policy_refusal(err) or _is_policy_refusal(f"{out}\n{err}"):
         return RunResult(False, _clip(text), "policy", 0)
     return RunResult(True, _clip(text), "ok", 0)
 
