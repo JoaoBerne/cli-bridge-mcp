@@ -17,6 +17,26 @@ Date: 2026-06-01
 **Still open / deferred:** async durable job system, web dashboard, OTel export, semantic
 cache, worktree-isolated writers, retries w/ backoff, PyPI publish (user action).
 
+## Council Self-Critique Backlog (2026-06-05): M11
+
+Source: the council critiqued cli-bridge itself (4 debaters + judge, adversarial, rich brief).
+Verdict: adopt-with-fixes (judge; 2× do-not-adopt dissent). FR-1..8 below shipped the same
+night; what remains, by ROI:
+
+| # | Item | Detail | Size |
+|---|---|---|---:|
+| M11-1 | Ban argv secrets | curl lanes expand `${KEY}` into argv → visible in `ps`. Lane validator rejects secret-looking resolved argv; pass curl headers via stdin (`--config -` / `--header @-`) instead. Unanimous blocker. | S/M |
+| M11-2 | Preflight manifest | Before any fan-out with cwd/context: "these N files/chars go to THESE vendors" — cheapest real data-governance win; extends `dry_run`. | M |
+| M11-3 | Warm lane pool (opt-in) | Persist top-2 lanes as subprocesses, TTL ~60s, clean kill. Cold start 0.5–15s is the #1 UX complaint (3/4 debaters). | M/L |
+| M11-4 | Harden set_lane_cost | Prompt-injection vector (host writes config on a delegate's say-so): require a non-empty note + list recent cost writes in doctor. Keep the tool — "observed cost" can't replace a declared tier. | S |
+| M11-5 | Per-lane env scrub + path allowlist | `CLI_BRIDGE_<LANE>_ENV_ALLOW` / `_PATHS`; proportionate alternative to full OS sandboxing for an advisory tool. | M |
+| M11-6 | Observed chars/token calibration | Calibrate the /4 ratio per lane from actual outputs; keeps "estimated" honest. | S |
+
+Council misses worth recording: it didn't know the trace bundle (audit log) and eval harness
+already exist — even a rich brief isn't grounding (validates FR-1 `context_files`); next
+self-critique must pass the repo docs as context. The output guard flagged the debate itself
+("secret-exfil") because it *discussed* secrets — known heuristic false-positive class.
+
 ## Field Report Findings (2026-06-04): `debate` hardening
 
 Source: first production use of `debate` for a contested architecture decision (host agent had
@@ -33,11 +53,17 @@ exposed structural gaps. Full report lives in the private overlay. Distilled bac
 | FR-6 | Provenance tags | Ask debaters to tag claims `[brief]` / `[own-knowledge]` / `[verified]` — makes the echo chamber visible in the output. | S |
 | FR-7 | Anti-unanimity guard | 100% convergence at round 1 is suspicious by construction. Optional bonus round: one lane re-prompted to steelman the losing option. | M |
 | FR-8 | `rate_lane` post-debate hook | Report ends with a pre-filled rating reminder so the learning router actually gets fed. | S |
+| FR-9 | Hunk-boundary diff truncation (`review_diff`) | Field-confirmed (2026-06-05): a 66k-char diff was truncated mid-identifier; a reviewer read `x.clo` for `x.close()` and emitted a false BLOCKER on correct code. Truncate at hunk/file boundaries only, and annotate the report with which files went unreviewed instead of cutting silently. | S |
 
 What worked (preserve): adversarial stances produced genuinely differentiated openings; the
 judge corrected one debater's overreach; unanimous third-party verdict resolved a human↔agent
 deadlock no amount of host arguing had moved. The decision-arbitration value is the killer
 feature — protect it while fixing grounding.
+
+Second field run (2026-06-05, `review_diff` on a ~400-line backend migration): correctness +
+security reviewers produced 0 false positives; the tests-focus lane produced 13 near-identical
+boilerplate findings (no actual file reading — same echo-chamber failure as FR-1); the only
+blocker was the FR-9 truncation artifact. FR-2-style claim verification would have caught it.
 
 ---
 
