@@ -52,6 +52,25 @@ _REDACTIONS = (
 # stderr fingerprints -> a stable, actionable error kind the caller can branch on.
 _QUOTA = re.compile(r"RESOURCE_EXHAUSTED|quota|rate.?limit|too many requests|\b429\b", re.I)
 _AUTH = re.compile(r"unauthorized|not logged in|authenticat|login required|\b401\b|api key", re.I)
+# A delegate can REFUSE on usage-policy grounds and still exit 0 — Claude Code prints
+# "API Error: Claude Code is unable to respond to this request, which appears to violate our
+# Usage Policy ... Request ID: req_…". Without this, that refusal flows through as a SUCCESSFUL
+# answer and gets cached. Require BOTH co-occurring phrases (the refusal sentence AND the policy
+# clause) so a normal answer that merely mentions "usage policy" or "API Error" can't misfire.
+_POLICY = re.compile(
+    r"unable to respond to this request.*violate (?:our|the)\s+usage policy", re.I | re.S)
+
+
+def _is_policy_refusal(text: str) -> bool:
+    return bool(_POLICY.search(text or ""))
+
+
+def _failure_kind(out: str, err: str) -> str:
+    """Classify a delegate result's failure (shared by the exit-0 and non-zero paths)."""
+    if _is_policy_refusal(out) or _is_policy_refusal(err):
+        return "policy"
+    blob = f"{err}\n{out}"
+    return "quota" if _QUOTA.search(blob) else "auth" if _AUTH.search(blob) else "failed"
 
 # Cross-platform process-tree control. POSIX: new session + killpg(group). Windows: new
 # process group + taskkill /T (whole tree). Without this, timeout/cancel cleanup crashes on
@@ -92,7 +111,7 @@ def _clip(text: str) -> str:
 class RunResult:
     ok: bool
     output: str
-    kind: str = "ok"          # ok | timeout | not_found | quota | auth | failed | spawn | empty
+    kind: str = "ok"          # ok | timeout | not_found | quota | auth | failed | spawn | empty | policy
     exit_code: int | None = None
     latency_ms: int = 0       # wall time of the spawn, filled in by the caller (server._run_lane)
 
@@ -107,6 +126,8 @@ class RunResult:
             "auth": " - log into this CLI in your terminal, then retry",
             "not_found": " - is the CLI installed and on PATH?",
             "empty": " - this CLI exited cleanly but returned nothing; another lane may answer",
+            "policy": " - this CLI refused on usage-policy grounds; revise the request or skip "
+                      "this lane",
         }.get(self.kind, "")
         return f"[{self.kind}] {self.output}{hint}".rstrip()
 
@@ -142,11 +163,9 @@ def run(argv: list[str], timeout_s: int, cwd: str | None = None,
     if proc.returncode == 0:
         return _ok_or_empty(out, err, argv)
 
-    blob = f"{err}\n{out}"
-    kind = "quota" if _QUOTA.search(blob) else "auth" if _AUTH.search(blob) else "failed"
     detail = err or out or "(no output)"
     return RunResult(False, _clip(f"{argv[0]} exit {proc.returncode}: {detail}"),
-                     kind, proc.returncode)
+                     _failure_kind(out, err), proc.returncode)
 
 
 def _ok_or_empty(out: str, err: str, argv: list[str]) -> RunResult:
@@ -158,6 +177,10 @@ def _ok_or_empty(out: str, err: str, argv: list[str]) -> RunResult:
     text = out or err
     if not text:
         return RunResult(False, f"`{argv[0]}` returned no output (exit 0)", "empty", 0)
+    if _is_policy_refusal(text):
+        # Exit 0 but the delegate REFUSED on policy grounds — a soft failure, like "empty":
+        # cascade/ask_best fall through to a lane that answers, and it is never cached.
+        return RunResult(False, _clip(text), "policy", 0)
     return RunResult(True, _clip(text), "ok", 0)
 
 
@@ -182,10 +205,9 @@ def _finish(returncode, out, err, argv) -> RunResult:
     err = redact((err or "").strip())
     if returncode == 0:
         return _ok_or_empty(out, err, argv)
-    blob = f"{err}\n{out}"
-    kind = "quota" if _QUOTA.search(blob) else "auth" if _AUTH.search(blob) else "failed"
     detail = err or out or "(no output)"
-    return RunResult(False, _clip(f"{argv[0]} exit {returncode}: {detail}"), kind, returncode)
+    return RunResult(False, _clip(f"{argv[0]} exit {returncode}: {detail}"),
+                     _failure_kind(out, err), returncode)
 
 
 async def arun(argv: list[str], timeout_s: int, cwd: str | None = None,

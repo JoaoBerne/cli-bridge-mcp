@@ -37,6 +37,15 @@ already exist — even a rich brief isn't grounding (validates FR-1 `context_fil
 self-critique must pass the repo docs as context. The output guard flagged the debate itself
 ("secret-exfil") because it *discussed* secrets — known heuristic false-positive class.
 
+Dogfood findings (2026-06-05, council run with real `context_files` on the source):
+- ✅ DONE — **policy-refusal soft failure** (`kind="policy"`): a delegate that refuses on
+  usage-policy grounds and exits 0 used to be returned (and cached) as a successful answer; now
+  it falls through like `empty`. Found by routing the council at `runner.py`.
+- **M11-7 cost-safety hole** (challenge on `lanes.py`): `CLI_BRIDGE_OPENCODE_MODEL=opencode-go/…`
+  with `COST=free` makes a *free-labeled* lane spawn a *paid* model — the daily cap only checks
+  `lane.is_paid`, not the resolved model id. Narrow the cost-safety claim and/or warn when a
+  free/limited lane's resolved opencode model is a `opencode-go/*` or bare-Zen id. | S |
+
 ## Field Report Findings (2026-06-04): `debate` hardening
 
 Source: first production use of `debate` for a contested architecture decision (host agent had

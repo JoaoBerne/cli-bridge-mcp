@@ -83,6 +83,15 @@ All notable changes to this project are documented here. The format follows
   doctor warns *before* the lane fails silently. Costs no quota (just `--help`). Custom JSON lanes
   derive their checked flags from the template automatically. Lanes declare `probe_flags`.
 
+### Changed (reliability)
+- **Usage-policy refusals fall through instead of posing as answers.** When a delegate refuses
+  on policy grounds and still exits 0 (Claude Code prints "API Error: … unable to respond … "
+  "violate our Usage Policy … Request ID: req_…"), the runner now classifies it as a soft
+  failure `kind="policy"` — so `ask_cascade`/`ask_best` skip to a lane that actually answers, it
+  is never cached, and a council fan-out no longer shows a refusal as if it were a real answer.
+  Fingerprint requires two co-occurring phrases so a normal answer mentioning "usage policy" or
+  "API Error" can't misfire. (Surfaced by dogfooding the council on the project itself.)
+
 ### Changed (drift-proofing)
 - **opencode's free model is DISCOVERED, never pinned — and cost-safe.** The empty-model default
   resolves only to a `opencode/*-free` model (the $0 rate-limited tier), discovered live from

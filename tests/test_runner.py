@@ -54,6 +54,31 @@ def test_exit0_stderr_only_still_answers():
     assert r.ok and r.output == "theanswer"
 
 
+_AUP = ("API Error: Claude Code is unable to respond to this request, which appears to "
+        "violate our Usage Policy (https://www.anthropic.com/legal/aup). "
+        "Request ID: req_011Cbj4UZiWHzWuQ8M1Eo29i")
+
+
+def test_policy_refusal_exit0_is_soft_failure():
+    # Claude Code refuses on policy grounds and exits 0 — must NOT be returned as a successful
+    # answer (it would be cached + shown as if the lane answered). Soft failure → fall through.
+    r = runner.run(["sh", "-c", f"echo {repr(_AUP)}"], 30)
+    assert not r.ok and r.kind == "policy"
+
+
+def test_policy_refusal_nonzero_classified():
+    r = runner.run(["sh", "-c", f"echo {repr(_AUP)} 1>&2; exit 1"], 30)
+    assert r.kind == "policy"
+
+
+def test_policy_fingerprint_does_not_misfire():
+    # A normal answer that merely MENTIONS the words must stay a successful answer.
+    text = "Our usage policy doc explains the API Error codes; here is the answer: 42."
+    assert runner._is_policy_refusal(text) is False
+    r = runner.run(["sh", "-c", f"echo {repr(text)}"], 30)
+    assert r.ok and r.kind == "ok"
+
+
 def test_timeout_kills_grandchild():
     marker = "/tmp/cli_bridge_orphan_marker"
     if os.path.exists(marker):
