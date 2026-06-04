@@ -528,6 +528,18 @@ def load_custom_lanes(path: str | None = None) -> list[LaneSpec]:
     return lanes
 
 
+def is_paid_opencode_model(model: str) -> bool:
+    """True when an opencode model id spends money/credits: `opencode-go/*` burns prepaid Go
+    credits, and a bare `opencode/*` Zen model without the `-free` suffix bills per token. Used to
+    catch a FREE-labeled opencode lane that's been pointed (via env/config) at a paid model — the
+    cost-safety hole the council's challenge surfaced (a free tier can't bill, but a free *label*
+    on a paid *model* can). Pure."""
+    m = (model or "").strip()
+    if m.startswith("opencode-go/"):
+        return True
+    return m.startswith("opencode/") and not m.endswith("-free")
+
+
 def missing_flags(help_text: str, probe_flags) -> list[str]:
     """Which of a lane's required flags are ABSENT from its CLI help text — i.e. likely removed or
     renamed upstream, so the lane's invocation would break. Plain substring match (a flag like

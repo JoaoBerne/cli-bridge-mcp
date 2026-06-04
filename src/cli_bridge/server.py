@@ -1979,6 +1979,10 @@ def _doctor(host: str) -> str:
         lines.append(f"- **{lane.key}** ({lane.bin}) - {mark}{paid}{exp}{hidden}{default}")
         if installed and lane.cost_note_effective:
             lines.append(f"  - _{lane.cost_note_effective}_")
+        if not lane.is_paid and lanes_mod.is_paid_opencode_model(model):
+            lines.append(f"  - ⚠️ **cost mismatch**: lane is '{lane.cost_label}' but its model "
+                         f"`{model}` spends money/credits — set `CLI_BRIDGE_"
+                         f"{lane.key.upper()}_COST=paid` or pick an `opencode/*-free` model.")
     risky = lanes_mod.LANES_LOAD_STATUS.get("argv_secret_risk") or []
     if risky:
         lines.append(f"\n⚠️ **Secret in argv** — custom lane(s) {', '.join(risky)} expand a "

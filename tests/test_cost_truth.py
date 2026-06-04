@@ -144,6 +144,21 @@ def test_argv_secret_risk_detector():
     assert lanes.argv_secret_risk(["${HOME}/x", "{task}"]) is False  # env ≠ credential
 
 
+def test_is_paid_opencode_model():
+    assert lanes.is_paid_opencode_model("opencode-go/kimi-k2.6") is True
+    assert lanes.is_paid_opencode_model("opencode/zen-pro") is True       # bare Zen bills/token
+    assert lanes.is_paid_opencode_model("opencode/deepseek-v4-flash-free") is False
+    assert lanes.is_paid_opencode_model("") is False
+
+
+def test_doctor_warns_when_free_lane_points_at_paid_model(monkeypatch):
+    # The cost-safety hole the council found: COST=free + a paid opencode model spends silently.
+    monkeypatch.setenv("CLI_BRIDGE_OPENCODE_COST", "free")
+    monkeypatch.setenv("CLI_BRIDGE_OPENCODE_MODEL", "opencode-go/kimi-k2.6")
+    text = server._doctor("")
+    assert "cost mismatch" in text and "opencode-go/kimi-k2.6" in text
+
+
 def test_doctor_warns_on_argv_secret_lane(tmp_path, monkeypatch):
     cfg = tmp_path / "lanes.json"
     cfg.write_text(json.dumps([{
