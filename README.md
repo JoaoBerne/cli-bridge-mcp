@@ -37,11 +37,13 @@ There are other "call other models" MCPs. Here's what makes cli-bridge different
 - 🛡️ **Ban-safe by design.** It spawns each model's **official CLI** — exactly as you'd run it by
   hand. No OAuth-token extraction, no API-key reuse, nothing that gets accounts flagged. Each CLI
   handles its own auth and billing.
-- 💸 **Sensible cost defaults, then *you* tune to your plan.** Out of the box `ask_all` builds a
-  free council (Gemini + Mistral + opencode) and never touches subscription quota (Claude, GPT) or
-  paid credits unless you ask. Each lane ships a realistic tier
-  (`CLI_BRIDGE_<LANE>_COST=free|limited|paid`) that you override per your own subscriptions — on a
-  big plan, mark them all `free`, or set `CLI_BRIDGE_PROFILE=max`.
+- 💸 **Sourced cost defaults, then *you* tune to your plan.** Out of the box `ask_all` builds a
+  free council and never touches subscription quota (Claude, GPT) or paid credits unless you ask.
+  Each lane ships a tier sourced from the vendor's published plans
+  ([docs/COSTS.md](docs/COSTS.md), dated) — **never detected from your account, and labeled as
+  such** — that you override per your own subscriptions
+  (`CLI_BRIDGE_<LANE>_COST=free|limited|paid`); on a big plan, mark them all `free`, or set
+  `CLI_BRIDGE_PROFILE=max`.
 - 🔌 **Works from any host.** Driving Claude Code? It hides the Claude lane (no asking yourself)
   and exposes the rest. Driving Codex or opencode instead? Same deal, detected automatically from
   the MCP handshake.
@@ -109,12 +111,35 @@ live-checks each login).
 | `ask_gpt`      | [OpenAI Codex](https://github.com/openai/codex) | subscription |
 | `ask_gemini`   | Gemini CLI (or `agy` / Antigravity) | free / subscription |
 | `ask_mistral`  | Mistral Vibe | free tier |
-| `ask_qwen` ⚗️  | Qwen Code | free / subscription |
-| `ask_copilot` ⚗️ | GitHub Copilot CLI | subscription |
-| `ask_grok` ⚗️  | xAI Grok CLI | free / subscription |
+| `ask_qwen` ⚗️  | Qwen Code | metered API key (free OAuth tier closed Apr 2026) |
+| `ask_copilot` ⚗️ | GitHub Copilot CLI | subscription (usage-based credits since 2026-06) |
+| `ask_grok` ⚗️  | xAI Grok CLI | subscription (SuperGrok / X Premium+) |
 | `ask_opencode` | [opencode](https://opencode.ai) gateway (deepseek, qwen, glm, kimi…) | free by default; some models use credits |
 
 ⚗️ = experimental (flags not yet verified live — please report breakage).
+Cost column = the vendor's *typical published plan* as of June 2026 ([docs/COSTS.md](docs/COSTS.md)
+has limits, sunsets and sources) — cli-bridge never detects what a lane costs *you*; declare your
+own plan with `CLI_BRIDGE_<LANE>_COST`.
+
+### The $0 council (no subscriptions at all)
+
+No paid plan, no card? You can still assemble a real multi-model council in ~5 minutes from
+providers with a **genuinely free, hard-stop tier** (exhaustion = HTTP 429, a bill is
+structurally impossible — verified June 2026, sources in [docs/COSTS.md](docs/COSTS.md)):
+
+```bash
+# 1. Get free API keys (no card): console.groq.com · cloud.cerebras.ai ·
+#    a GitHub PAT (models scope) · openrouter.ai/keys
+export GROQ_API_KEY=... CEREBRAS_API_KEY=... GITHUB_MODELS_TOKEN=... OPENROUTER_API_KEY=...
+# 2. Point cli-bridge at the ready-made lanes
+export CLI_BRIDGE_LANES_FILE=/path/to/examples/free-apis.json
+```
+
+That's **Groq** (llama-3.3-70b, 1k req/day) + **Cerebras** (gpt-oss-120b) + **GitHub Models**
+(every GitHub account has free access) + **OpenRouter `:free`** breadth — four independent
+voices for `ask_all`/`consensus`/`debate`, plus opencode's built-in free models if installed.
+Caveats: Gemini CLI's free tier **sunsets 2026-06-18**; free tiers churn in weeks — check
+[docs/COSTS.md](docs/COSTS.md) for what was true at verification time.
 
 ### 2. Register it with your host
 
@@ -171,8 +196,8 @@ Hosts that support MCP prompts also surface `review_diff`, `security_review`, `d
 | `ask_all_async` / `job_status` / `job_result` / `job_cancel` / `jobs_list` | Run a fan-out as a **background job** that returns a job id in <1s, so a slow council run can't hit the host's tool-call deadline. Cancel kills the delegates' process groups. |
 | `review_diff` | Multi-model code review of a git diff: lanes review in parallel with **different focuses** (correctness / security / tests / maintainability), each returning JSON findings; deterministic prechecks (secrets, dangerous shell) seed them; findings **merge by file/line/title** with agreement-based confidence (single/majority/consensus). `output_format: markdown` (default) or `json`. Params: `cwd`, `base` (default HEAD), `diff`, `include_paid`, `timeout_s`. |
 | `security_review` | OWASP-aware **security-only** review of a git diff (injection / auth & access control / secrets & crypto / data exposure & SSRF) → severity-ranked findings + a `residual_risk` section. |
-| `debate` | Several models answer a question, **see each other's answers and revise** over bounded rounds (default 1, max 3), then a judge writes the final consensus + remaining disagreement. `adversarial: true` assigns for/against/neutral stances to the openings for sharper disagreement. Params: `task`, `rounds`, `adversarial`, `include_paid`, `timeout_s`. |
-| `consensus` | The "LLM council" done better: each lane answers blind, then **ranks the anonymized answers** (no self-favouring), votes are aggregated **deterministically** (Borda count), and a chairman synthesizes the winner. Returns the final answer + a peer-vote ranking table. Params: `task`, `include_paid`, `timeout_s`. |
+| `debate` | Several models answer a question, **see each other's answers and revise** over bounded rounds (default 1, max 3), then an **independent judge** (held out of the debate when 3+ lanes) writes the final consensus + remaining disagreement. Hardened from production use: `context_files` injects key files into every debater prompt (**grounding** — without it the council only paraphrases your brief), a **fact-check pass** (free lane, on by default) flags the verdict's unverifiable commands/tags/versions, claims carry provenance tags (`[brief]`/`[own-knowledge]`/`[verified]`), a thin brief gets a linter warning, and `steelman: true` makes one lane argue *against* a unanimous verdict before the judge re-concludes. `summary_only` drops the full positions (~60-80 % fewer tokens). Params: `task`, `rounds`, `adversarial`, `context_files`, `fact_check`, `summary_only`, `allow_self_judge`, `steelman`, `include_paid`, `cwd`, `timeout_s`. |
+| `consensus` | The "LLM council" done better: each lane answers blind, then **ranks the anonymized answers** (no self-favouring), votes are aggregated **deterministically** (Borda count), and a chairman synthesizes the winner. Returns the final answer + a peer-vote ranking table. Supports `context_files` grounding and `summary_only`. Params: `task`, `context_files`, `summary_only`, `include_paid`, `cwd`, `timeout_s`. |
 | `challenge` | Hand a claim to **one outside lane** with a critical-reassessment prompt → an independent skeptical review (with an integrity guardrail — it won't manufacture disagreement). Pressure-test your own conclusion before acting. Optional `lane`. |
 | `premortem` | Each lane imagines the plan **already failed** and lists likely failure modes + mitigations; merged into a prioritized risk list. Run it before building. |
 | `test_plan` | Derive a prioritized **test plan** (behaviors, edge cases, concrete cases) from a git diff or a description. |
@@ -186,7 +211,7 @@ Hosts that support MCP prompts also surface `review_diff`, `security_review`, `d
 | `usage_budget` | Today's runs per lane vs `CLI_BRIDGE_<LANE>_DAILY_LIMIT` + estimated spend; flags lanes over their limit. |
 | `lane_stats` | Per-lane health: runs, failures, consecutive failures/timeouts, active cooldown. |
 | `reset_lane_state` | Clear a lane's cooldown/failure counters (after re-login or quota reset). |
-| `setup` | Detect installed lanes, sort them by what they cost you (free/limited/paid) and **recommend a profile + daily cap** to confirm — then walk the user through it. |
+| `setup` | List installed lanes with their *sourced* typical-plan cost (free/limited/paid — never detected from your account), ask which you actually pay for, and **recommend a profile + daily cap** to confirm — then walk the user through it. |
 
 There's also a **human CLI** — the same engine from your terminal or CI:
 `cli-bridge init` (detect CLIs + print MCP wiring), `doctor`, `ask <lane> <task>`, `ask-all`,
@@ -292,14 +317,25 @@ with no file at all:
 ```json
 [
   {
-    "key": "grok", "display": "Grok (xAI CLI)", "bin": "grok",
-    "ask": ["chat", "{task}"], "model_flag": "-m", "default_model": "grok-beta",
-    "client_ids": ["grok-cli"], "note": "xAI Grok via its official CLI."
+    "key": "aider", "display": "Aider", "bin": "aider",
+    "ask": ["--message", "{task}"], "model_flag": "--model",
+    "client_ids": ["aider"], "note": "Aider one-shot via --message."
   }
 ]
 ```
 
-You now have an `ask_grok` tool.
+You now have an `ask_aider` tool. (A custom lane with a built-in key, e.g. `grok`, *overrides*
+the built-in — handy when your install's flags differ.)
+
+**The wider ecosystem, ready to plug in:** `examples/community-lanes.json` ships best-effort
+lanes for **Aider, Goose, Plandex, Amp, Crush, Amazon Q Developer CLI and Droid (Factory)** —
+all marked experimental and `limited` (kept out of broad fan-out until *you* declare what they
+cost you), and all covered by `doctor deep`'s flag-drift check, which validates each lane
+against the CLI's own `--help` on *your* machine before anything breaks silently. Claude Code,
+Codex, Gemini + Antigravity (`agy`), opencode, Qwen Code, Copilot and Grok are already
+built-in. Anything else (Cline, OpenHands, Continue, Roo/Kilo Code, Kimi K2 CLI, …) is the
+same 3-line JSON away — and any of these CLIs that speaks MCP can sit on the *other* side too,
+running cli-bridge as its server.
 
 ### Bring your own API (no CLI needed)
 
@@ -357,7 +393,9 @@ Point Cursor / VS Code (Cline, Continue) / Zed at the **same command** (`uvx cli
 - **BYO-API (curl) lanes:** a `${ENV}` key is substituted into the argv, so it can appear in this
   machine's process list while the call runs (it's never logged — traces redact it). Prefer a
   provider's own CLI when possible; for curl, a header-file (`curl -H @file`) avoids argv exposure.
-- **Experimental lanes** (`qwen`, `copilot`): flags aren't verified live — report breakage.
+- **Experimental lanes** (`qwen`, `copilot`, `grok`): flags aren't verified live — report breakage.
+- **Cost tiers are sourced defaults, not detection** — vendor-plan facts dated June 2026
+  ([docs/COSTS.md](docs/COSTS.md)); plans/quotas churn, `doctor` warns when the snapshot is stale.
 - **Sandboxed host:** if your host runs the server in a strict sandbox (read-only FS / no
   network), spawned CLIs inherit it and may fail to reach their providers. cli-bridge surfaces
   this as an `auth`/`failed` error rather than hanging.

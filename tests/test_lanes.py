@@ -132,7 +132,7 @@ def test_grok_lane_exists_no_hardcoded_model():
     assert lane.experimental and "model" in lane.caps
     assert lane.default_model == ""                       # never pin a model that can age out
     argv = lane.build_ask("hi", "", "", "")
-    assert argv == ["--prompt", "hi"]                     # empty model -> CLI's own default
+    assert argv == ["-p", "hi"]                           # official headless flag; no model pinned
     argv2 = lane.build_ask("hi", "grok-x", "", "")
     assert "--model" in argv2 and "grok-x" in argv2
 

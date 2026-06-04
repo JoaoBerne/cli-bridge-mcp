@@ -1,0 +1,98 @@
+[
+  {
+    "//": "Community lanes — plug the wider agent-CLI ecosystem into your council.",
+    "//1": "Every entry is EXPERIMENTAL: flags are best-effort from each CLI's docs and may",
+    "//2": "drift — run `doctor deep` after enabling; it checks each lane's flags against the",
+    "//3": "CLI's --help and warns BEFORE a silent breakage. Fix a flag by editing this file.",
+    "//4": "cost is 'limited' on purpose (kept out of broad fan-out until YOU declare the cost",
+    "//5": "via set_lane_cost / CLI_BRIDGE_<LANE>_COST — cli-bridge never guesses your plan).",
+    "//6": "Already built-in (no entry needed): claude, codex/gpt, gemini + antigravity (agy),",
+    "//7": "opencode, qwen, copilot, grok.",
+    "//8": "No verified headless recipe yet (add your own 3-line entry, see README): Cline,",
+    "//9": "OpenHands, Continue, Pi, OpenClaw, Roo Code, Kilo Code, Void, Windsurf (IDE-first),",
+    "//10": "Hermes Agent, Kimi K2 CLI — contributions welcome.",
+
+    "key": "aider",
+    "display": "Aider",
+    "bin": "aider",
+    "cost": "limited",
+    "experimental": true,
+    "model_flag": "--model",
+    "ask": ["--message", "{task}", "--yes-always", "--no-auto-commits", "--dry-run"],
+    "help": ["--help"],
+    "install_hint": "python -m pip install aider-install && aider-install",
+    "note": "Aider one-shot via --message. --dry-run keeps it read-only (proposed edits are shown, not applied) — remove it if you WANT aider to edit."
+  },
+  {
+    "key": "goose",
+    "display": "Goose (Block)",
+    "bin": "goose",
+    "cost": "limited",
+    "experimental": true,
+    "model_flag": "",
+    "ask": ["run", "-t", "{task}"],
+    "help": ["run", "--help"],
+    "install_hint": "see goose docs (block/goose) — brew install block-goose-cli or install script",
+    "note": "Goose headless via `goose run -t`. ⚠ goose executes tool actions (can edit files/run commands) — point it at a repo you can diff."
+  },
+  {
+    "key": "plandex",
+    "display": "Plandex",
+    "bin": "plandex",
+    "cost": "limited",
+    "experimental": true,
+    "model_flag": "",
+    "ask": ["tell", "{task}"],
+    "help": ["tell", "--help"],
+    "install_hint": "curl -sL https://plandex.ai/install.sh | bash",
+    "note": "Plandex `tell` plans into its own sandbox; nothing touches your files until you run `plandex apply` yourself."
+  },
+  {
+    "key": "amp",
+    "display": "Amp (Sourcegraph)",
+    "bin": "amp",
+    "cost": "limited",
+    "experimental": true,
+    "model_flag": "",
+    "ask": ["-x", "{task}"],
+    "help": ["--help"],
+    "install_hint": "npm i -g @sourcegraph/amp",
+    "note": "Amp execute mode (-x). ⚠ agentic — can act on the workspace; review its changes."
+  },
+  {
+    "key": "crush",
+    "display": "Crush (Charm)",
+    "bin": "crush",
+    "cost": "limited",
+    "experimental": true,
+    "model_flag": "",
+    "ask": ["run", "{task}"],
+    "help": ["run", "--help"],
+    "install_hint": "brew install charmbracelet/tap/crush  (or npm i -g @charmland/crush)",
+    "note": "Crush non-interactive single prompt via `crush run`."
+  },
+  {
+    "key": "q",
+    "display": "Amazon Q Developer CLI",
+    "bin": "q",
+    "cost": "limited",
+    "experimental": true,
+    "model_flag": "",
+    "ask": ["chat", "--no-interactive", "--trust-no-tools", "{task}"],
+    "help": ["chat", "--help"],
+    "install_hint": "see AWS docs — Amazon Q Developer CLI (`q`)",
+    "note": "Q chat headless; --trust-no-tools keeps it read-only (no tool execution)."
+  },
+  {
+    "key": "droid",
+    "display": "Droid (Factory)",
+    "bin": "droid",
+    "cost": "limited",
+    "experimental": true,
+    "model_flag": "",
+    "ask": ["exec", "{task}"],
+    "help": ["exec", "--help"],
+    "install_hint": "curl -fsSL https://app.factory.ai/cli | sh",
+    "note": "Factory droid headless via `droid exec`. ⚠ agentic — defaults may allow edits; check `droid exec --help` for an autonomy/read-only flag on your version."
+  }
+]
