@@ -169,6 +169,25 @@ def allowed_lanes() -> set[str]:
     return {p.strip() for p in raw.split(",") if p.strip()} if raw else set()
 
 
+def _tool_set(var: str) -> set[str]:
+    raw = os.environ.get(var, "").strip()
+    return {t.strip().lower() for t in raw.split(",") if t.strip()}
+
+
+def disabled_tools() -> set[str]:
+    """Tool NAMES to hide from the listing (CLI_BRIDGE_DISABLED_TOOLS=debate,premortem,...).
+    Trims the schema context every host pays per request — the 2026 consensus is 5-15 tools, with
+    sharp degradation past ~20 (and ~33 here). Essential tools (doctor/setup) can't be hidden."""
+    return _tool_set("CLI_BRIDGE_DISABLED_TOOLS")
+
+
+def enabled_tools() -> set[str]:
+    """Allowlist (CLI_BRIDGE_ENABLED_TOOLS=ask_best,ask_all,review_diff). When set, ONLY these
+    (+ essentials + the ask_<lane> per installed lane if named) are exposed — a one-env 'lean
+    mode'. Empty = expose everything not in the denylist."""
+    return _tool_set("CLI_BRIDGE_ENABLED_TOOLS")
+
+
 def build_disabled() -> bool:
     """CLI_BRIDGE_DISABLE_BUILD=1 forces every delegate to read-only (plan), even if a caller
     asks agent='build'. For shared/team machines where no delegate should edit files."""

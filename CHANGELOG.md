@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added (context economy — modular tool loading)
+- **`CLI_BRIDGE_DISABLED_TOOLS` / `CLI_BRIDGE_ENABLED_TOOLS`**: hide tools from the listing
+  (denylist) or expose only a chosen set (allowlist = one-env "lean mode"). Every host pays each
+  tool's schema in context per request; the 2026 consensus is 5–15 tools with sharp degradation
+  past ~20, and an unfilterable surface is the #1 documented complaint about the leading
+  multi-model MCP server. `doctor`/`setup` are essential and can't be hidden.
+
+### Changed (review quality — scope discipline)
+- **Reviewers are now told not to overengineer or scope-creep.** `review_diff` / `security_review`
+  prompts gained an explicit anti-overengineering + diff-only discipline line (no hypothetical
+  abstractions, no unrelated rewrites/migrations) — directly counters the low-value-nit padding
+  seen when dogfooding the council on this repo.
+
 ### Changed (deliberation science — selection beats synthesis)
 - **`consensus` now SELECTS the peer-ranked best answer by default; synthesis is opt-in.**
   Research flipped against blending: judge-SELECTION of the single best answer wins where

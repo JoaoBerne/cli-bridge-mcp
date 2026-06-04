@@ -845,6 +845,32 @@ def _self_ask_tool(lane: LaneSpec) -> Tool:
     )
 
 
+# doctor/setup are how a host learns what's installed and how to configure cost — never hide them.
+ESSENTIAL_TOOLS = {"doctor", "setup"}
+
+
+def _filter_tools(tools: list[Tool]) -> list[Tool]:
+    """Apply CLI_BRIDGE_ENABLED_TOOLS (allowlist) / _DISABLED_TOOLS (denylist) so a host pays
+    context only for the tools it wants. Stole the pattern from pal-mcp-server, whose #1 issue is
+    ~30-40k idle tokens from an unfilterable surface. Essentials are always kept."""
+    enabled = config.enabled_tools()
+    disabled = config.disabled_tools()
+    if not enabled and not disabled:
+        return tools
+    out = []
+    for t in tools:
+        name = t.name.lower()
+        if name in ESSENTIAL_TOOLS:
+            out.append(t)
+        elif enabled and name not in enabled:
+            continue
+        elif name in disabled:
+            continue
+        else:
+            out.append(t)
+    return out
+
+
 @server.list_tools()
 async def list_tools() -> list[Tool]:
     lanes, host = _active_lanes()
@@ -852,7 +878,7 @@ async def list_tools() -> list[Tool]:
     own = _host_lane(host)
     if own:
         tools.insert(0, _self_ask_tool(own))   # reach a sibling model of your own family
-    return tools
+    return _filter_tools(tools)
 
 
 # ─────────────────────────────── MCP prompts (host-native slash commands) ───────────────────────────────

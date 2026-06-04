@@ -266,6 +266,8 @@ Everything is environment variables — no code edits. Tune it to **your** subsc
 | `CLI_BRIDGE_PROFILE` | `saver`, `balanced`, or `max`. `max` includes limited/paid lanes in `ask_all` unless the caller overrides `include_paid`. |
 | `CLI_BRIDGE_HOST` | Force the host identity (which lane to hide). Normally auto-detected. |
 | `CLI_BRIDGE_LANES_FILE` | Path to a JSON file adding **your own** CLIs/APIs as lanes. |
+| `CLI_BRIDGE_DISABLED_TOOLS` | Comma-separated tool names to hide from the listing (e.g. `debate,premortem,test_plan`) — trims the schema context every host pays per request. `doctor`/`setup` can't be hidden. |
+| `CLI_BRIDGE_ENABLED_TOOLS` | Allowlist for a one-env **lean mode**: when set, only these tools (+ `doctor`/`setup`) are exposed (e.g. `ask_best,ask_all,review_diff`). |
 | `CLI_BRIDGE_<LANE>_PRIORITY` | Lower runs earlier in `ask_cascade` (default 50). Pin your preferred order. |
 | `CLI_BRIDGE_INLINE_MAX_CHARS` | Above this, an answer spills to a file instead of flooding context (default 12000). |
 | `CLI_BRIDGE_TERSE` | `off` / `lite` (default) / `full` / `ultra`. Prepends a compact response-style preamble to delegate prompts (English, reason fully internally, answer terse, code/JSON untouched) to cut both your context and the delegate's output tokens. Never applied to structured workflow tools. |

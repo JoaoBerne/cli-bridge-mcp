@@ -246,3 +246,41 @@ def test_is_host_matches_via_slug():
     assert server._is_host(lane, server._slug("Claude Code"))
     assert not server._is_host(lane, "codex")
     assert not server._is_host(lane, "")
+
+
+# ── modular tool loading (stolen from pal-mcp-server DISABLED_TOOLS, fixes A.3 bloat) ──
+
+def _tool_names(monkeypatch):
+    # a stable lane set so the listing is deterministic regardless of what's installed
+    from cli_bridge import lanes as lanes_mod
+    panel = [LaneSpec("gemini", "Gemini", "echo", lambda *a: []),
+             LaneSpec("gpt", "GPT", "echo", lambda *a: [])]
+    monkeypatch.setattr(server, "_active_lanes", lambda: (panel, "claude-code"))
+    monkeypatch.setattr(lanes_mod, "all_lanes", lambda: panel)
+    return {t.name for t in asyncio.run(server.list_tools())}
+
+
+def test_no_filter_lists_everything(monkeypatch):
+    names = _tool_names(monkeypatch)
+    assert {"ask_gemini", "ask_all", "debate", "doctor", "setup"} <= names
+
+
+def test_disabled_tools_hides_named_tools(monkeypatch):
+    monkeypatch.setenv("CLI_BRIDGE_DISABLED_TOOLS", "debate, premortem")
+    names = _tool_names(monkeypatch)
+    assert "debate" not in names and "premortem" not in names
+    assert "ask_all" in names                      # untouched
+
+
+def test_disabled_tools_cannot_hide_essentials(monkeypatch):
+    monkeypatch.setenv("CLI_BRIDGE_DISABLED_TOOLS", "doctor,setup")
+    names = _tool_names(monkeypatch)
+    assert "doctor" in names and "setup" in names   # essentials always kept
+
+
+def test_enabled_tools_is_a_lean_allowlist(monkeypatch):
+    monkeypatch.setenv("CLI_BRIDGE_ENABLED_TOOLS", "ask_best,ask_all")
+    names = _tool_names(monkeypatch)
+    assert "ask_best" in names and "ask_all" in names
+    assert "doctor" in names                        # essential still present
+    assert "debate" not in names and "consensus" not in names   # everything else hidden

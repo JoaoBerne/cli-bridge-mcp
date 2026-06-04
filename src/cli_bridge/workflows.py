@@ -118,13 +118,23 @@ _JSON_RULES = (
 )
 
 
+# Scope discipline (adapted from pal-mcp-server's codereview prompt): keeps reviewers from
+# padding the report with hypothetical-future abstractions and out-of-scope rewrites — the
+# low-value-nit failure mode observed when dogfooding review_diff on this repo.
+_REVIEW_DISCIPLINE = (
+    "Overengineering is an anti-pattern: do NOT propose abstractions or indirection for "
+    "complexity that does not exist yet, and do NOT suggest wholesale rewrites, technology "
+    "migrations, or changes unrelated to the issues in this diff. Prefer concrete, actionable "
+    "fixes grounded in the code shown; if there are no genuine issues in your dimension, say so.")
+
+
 def review_prompt(role: str, desc: str, diff: str, truncated: bool) -> str:
     trunc = ("\n\n[NOTE: diff truncated to fit context — review only what is shown above]"
              if truncated else "")
     return (
         f"You are a senior code reviewer. Review ONLY the **{role}** dimension: {desc}\n\n"
         f"{_JSON_RULES} Report only real {role} issues; do not restate the diff or review "
-        f"other dimensions.\n\n```diff\n{diff}{trunc}\n```")
+        f"other dimensions. {_REVIEW_DISCIPLINE}\n\n```diff\n{diff}{trunc}\n```")
 
 
 def _timeout(raw) -> int:
@@ -158,7 +168,7 @@ def security_prompt(role: str, desc: str, diff: str, truncated: bool) -> str:
         f"You are an application security reviewer (OWASP-aware). Focus ONLY on **{role}**: "
         f"{desc}\n\n{_JSON_RULES} (Put the attack/impact in 'evidence' and the remediation in "
         f"'recommendation'.) Flag only real security issues in your area; do not restate the "
-        f"diff.\n\n```diff\n{diff}{trunc}\n```")
+        f"diff. {_REVIEW_DISCIPLINE}\n\n```diff\n{diff}{trunc}\n```")
 
 
 # ── deterministic prechecks: a model-independent safety net run BEFORE the LLM reviewers ──

@@ -38,14 +38,25 @@ The external review's protocol: *act, reject-with-reason, or defer — explicitl
   *transparently falls back to a free lane*; no code change needed, just track the 12-month
   window. Logged, not actioned.
 
+**ALSO DONE 2026-06-05 (prior-art steals, cheap + low-risk):**
+- ✅ **A.3 tool-surface bloat** — `CLI_BRIDGE_DISABLED_TOOLS` (denylist) + `CLI_BRIDGE_ENABLED_TOOLS`
+  (allowlist / one-env lean mode); essentials (doctor/setup) always kept. Pattern from a workflow
+  MCP server whose unfilterable surface is its #1 complaint.
+- ✅ **review scope discipline** — anti-overengineering + diff-only lines in review_diff/
+  security_review prompts (counters the low-value-nit padding seen dogfooding).
+
 **DEFERRED → M12 (need design / eval / user, too big for an autonomous pass):**
 - **A.2 prove-quality eval** (the review's #1) — council vs single-strong + self-consistency on
   seeded-bug fixtures, scored precision/recall. Highest strategic value; needs a careful harness.
-- **A.3 tool-surface bloat** (~33 tools) — toolsets/lean-default + lean set behind a flag; the
-  leader's #1 complaint. Medium; measure idle `/context` cost first.
-- **Steal-list #1 convergence detection** (offline embeddings, $0) · **#2 structured VOTE footer**
-  · **#5 forced-pacing workflow engine** (their real moat) · **#9 architect/editor split for
-  ask_build_isolated** (Aider, cost+quality lever). All Medium+, want an eval before shipping.
+- **Forced-pacing workflow engine** (prior art's real moat) — tools as state machines
+  (`step_number`/`total_steps`/`next_step_required`/`confidence`) that withhold expert analysis
+  until the host has investigated; pairs with **`files_required_to_continue`** (return a
+  structured "need these files" instead of guessing). Medium-Large; changes the interaction model.
+- **`apilookup` current-docs guard** — pure-prompt "resolve today's date, search current-year
+  docs, don't trust training cutoff" before a library lookup. Small; ship as an MCP prompt (slash
+  command) to avoid re-bloating the tool surface.
+- **Convergence detection** (offline embeddings, $0) · **structured VOTE footer** · **architect/
+  editor split for ask_build_isolated** (Aider — cost+quality lever). Medium+, want an eval first.
 - **C go-to-market** (PyPI/registry/Reddit, "ask the council" magic phrase) — gated on the
   user's publication GO; positioning seeded in README.
 
