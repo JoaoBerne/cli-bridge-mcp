@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added (current-docs guard)
+- **`apilookup` MCP prompt** (slash command): forces a dated, current-year documentation lookup
+  through a web-aware lane (`ask_gemini`/`ask_grok`) instead of answering a library/API question
+  from a stale training cutoff. Shipped as a prompt — zero tool-surface cost.
+
 ### Added (context economy — modular tool loading)
 - **`CLI_BRIDGE_DISABLED_TOOLS` / `CLI_BRIDGE_ENABLED_TOOLS`**: hide tools from the listing
   (denylist) or expose only a chosen set (allowlist = one-env "lean mode"). Every host pays each

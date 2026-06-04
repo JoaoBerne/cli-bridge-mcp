@@ -44,6 +44,8 @@ The external review's protocol: *act, reject-with-reason, or defer — explicitl
   MCP server whose unfilterable surface is its #1 complaint.
 - ✅ **review scope discipline** — anti-overengineering + diff-only lines in review_diff/
   security_review prompts (counters the low-value-nit padding seen dogfooding).
+- ✅ **`apilookup` current-docs guard** — shipped as an MCP prompt (slash command), zero
+  tool-surface cost; forces a dated current-year lookup via a web-aware lane.
 
 **DEFERRED → M12 (need design / eval / user, too big for an autonomous pass):**
 - **A.2 prove-quality eval** (the review's #1) — council vs single-strong + self-consistency on

@@ -215,7 +215,14 @@ def test_self_ask_runs_with_explicit_model(monkeypatch):
 
 def test_list_prompts_exposes_workflows():
     names = {p.name for p in asyncio.run(server.list_prompts())}
-    assert {"review_diff", "security_review", "debate", "cost_setup"} <= names
+    assert {"review_diff", "security_review", "debate", "cost_setup", "apilookup"} <= names
+
+
+def test_apilookup_prompt_forces_current_docs():
+    text = asyncio.run(server.get_prompt(
+        "apilookup", {"query": "fastapi background tasks"})).messages[0].content.text
+    assert "today's date" in text and "training cutoff" in text
+    assert "ask_gemini" in text and "fastapi background tasks" in text
 
 
 def test_get_prompt_review_diff_with_base():

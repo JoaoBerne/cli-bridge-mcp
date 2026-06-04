@@ -178,8 +178,8 @@ Just talk to your assistant:
 > *"Ask Opus 4.6 to double-check my reasoning."* (sibling model, from Claude Code)
 > *"Pick the best lane for a deep review — and remember that one nailed it."* (→ `ask_best` + `rate_lane`; next time it routes there first)
 
-Hosts that support MCP prompts also surface `review_diff`, `security_review`, `debate`, and
-`cost_setup` as native slash commands.
+Hosts that support MCP prompts also surface `review_diff`, `security_review`, `debate`,
+`premortem`, `test_plan`, `apilookup`, and `cost_setup` as native slash commands.
 
 ---
 
