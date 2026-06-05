@@ -231,6 +231,7 @@ class ArmRun:
     fp_other: int = 0
     sev_exact: int = 0
     n_findings: int = 0
+    failed_fixtures: int = 0          # fixtures where the arm's review failed outright (throttled)
     per_fixture: dict[str, FixtureScore] = field(default_factory=dict)
 
     @property
@@ -247,8 +248,8 @@ class ArmRun:
         return self.sev_exact / self.tp if self.tp else 0.0
 
 
-def aggregate(scores: list[FixtureScore]) -> ArmRun:
-    a = ArmRun()
+def aggregate(scores: list[FixtureScore], failed: int = 0) -> ArmRun:
+    a = ArmRun(failed_fixtures=failed)
     for s in scores:
         a.tp += s.tp
         a.fn += s.fn
@@ -270,18 +271,22 @@ def selfconsistency_lanes(single: LaneSpec, k: int) -> list[LaneSpec]:
 
 
 async def run_arm(targets: list[LaneSpec], diff: str, run_lane, *,
-                  timeout_s: int | None = None) -> list[dict]:
-    """One review pass → list of finding dicts. review_diff returns '[error] ...' (not JSON) when
-    every reviewer fails; we treat that as zero findings rather than crashing the eval."""
+                  timeout_s: int | None = None) -> tuple[list[dict], bool]:
+    """One review pass → (findings, ran_ok). ran_ok=False when review_diff failed outright (every
+    reviewer errored / rate-limited to empty) — DISTINCT from 'ran fine, found nothing'. This is
+    what lets the eval flag a 0%-recall arm that is really a throttled lane, not a quality result
+    (the single arm fires K calls at ONE lane per fixture, so on free tiers it gets throttled)."""
     args = {"diff": diff, "output_format": "json"}
     if timeout_s:
         args["timeout_s"] = timeout_s
     out = await workflows.review_diff(targets, args, run_lane)
+    if out.lstrip().startswith("[error]"):
+        return [], False
     try:
         data = json.loads(out)
     except (ValueError, TypeError):
-        return []
-    return data.get("findings", []) if isinstance(data, dict) else []
+        return [], False
+    return (data.get("findings", []) if isinstance(data, dict) else []), True
 
 
 @dataclass
@@ -302,13 +307,16 @@ async def evaluate(fixtures: list[Fixture], council: list[LaneSpec], single: Lan
     single_runs: list[ArmRun] = []
     for _ in range(max(1, repeats)):
         c_scores, s_scores = [], []
+        c_fail = s_fail = 0
         for fx in fixtures:
-            c = await run_arm(council, fx.diff, run_lane, timeout_s=timeout_s)
-            s = await run_arm(single_arm, fx.diff, run_lane, timeout_s=timeout_s)
+            c, c_ok = await run_arm(council, fx.diff, run_lane, timeout_s=timeout_s)
+            s, s_ok = await run_arm(single_arm, fx.diff, run_lane, timeout_s=timeout_s)
             c_scores.append(score_fixture(c, fx, include_prechecks=include_prechecks))
             s_scores.append(score_fixture(s, fx, include_prechecks=include_prechecks))
-        council_runs.append(aggregate(c_scores))
-        single_runs.append(aggregate(s_scores))
+            c_fail += 0 if c_ok else 1
+            s_fail += 0 if s_ok else 1
+        council_runs.append(aggregate(c_scores, c_fail))
+        single_runs.append(aggregate(s_scores, s_fail))
     return EvalResult(council=council_runs, single=single_runs, fixtures=fixtures,
                       council_lanes=[ln.key for ln in council], single_lane=single.key, k=k)
 
@@ -354,6 +362,9 @@ def render_markdown(res: EvalResult) -> str:
     c_sev = _mean_sd([r.sev_acc for r in res.council])
     s_sev = _mean_sd([r.sev_acc for r in res.single])
     n_bugs = res.council[0].n_bugs if res.council else 0
+    n_fix = len(res.fixtures)
+    c_failed = sum(r.failed_fixtures for r in res.council)
+    s_failed = sum(r.failed_fixtures for r in res.single)
     overlap = _ci_overlap(c_rec, s_rec)
     delta = c_rec[0] - s_rec[0]
     if overlap:
@@ -384,6 +395,20 @@ def render_markdown(res: EvalResult) -> str:
         "",
         verdict,
         "",
+    ]
+    total = n_fix * len(res.council)
+    if c_failed or s_failed:
+        warn = []
+        if s_failed:
+            warn.append(f"the **single** arm's review failed on {s_failed}/{total} fixture-runs")
+        if c_failed:
+            warn.append(f"the **council** arm failed on {c_failed}/{total}")
+        lines.append(
+            "> ⚠️ **Unreliable:** " + "; ".join(warn) + " — likely a lane rate-limited to empty "
+            "(the single arm fires K calls at ONE lane per fixture, so on free tiers it gets "
+            "throttled). A 0% here is an ARTIFACT, not a quality result. Re-run with a lane that "
+            "has quota headroom (paid tier or local model) for `--single-lane`.\n")
+    lines += [
         _winloss_table(res),
         "",
         "> Directional only — small N. Reproduce on your machine: `cli-bridge eval --live "
@@ -433,6 +458,7 @@ def result_dict(res: EvalResult) -> dict:
             "sev_acc": [round(r.sev_acc, 4) for r in runs],
             "tp": [r.tp for r in runs],
             "n_bugs": [r.n_bugs for r in runs],
+            "failed_fixtures": [r.failed_fixtures for r in runs],
         }
     return {
         "tool": "eval",

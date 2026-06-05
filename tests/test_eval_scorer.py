@@ -190,3 +190,24 @@ def test_evaluate_council_beats_a_silent_single():
         fx, council, _lane("solo"), k=4, run_lane=run_lane, repeats=1))
     assert res.council[0].recall > res.single[0].recall
     assert res.single[0].recall == 0.0
+    assert res.single[0].failed_fixtures == 0          # silent (ran, found nothing) is NOT a failure
+
+
+def test_evaluate_flags_throttled_arm_as_unreliable():
+    """A lane that errors/rate-limits (review fails outright) is flagged failed — distinct from a
+    clean 0%. Guards against reading a throttled 0% arm as 'single models are useless'."""
+    fx = _fixtures()
+    good = _replay_run_lane(fx)
+
+    async def run_lane(lane, args, *, tool="ask", terse=True):
+        if lane.key.startswith("solo"):
+            return runner.RunResult(False, "rate limited", "empty")   # single lane: every call fails
+        return await good(lane, args)
+
+    council = [_lane(k) for k in ("a", "b", "c", "d")]
+    res = asyncio.run(ev.evaluate(
+        fx, council, _lane("solo"), k=4, run_lane=run_lane, repeats=1))
+    assert res.single[0].failed_fixtures == len(fx)    # every single-arm review failed
+    assert res.council[0].failed_fixtures == 0
+    assert "Unreliable" in ev.render_markdown(res)
+    assert ev.result_dict(res)["single"]["failed_fixtures"][0] == len(fx)

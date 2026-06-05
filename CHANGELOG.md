@@ -64,6 +64,14 @@ All notable changes to this project are documented here. The format follows
 - Honesty by construction: `--repeats` (3 default, 5 to publish), small-N "directional, not a
   leaderboard" caveat, and a negative result (council ties/loses) is shipped, not hidden. See
   `BENCHMARKS.md` § Quality.
+- **Throttle guard:** the eval distinguishes an arm that *ran and found nothing* from one whose
+  review *failed outright* (a lane rate-limited to empty). The single arm fires K calls at ONE lane
+  per fixture, so on free tiers it gets throttled; a resulting 0% is flagged **Unreliable** in the
+  report (and `failed_fixtures` in JSON), not silently scored as "single models are useless."
+- First measured run (2026-06-05, free tiers) is recorded in `BENCHMARKS.md`: **no clean winner**,
+  confounded by free-tier rate-limiting — a robust single lane caught more bugs but over-detected
+  and mis-rated severity; the council had fewer false alarms + far better severity but ran degraded
+  (one lane throttled). The naïve "council always wins" claim did not hold.
 
 ### Added (current-docs guard)
 - **`apilookup` MCP prompt** (slash command): forces a dated, current-year documentation lookup

@@ -54,5 +54,36 @@ The live run prints recall / precision / false-alarms-on-clean-lines / severity 
 the mean±sd bands overlap, it reports *"no measurable difference"* rather than crowning a winner
 from noise. Small N — treat as **directional, not a leaderboard**.
 
-> Maintainers: paste a `--repeats 5` table here before a release. A negative result (council ties
-> or loses) is a finding worth shipping, not a number to hide.
+### Measured — 2026-06-05, this machine's **free-tier** CLIs
+
+A first real run. The headline: **no clean winner, and the comparison is confounded by free-tier
+rate-limiting** — exactly the kind of un-hyped result this harness exists to surface.
+
+| arm | recall (bugs caught) | precision | false alarms (fp) | severity exact |
+|-----|:---:|:---:|:---:|:---:|
+| single — `opencode`/deepseek ×4 roles | **9/10 (90%)** | 0.20 | 36 | 22% |
+| council — `gemini, mistral, opencode` | 5/10 (50%)¹ | 0.20 | 20 | **80%** |
+
+_repeats=1 (single data point, noisy), 12 fixtures, 10 reasoning bugs, deterministic scorer._
+
+What it actually shows:
+- A single **robust** strong lane caught *more* bugs than the council — but **over-detected** (36
+  false alarms vs 20) and mis-rated severity (22% vs 80%). "More models = more bugs" did **not**
+  hold here.
+- ¹ The council ran **degraded**: `gemini` rate-limited to empty mid-run (243/271 calls failed), so
+  the council effectively reviewed with ~2 healthy lanes. Its 50% recall is a **lower bound**.
+- **The real confound:** the single arm fires 4 calls to *one* lane per fixture; on free tiers that
+  lane (gpt, gemini) gets throttled to empty and scores ~0 — an artifact, not a quality signal.
+  `opencode` and `mistral` were the only lanes that survived the burst (0 failures). So a council's
+  load-spreading is itself a real-world advantage, but a *clean quality* verdict needs a lane with
+  quota headroom (a paid tier or a local model). **Don't read this as "single beats council."**
+
+Reproduce on your machine (use a lane with headroom for `--single-lane`, and `--repeats 5`):
+
+```bash
+cli-bridge eval --live --council-lanes gpt,gemini,mistral,opencode \
+  --single-lane opencode --k 4 --repeats 5
+```
+
+> Maintainers: this table is directional, not a leaderboard. A negative/ambiguous result is a
+> finding worth shipping, not a number to hide — that's the whole point.
