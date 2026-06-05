@@ -6,6 +6,26 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added (debate — structured vote + convergence early-stop, M12-2)
+- **Debaters now end each turn with a machine-readable `VOTE: confidence=<0-1>; continue=<yes|no>`.**
+  The footer is parsed into a tally (continue vs stop, mean confidence) shown in the report and
+  trace, and — crucially — **bounds the loop by signal, not a fixed count**: when every debater
+  votes to stop, the debate ends early. The footer is stripped from the answers fed to the judge,
+  fact-checker, and final display so the confidence number can't bias the verdict.
+- **Convergence detection (pure stdlib, no embeddings/network).** Between rounds, lexical
+  similarity (`difflib`) of each debater's revised answer vs its previous one is measured; once
+  answers stabilise (≥92%) the debate stops early instead of burning the remaining round budget.
+  The round count is now a ceiling, not a quota. (Chose `difflib` over the planned Ollama
+  embeddings to keep the "stdlib + mcp only, tests need no network" invariant.)
+
+### Added (build — architect/editor split, M12-2)
+- **`ask_build_isolated` gains an optional `architect_lane`** (Aider-style): a (usually stronger)
+  lane first writes a precise PLAN read-only, which the editor lane (`lane`, pick a cheaper one)
+  then implements in the throwaway worktree. Strong model plans, cheap model applies — a known
+  cost+quality lever. The plan is shown in the report; if the architect fails, the editor builds
+  solo with the original task (graceful fallback). No behaviour change when `architect_lane` is
+  omitted.
+
 ### Added (quality eval — does a council beat one strong model? M12-1)
 - **`cli-bridge eval`** — a deterministic harness that answers the project's central, *falsifiable*
   question: does a COUNCIL of distinct models beat ONE strong model + self-consistency at finding

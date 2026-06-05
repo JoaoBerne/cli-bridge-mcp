@@ -628,7 +628,13 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                     "properties": {
                         "task": {"type": "string", "description": "What the agent should build/edit."},
                         "lane": {"type": "string", "enum": [ln.key for ln in build_lanes],
-                                 "description": "Which build-capable lane to run."},
+                                 "description": "The build-capable lane that EDITS the worktree "
+                                 "(the editor). Pick a cheaper lane here when using architect_lane."},
+                        "architect_lane": {"type": "string", "enum": [ln.key for ln in lanes],
+                                           "description": "Optional: a (usually stronger) lane that "
+                                           "first writes a precise PLAN, which the editor lane then "
+                                           "implements (Aider-style architect/editor split — strong "
+                                           "model plans, cheaper model applies). Needs no write mode."},
                         "model": {"type": "string", "description": "Model override (empty = default)."},
                         "effort": {"type": "string",
                                    "enum": ["", "minimal", "low", "medium", "high", "max"],
@@ -1489,7 +1495,14 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
         if "agent" not in lane.caps:
             return [TextContent(type="text", text=(
                 f"[error] lane '{key}' has no build/write mode."))]
-        return [_emit(await worktrees.ask_build_isolated(lane, args, _run_lane),
+        architect = None
+        akey = _str(args, "architect_lane")
+        if akey:
+            architect = _lane_by_key(akey, lanes)
+            if not architect:
+                return [TextContent(type="text", text=(
+                    f"[error] no such architect_lane: {akey}."))]
+        return [_emit(await worktrees.ask_build_isolated(lane, args, _run_lane, architect=architect),
                       label="ask_build_isolated")]
 
     if name == "conversations_list":

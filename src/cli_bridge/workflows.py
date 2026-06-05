@@ -16,6 +16,7 @@ Reviewers run with terse=False — they must emit clean JSON, not a compressed p
 from __future__ import annotations
 
 import asyncio
+import difflib
 import json
 import os
 import re
@@ -528,6 +529,65 @@ def _pick_judge(targets: list[LaneSpec], fallback: LaneSpec) -> LaneSpec:
                  if not ln.is_paid and not ln.is_limited and not ln.experimental), fallback)
 
 
+# ── structured vote + convergence: bound the loop by SIGNAL, not a fixed round count ──────────
+# Each debater ends with a machine-readable VOTE (confidence + whether another round would help).
+# When everyone votes to stop — or answers stop changing between rounds (lexical similarity, pure
+# stdlib, no embeddings/network) — we end early instead of burning the full round budget.
+DEBATE_CONVERGENCE = 0.92      # consecutive-round answer similarity that counts as "converged"
+
+_VOTE_RULE = (
+    "End your reply with EXACTLY one final line, nothing after it:\n"
+    "VOTE: confidence=<0.0-1.0>; continue=<yes|no>\n"
+    "(your confidence in your current answer, and whether another round could still change it).")
+
+_VOTE_RE = re.compile(
+    r"(?im)^\s*VOTE:\s*confidence\s*=\s*(\d*\.?\d+)\s*;?\s*continue\s*=\s*(yes|no)\b")
+_VOTE_STRIP_RE = re.compile(r"(?im)^[ \t]*VOTE:\s*confidence\s*=.*$")
+
+
+def _parse_vote(text: str) -> tuple[float | None, bool | None]:
+    m = _VOTE_RE.search(text or "")
+    if not m:
+        return None, None
+    try:
+        conf = max(0.0, min(1.0, float(m.group(1))))
+    except ValueError:
+        conf = None
+    return conf, m.group(2).lower() == "yes"
+
+
+def _strip_vote(text: str) -> str:
+    """Remove the VOTE footer for any rendering that feeds a CONCLUSION (judge, fact-check, final
+    display) — the confidence number shouldn't bias the verdict. Inter-debater transcripts keep it."""
+    return _VOTE_STRIP_RE.sub("", text or "").rstrip()
+
+
+def _vote_tally(positions: dict) -> dict:
+    confs, conts = [], []
+    for _display, text in positions.values():
+        c, cont = _parse_vote(text)
+        if c is not None:
+            confs.append(c)
+        if cont is not None:
+            conts.append(cont)
+    return {
+        "n": len(conts),
+        "continue_yes": sum(1 for c in conts if c),
+        "continue_no": sum(1 for c in conts if not c),
+        "mean_confidence": round(sum(confs) / len(confs), 2) if confs else None,
+        "all_stop": bool(conts) and not any(conts),
+    }
+
+
+def _round_similarity(prev: dict, cur: dict) -> float | None:
+    """Mean lexical similarity of each debater's answer vs the previous round (stdlib difflib).
+    High = answers stabilised. None when there is no comparable prior answer."""
+    keys = [k for k in cur if k in prev]
+    sims = [difflib.SequenceMatcher(None, _strip_vote(prev[k][1]), _strip_vote(cur[k][1])).ratio()
+            for k in keys]
+    return sum(sims) / len(sims) if sims else None
+
+
 async def debate(targets: list[LaneSpec], args: dict, run_lane, progress=None) -> str:
     """Multi-lane debate: each lane answers, then sees the others and revises over a bounded
     number of rounds, then a judge writes the final conclusion. Hardened from field use:
@@ -574,7 +634,7 @@ async def debate(targets: list[LaneSpec], args: dict, run_lane, progress=None) -
         return lane, res
 
     def _ground(prompt: str) -> str:
-        parts = ([pack] if pack else []) + [prompt, _PROVENANCE_RULE]
+        parts = ([pack] if pack else []) + [prompt, _PROVENANCE_RULE, _VOTE_RULE]
         return "\n\n".join(parts)
 
     def _open(i: int) -> str:
@@ -598,11 +658,14 @@ async def debate(targets: list[LaneSpec], args: dict, run_lane, progress=None) -
     if progress:
         await progress(1, 2, "opening")
 
-    # Revision rounds: each lane sees the full transcript and revises.
+    # Revision rounds: each lane sees the full transcript and revises. The loop ends EARLY when
+    # debaters vote to stop or answers converge — the round count is a ceiling, not a quota.
     rounds_run = 0
+    early_stop = ""
     for _ in range(rounds):
         if len(positions) < 2:
             break                         # nothing to debate against
+        prev = dict(positions)
         transcript = _debate_transcript(list(positions.values()))
         live = [ln for ln in debaters if ln.key in positions]
         raw = await asyncio.gather(
@@ -615,9 +678,19 @@ async def debate(targets: list[LaneSpec], args: dict, run_lane, progress=None) -
             if res.ok:
                 positions[lane.key] = (lane.display, res.output)
         rounds_run += 1
+        live_now = {ln.key: positions[ln.key] for ln in live if ln.key in positions}
+        if _vote_tally(live_now)["all_stop"]:
+            early_stop = "all debaters voted to stop"
+            break
+        sim = _round_similarity(prev, positions)
+        if sim is not None and sim >= DEBATE_CONVERGENCE:
+            early_stop = f"answers converged ({sim:.0%} similar to prior round)"
+            break
 
     final_positions = list(positions.values())
-    transcript = _debate_transcript(final_positions)
+    clean_positions = [(d, _strip_vote(t)) for d, t in final_positions]
+    transcript = _debate_transcript(clean_positions)
+    tally = _vote_tally(positions)
     meta = {
         "question": question[:200],
         "debaters": [d for d, _ in final_positions],
@@ -626,6 +699,12 @@ async def debate(targets: list[LaneSpec], args: dict, run_lane, progress=None) -
         "context_files": (f"{pack.count('--- file:')} loaded" if pack else "none"),
         "judge_independent": not self_judged,
     }
+    if tally["n"]:
+        meta["votes"] = f"{tally['continue_yes']} continue / {tally['continue_no']} stop"
+        if tally["mean_confidence"] is not None:
+            meta["mean_confidence"] = tally["mean_confidence"]
+    if early_stop:
+        meta["early_stop"] = early_stop
     if pack_notes:
         meta["context_notes"] = pack_notes
 
@@ -687,7 +766,12 @@ async def debate(targets: list[LaneSpec], args: dict, run_lane, progress=None) -
         lines.append("> ⚠️ _Thin brief → thin consensus:_ " + "; ".join(lint) + "\n")
     lines.append(f"_Debaters: {', '.join(meta['debaters'])} · rounds: {rounds_run} · "
                  f"judge: {meta['judge']}_\n")
-    lines.append(council_recap([(d, True, 0, t) for d, t in final_positions],
+    if "votes" in meta or early_stop:
+        bits = ([f"vote: {meta['votes']}"] if "votes" in meta else []) \
+            + ([f"mean confidence {meta['mean_confidence']}"] if "mean_confidence" in meta else []) \
+            + ([f"early stop: {early_stop}"] if early_stop else [])
+        lines.append("_" + " · ".join(bits) + "_\n")
+    lines.append(council_recap([(d, True, 0, t) for d, t in clean_positions],
                                title="Final positions"))
     lines.append("")
     lines.append("## Final answer\n")
@@ -696,7 +780,7 @@ async def debate(targets: list[LaneSpec], args: dict, run_lane, progress=None) -
         lines.append(fact_section)
     if not summary_only:
         lines.append("\n## Full positions\n")
-        for display, text in final_positions:
+        for display, text in clean_positions:
             lines.append(f"<details><summary>{display}</summary>\n\n{text.strip()}\n\n</details>")
     lines.append("\n## Trace\n```json\n" + json.dumps(meta, indent=2) + "\n```")
     lines.append(f"\n_Tip: judge this session → `rate_lane(lane=\"{judge.key}\", mode=\"deep\", "

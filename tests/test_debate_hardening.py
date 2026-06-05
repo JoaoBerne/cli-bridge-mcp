@@ -258,3 +258,71 @@ def test_consensus_context_pack_reaches_panelists(tmp_path):
         _panel(2), {"task": "q", "context_files": [str(f)]}, run_lane))
     answers = [t for t in seen if "Answer the question" in t]
     assert answers and all("panel ground truth" in t for t in answers)
+
+
+# ── M12-2: structured VOTE footer + convergence early-stop ────────────────────────────────
+
+def _vote_recorder(rec, conf="0.9", cont="yes", body=None):
+    async def run_lane(lane, args, *, tool="ask", terse=True):
+        rec.append({"lane": lane.key, "task": args["task"], "tool": tool})
+        t = args["task"]
+        if "debated the question" in t:
+            return RunResult(True, "UNANIMOUS: no\nVerdict.", "ok")
+        if "fact-checker" in t:
+            return RunResult(True, "CONFIRMED: ok", "ok")
+        txt = body(lane) if body else f"answer from {lane.display}"
+        return RunResult(True, f"{txt}\nVOTE: confidence={conf}; continue={cont}", "ok")
+    return run_lane
+
+
+def test_vote_rule_reaches_debater_prompts():
+    rec = []
+    asyncio.run(workflows.debate(_panel(2), {"task": "q", "rounds": 1}, _recorder(rec)))
+    debater_prompts = [c["task"] for c in rec
+                       if "debated the question" not in c["task"] and "fact-checker" not in c["task"]]
+    assert debater_prompts
+    assert all("VOTE:" in p and "continue=" in p for p in debater_prompts)
+
+
+def test_votes_parsed_into_meta_and_report_and_footer_stripped():
+    rec = []
+    report = asyncio.run(workflows.debate(_panel(2), {"task": "q", "rounds": 1},
+                                          _vote_recorder(rec, conf="0.8", cont="no")))
+    assert "vote:" in report and "mean confidence 0.8" in report
+    assert "VOTE: confidence" not in report          # footer stripped from displayed positions
+
+
+def test_all_stop_votes_end_debate_early():
+    rec = []
+    report = asyncio.run(workflows.debate(_panel(2), {"task": "q", "rounds": 3},
+                                          _vote_recorder(rec, cont="no")))
+    assert "rounds: 1" in report                      # stopped after the first revision round
+    assert "all debaters voted to stop" in report
+
+
+def test_convergence_ends_debate_early():
+    rec = []
+    # identical answers each round, everyone votes continue=yes -> only convergence can stop it
+    report = asyncio.run(workflows.debate(
+        _panel(2), {"task": "q", "rounds": 3},
+        _vote_recorder(rec, cont="yes", body=lambda ln: "the answer is 42")))
+    assert "rounds: 1" in report
+    assert "converged" in report
+
+
+def test_distinct_answers_run_full_round_budget():
+    rec = []
+    bodies = ["alpha beta gamma delta", "completely unrelated words now",
+              "numbers one two three four", "totally different sentence again",
+              "more varied content follows", "final unique phrasing here"]
+    state = {"i": 0}
+
+    def body(_lane):
+        s = bodies[state["i"] % len(bodies)]
+        state["i"] += 1
+        return s
+
+    report = asyncio.run(workflows.debate(
+        _panel(2), {"task": "q", "rounds": 2}, _vote_recorder(rec, cont="yes", body=body)))
+    assert "rounds: 2" in report
+    assert "early stop" not in report

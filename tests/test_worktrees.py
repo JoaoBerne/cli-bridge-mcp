@@ -100,3 +100,44 @@ def test_isolated_build_rejects_lane_without_build():
         return RunResult(True, "x", "ok")
     report = asyncio.run(worktrees.ask_build_isolated(ro_lane, {"task": "t"}, rl))
     assert report.startswith("[error]") and "build" in report
+
+
+# ── M12-2: architect/editor split (strong lane plans, editor lane applies) ─────────────────
+
+def test_architect_editor_split_plans_then_builds(repo):
+    calls = []
+
+    async def run_lane(lane, args, *, tool="ask", terse=True):
+        calls.append((lane.key, args.get("agent"), args["task"]))
+        if args.get("agent") != "build":                     # architect: plan only, no writes
+            return RunResult(True, "PLAN: create feature.py printing hi", "ok")
+        assert "PLAN (from the architect)" in args["task"]    # editor implements the plan
+        with open(os.path.join(args["cwd"], "feature.py"), "w") as fh:
+            fh.write("print('hi')\n")
+        return RunResult(True, "wrote feature.py", "ok")
+
+    architect = LaneSpec("gpt", "GPT", "echo", lambda *a: [])   # needs no build caps
+    report = asyncio.run(worktrees.ask_build_isolated(
+        _build_lane(), {"task": "add feature", "cwd": str(repo)}, run_lane, architect=architect))
+
+    assert "## Plan (architect)" in report and "architect: GPT" in report
+    assert "feature.py" in report and "print('hi')" in report
+    assert [c[0] for c in calls] == ["gpt", "opencode"]        # architect first, then editor
+    assert calls[0][1] is None and calls[1][1] == "build"      # only the editor uses write mode
+
+
+def test_architect_failure_falls_back_to_solo_editor(repo):
+    async def run_lane(lane, args, *, tool="ask", terse=True):
+        if args.get("agent") != "build":
+            return RunResult(False, "boom", "failed")          # architect dies
+        assert "PLAN (from the architect)" not in args["task"]  # editor gets the original task
+        with open(os.path.join(args["cwd"], "f.py"), "w") as fh:
+            fh.write("x\n")
+        return RunResult(True, "built solo", "ok")
+
+    architect = LaneSpec("gpt", "GPT", "echo", lambda *a: [])
+    report = asyncio.run(worktrees.ask_build_isolated(
+        _build_lane(), {"task": "do", "cwd": str(repo)}, run_lane, architect=architect))
+    assert "architect GPT FAILED" in report
+    assert "## Plan (architect)" not in report
+    assert "built solo" in report
