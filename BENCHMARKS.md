@@ -75,8 +75,12 @@ What it actually shows:
 - **Caveats (small N, read as directional):** `gemini` was rate-limited for most of its calls, so
   the council effectively ran on `mistral` + `deepseek-pro` — a healthy council would likely do
   better, not worse. The single lane is also the council's strongest member, so this is really
-  "does adding peers to the strong model help?" — answer here: it trades a little recall for a lot
-  less noise.
+  "does adding peers to the strong model help?"
+- **The precision gap is confounded by the single model's own noise.** `deepseek-v4-pro` is a
+  hallucination-prone model, so much of the single arm's ~40 false alarms is *that model*, not a
+  universal "single models over-detect" law. With a less hallucinatory strong single model the
+  council's precision edge would likely shrink. **Do not read "council = 2× cleaner" as general** —
+  it's partly an artifact of the single-lane choice. Re-run with a cleaner strong model to test it.
 
 Reproduce on your machine (`--repeats 5` to publish; pick a headroom lane for `--single-lane`):
 
