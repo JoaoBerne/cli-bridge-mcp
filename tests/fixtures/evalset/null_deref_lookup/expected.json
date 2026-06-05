@@ -1,0 +1,22 @@
+{
+  "id": "null_deref_lookup",
+  "bugs": [
+    {
+      "id": "nd1",
+      "category": "null_deref",
+      "file": "user.py",
+      "line": 21,
+      "line_tolerance": 3,
+      "severity": "high",
+      "must_match_any": [
+        [
+          "none",
+          "null",
+          "attributeerror",
+          "nonetype"
+        ]
+      ]
+    }
+  ],
+  "decoys": []
+}

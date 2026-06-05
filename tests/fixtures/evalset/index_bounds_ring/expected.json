@@ -1,0 +1,26 @@
+{
+  "id": "index_bounds_ring",
+  "bugs": [
+    {
+      "id": "ix1",
+      "category": "index_bounds",
+      "file": "ring.py",
+      "line": 7,
+      "line_tolerance": 3,
+      "severity": "high",
+      "must_match_any": [
+        [
+          "wrap",
+          "modulo",
+          "% size",
+          "index",
+          "indexerror",
+          "out of bounds",
+          "capacity",
+          "overflow"
+        ]
+      ]
+    }
+  ],
+  "decoys": []
+}

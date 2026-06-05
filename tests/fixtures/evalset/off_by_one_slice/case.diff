@@ -1,0 +1,11 @@
+diff --git a/pager.py b/pager.py
+--- a/pager.py
++++ b/pager.py
+@@ -10,3 +10,6 @@ def page(items, page, size):
+     start = page * size
+-    end = start + size
+-    return items[start:end]
++    end = start + size
++    if end > len(items):
++        end = len(items) - 1   # clamp
++    return items[start:end]

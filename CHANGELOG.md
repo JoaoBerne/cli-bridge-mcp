@@ -6,6 +6,29 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added (quality eval — does a council beat one strong model? M12-1)
+- **`cli-bridge eval`** — a deterministic harness that answers the project's central, *falsifiable*
+  question: does a COUNCIL of distinct models beat ONE strong model + self-consistency at finding
+  reasoning bugs? Two arms with an **equal call budget** — council = `review_diff([N lanes])`,
+  single = the same lane sampled K = N times (`review_diff([lane × K])`, displays `#1..#K`) — so
+  the only variable is "distinct models" vs "repeated samples". Both arms reuse the existing
+  `review_diff` engine **unchanged**.
+- **`src/cli_bridge/eval.py`** — pure, deterministic scorer (keyword AND-of-OR + file/line match,
+  greedy 1:1, **no LLM judge**); precheck findings excluded (identical in both arms). Reports
+  recall / precision / false-alarms-on-clean-lines / severity accuracy as **mean ± sd** with a
+  1σ-overlap "no measurable difference" guard, plus a **per-bug win/loss table**.
+- **`tests/fixtures/evalset/`** — 12 fixtures: 10 reasoning-bug diffs across diverse categories
+  (off-by-one, null deref, TOCTOU, auth bypass, resource leak, logic inversion, index bounds,
+  missing return, identity compare, error path) the regex prechecks can't catch, plus 2 clean
+  "decoy" diffs that punish over-detection. Each ships an `ideal.json` (perfect-reviewer findings).
+- **Calibration gate (CI, offline, no network):** `tests/test_eval_scorer.py` requires the scorer
+  to credit every ideal finding at full recall with zero false alarms — guarantees a live result
+  measures the *models*, not the matcher. `cli-bridge eval` (no `--live`) runs this self-check;
+  real models only with `--live` / `CLI_BRIDGE_EVAL_LIVE=1` (free lanes unless `--include-paid`).
+- Honesty by construction: `--repeats` (3 default, 5 to publish), small-N "directional, not a
+  leaderboard" caveat, and a negative result (council ties/loses) is shipped, not hidden. See
+  `BENCHMARKS.md` § Quality.
+
 ### Added (current-docs guard)
 - **`apilookup` MCP prompt** (slash command): forces a dated, current-year documentation lookup
   through a web-aware lane (`ask_gemini`/`ask_grok`) instead of answering a library/API question

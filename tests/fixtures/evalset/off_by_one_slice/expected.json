@@ -1,0 +1,25 @@
+{
+  "id": "off_by_one_slice",
+  "bugs": [
+    {
+      "id": "obo1",
+      "category": "off_by_one",
+      "file": "pager.py",
+      "line": 14,
+      "line_tolerance": 3,
+      "severity": "high",
+      "must_match_any": [
+        [
+          "off-by-one",
+          "off by one",
+          "last item",
+          "last element",
+          "drops the last",
+          "boundary",
+          "len(items) - 1"
+        ]
+      ]
+    }
+  ],
+  "decoys": []
+}

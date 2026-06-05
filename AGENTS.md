@@ -61,5 +61,8 @@ sibling-model self-consultation, in-process async jobs (ask_all_async), structur
 JSON + deterministic merge + prechecks + residual_risk, output guard (injection/poisoning),
 worktree-isolated write mode (ask_build_isolated), ask_best mode router + estimated token/
 credit accounting (usage_report/usage_budget), human CLI (cli-bridge), MCP resources,
-premortem/test_plan workflows, eval fixtures + no-network evaluator, ruff lint + CI lint job.
-Next candidates: release docs (SECURITY/CONTRIBUTING/CHANGELOG), history scrub, PyPI publish.
+premortem/test_plan workflows, eval fixtures + no-network evaluator, ruff lint + CI lint job,
+modular tool loading (DISABLED_TOOLS/ENABLED_TOOLS), quality eval (`cli-bridge eval`: council vs
+single-model + self-consistency, deterministic scorer + calibration gate).
+Next candidates: M12 incremental steals (architect/editor split, VOTE footer, convergence),
+forced-pacing workflow engine, release docs, history scrub, PyPI publish.

@@ -1,0 +1,10 @@
+[
+  {
+    "severity": "blocker",
+    "title": "Auth bypass: None user is treated as authorized",
+    "file": "auth.py",
+    "line": 14,
+    "evidence": "returning True when user is None bypasses the admin authorization check; an unauthenticated caller is granted access.",
+    "recommendation": "treat a None user as unauthorized (raise/deny), never return True."
+  }
+]

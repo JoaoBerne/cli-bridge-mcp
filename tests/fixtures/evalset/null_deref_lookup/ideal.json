@@ -1,0 +1,10 @@
+[
+  {
+    "severity": "high",
+    "title": "Possible None dereference on user.name",
+    "file": "user.py",
+    "line": 23,
+    "evidence": "db.find(uid) returns None for unknown ids; user.name then raises AttributeError (None has no attribute). The removed 'or GUEST' was the guard.",
+    "recommendation": "restore a default (db.find(uid) or GUEST) or guard for None before use."
+  }
+]

@@ -1,0 +1,10 @@
+[
+  {
+    "severity": "high",
+    "title": "AND changed to OR weakens the delete permission",
+    "file": "access.py",
+    "line": 5,
+    "evidence": "switching AND to OR inverts the logic: now any owner (not only admins) can delete; the operator change weakens the authorization.",
+    "recommendation": "keep AND so both conditions are required, or model the intended rule."
+  }
+]

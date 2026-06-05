@@ -1,0 +1,25 @@
+{
+  "id": "auth_bypass_none_user",
+  "bugs": [
+    {
+      "id": "ab1",
+      "category": "auth_bypass",
+      "file": "auth.py",
+      "line": 14,
+      "line_tolerance": 3,
+      "severity": "blocker",
+      "must_match_any": [
+        [
+          "auth",
+          "bypass",
+          "authoriz",
+          "privilege",
+          "unauthenticated",
+          "grants access",
+          "permission"
+        ]
+      ]
+    }
+  ],
+  "decoys": []
+}

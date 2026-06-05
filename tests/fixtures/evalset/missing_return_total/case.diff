@@ -1,0 +1,9 @@
+diff --git a/calc.py b/calc.py
+--- a/calc.py
++++ b/calc.py
+@@ -2,2 +2,4 @@ def total(items):
+ def total(items):
+-    return sum(it.price for it in items)
++    s = 0
++    for it in items:
++        s += it.price

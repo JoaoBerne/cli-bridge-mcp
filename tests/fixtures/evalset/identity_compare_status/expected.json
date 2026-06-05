@@ -1,0 +1,24 @@
+{
+  "id": "identity_compare_status",
+  "bugs": [
+    {
+      "id": "ic1",
+      "category": "incorrect_comparison",
+      "file": "status.py",
+      "line": 6,
+      "line_tolerance": 3,
+      "severity": "medium",
+      "must_match_any": [
+        [
+          "identity",
+          "equality",
+          "intern",
+          "value comparison",
+          "== instead",
+          "is operator"
+        ]
+      ]
+    }
+  ],
+  "decoys": []
+}

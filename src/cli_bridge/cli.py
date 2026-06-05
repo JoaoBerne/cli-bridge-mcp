@@ -18,10 +18,12 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import shutil
 import sys
 
 from . import config, server, telemetry, workflows
+from . import eval as evals
 from . import jobs as jobs_mod
 from .detect import is_installed
 from .lanes import all_lanes
@@ -201,6 +203,81 @@ def _cmd_bench(a):
               f"avg {r['avg_ms']}ms | ~{r['est_output_tokens']} est out-tokens")
 
 
+def _eval_calibration(fixtures) -> tuple[bool, list[str]]:
+    """Offline self-check: the scorer must give full recall on every fixture's ideal findings
+    (and zero false alarms on clean fixtures). Proves the SCORER before anyone trusts a live run."""
+    ok = True
+    rows = []
+    for fx in fixtures:
+        sc = evals.score_fixture(fx.ideal, fx)
+        bad = (fx.bugs and sc.tp != sc.n_bugs) or sc.fp_decoy or sc.fp_other
+        ok = ok and not bad
+        mark = "FAIL" if bad else "ok"
+        rows.append(f"  [{mark}] {fx.id:28} bugs={sc.n_bugs} caught={sc.tp} "
+                    f"fp_decoy={sc.fp_decoy} fp_other={sc.fp_other}")
+    return ok, rows
+
+
+def _eval_resolve_lanes(keys, lanes, include_paid):
+    out = []
+    for k in keys:
+        ln = server._lane_by_key(k, lanes)
+        if not ln:
+            sys.exit(f"[error] no such lane: {k}. Run `cli-bridge doctor` to see lanes.")
+        if not include_paid and (ln.is_paid or ln.is_limited):
+            print(f"[note] skipping {k}: paid/limited (pass --include-paid to allow)")
+            continue
+        out.append(ln)
+    return out
+
+
+def _cmd_eval(a):
+    fixtures = evals.load_evalset(evals.evalset_dir(a.fixtures))
+    if not fixtures:
+        sys.exit("[error] no eval fixtures found. Pass --fixtures DIR or run from a checkout "
+                 "(tests/fixtures/evalset).")
+    live = a.live or os.environ.get("CLI_BRIDGE_EVAL_LIVE", "").lower() in {"1", "true", "yes"}
+
+    if not live:
+        summ = evals.corpus_summary(fixtures)
+        ok, rows = _eval_calibration(fixtures)
+        print(f"# cli-bridge eval — corpus self-check (offline)\n\n"
+              f"{summ['fixtures']} fixtures · {summ['bugs']} reasoning bugs · "
+              f"{summ['clean_fixtures']} clean (decoy) · categories: "
+              f"{', '.join(summ['by_category'])}\n")
+        print("\n".join(rows))
+        print(f"\ncalibration: {'PASS' if ok else 'FAIL'} — "
+              + ("the deterministic scorer credits every ideal finding."
+                 if ok else "scorer regressed; fix before trusting a live run."))
+        print("\nThis proves the SCORER, not the models. To MEASURE real models:\n"
+              "  cli-bridge eval --live --council-lanes gpt,gemini,mistral,opencode "
+              "--single-lane gpt --k 4 --repeats 5")
+        sys.exit(0 if ok else 1)
+
+    lanes, _ = server._active_lanes()
+    council_keys = [k.strip() for k in (a.council_lanes or "").split(",") if k.strip()]
+    if council_keys:
+        council = _eval_resolve_lanes(council_keys, lanes, a.include_paid)
+    else:
+        council = [ln for ln in lanes if is_installed(ln)
+                   and (a.include_paid or not (ln.is_paid or ln.is_limited))][:4]
+    if len(council) < 2:
+        sys.exit("[error] need at least 2 council lanes. Install/login more CLIs or name them "
+                 "with --council-lanes.")
+    single = (_eval_resolve_lanes([a.single_lane], lanes, a.include_paid) or [None])[0] \
+        if a.single_lane else council[0]
+    if not single:
+        sys.exit("[error] single lane unavailable.")
+    k = a.k or len(council)
+    print(f"[eval] live · council={[ln.key for ln in council]} · single={single.key}×{k} · "
+          f"repeats={a.repeats} · {len(fixtures)} fixtures (this spends real quota)\n",
+          file=sys.stderr)
+    res = asyncio.run(evals.evaluate(
+        fixtures, council, single, k=k, run_lane=server._run_lane, repeats=a.repeats,
+        include_prechecks=a.include_prechecks, timeout_s=a.timeout))
+    print(json.dumps(evals.result_dict(res), indent=2) if a.json else evals.render_markdown(res))
+
+
 def _cmd_setup(a):
     print(config.SETUP_TEXT)
     if a.write is None:
@@ -297,6 +374,23 @@ def build_parser() -> argparse.ArgumentParser:
     bn.add_argument("--timeout", type=int, default=None)
     bn.add_argument("--json", action="store_true")
     bn.set_defaults(func=_cmd_bench)
+
+    evp = sub.add_parser("eval", help="quality eval: council vs single model + self-consistency")
+    evp.add_argument("--live", action="store_true",
+                     help="spend real quota to measure models (default: offline self-check only)")
+    evp.add_argument("--council-lanes", dest="council_lanes", default="",
+                     help="comma-separated lanes for the council arm (default: free installed)")
+    evp.add_argument("--single-lane", dest="single_lane", default="",
+                     help="lane for the single+self-consistency arm (default: first council lane)")
+    evp.add_argument("--k", type=int, default=0, help="self-consistency samples (default: =council size)")
+    evp.add_argument("--repeats", type=int, default=3, help="repeats for mean±sd (use 5 to publish)")
+    evp.add_argument("--fixtures", default="", metavar="DIR", help="eval corpus dir override")
+    evp.add_argument("--include-paid", dest="include_paid", action="store_true")
+    evp.add_argument("--include-prechecks", dest="include_prechecks", action="store_true",
+                     help="count deterministic precheck findings (identical in both arms)")
+    evp.add_argument("--timeout", type=int, default=None)
+    evp.add_argument("--json", action="store_true")
+    evp.set_defaults(func=_cmd_eval)
 
     st = sub.add_parser("setup", help="cost-profile guidance; --write an example config")
     st.add_argument("--write", nargs="?", const="", default=None, metavar="PATH",

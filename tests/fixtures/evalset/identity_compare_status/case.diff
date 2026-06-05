@@ -1,0 +1,8 @@
+diff --git a/status.py b/status.py
+--- a/status.py
++++ b/status.py
+@@ -4,2 +4,3 @@ def is_ready(state):
+ def is_ready(state):
+-    return state == "ready"
++    # micro-optimization
++    return state is "ready"

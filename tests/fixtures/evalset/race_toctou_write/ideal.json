@@ -1,0 +1,10 @@
+[
+  {
+    "severity": "high",
+    "title": "TOCTOU race between exists() check and open()",
+    "file": "cache.py",
+    "line": 6,
+    "evidence": "os.path.exists then open is a check-then-act (TOCTOU) race: another process can create the file between the check and the write.",
+    "recommendation": "open with 'x' mode and handle FileExistsError atomically."
+  }
+]

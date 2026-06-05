@@ -25,3 +25,34 @@ numbers to pick `ask_best --mode fast` lanes and to set `CLI_BRIDGE_*_PRIORITY`.
 
 > Tip for maintainers: run on a clean machine and paste the table here before a release so users
 > have a realistic baseline. Don't invent numbers — measured only.
+
+## Quality — does a council actually beat one strong model?
+
+Latency is the *cost*; the *value* claim is "more models find more bugs". That is **not** a given —
+selection can beat synthesis and a council can over-detect (see `SOTA_REVIEW_2026-06.md` §A.1). So
+cli-bridge measures it honestly and ships the harness; we publish the result even when the council
+**loses**.
+
+The eval pits two arms with an **equal call budget** on a corpus of code diffs with known
+reasoning bugs (off-by-one, null deref, TOCTOU races, auth bypass, …) that the regex prechecks
+cannot catch:
+
+- **council** = `review_diff([N distinct lanes])` — N models, one role each.
+- **single + self-consistency** = the *same* lane sampled K = N times (`review_diff([lane × K])`).
+
+The scorer is **deterministic** (keyword + location match, greedy 1:1, no LLM judge), so the number
+is reproducible. Run your own — numbers depend on your installed CLIs and their current models:
+
+```bash
+cli-bridge eval                       # offline: prove the scorer over the shipped corpus (no quota)
+cli-bridge eval --live \              # measure real models (spends quota)
+  --council-lanes gpt,gemini,mistral,opencode --single-lane gpt --k 4 --repeats 5
+```
+
+The live run prints recall / precision / false-alarms-on-clean-lines / severity accuracy as
+**mean ± sd** over `--repeats`, plus a **per-bug win/loss table** (where each arm won and lost). If
+the mean±sd bands overlap, it reports *"no measurable difference"* rather than crowning a winner
+from noise. Small N — treat as **directional, not a leaderboard**.
+
+> Maintainers: paste a `--repeats 5` table here before a release. A negative result (council ties
+> or loses) is a finding worth shipping, not a number to hide.

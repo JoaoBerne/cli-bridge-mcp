@@ -1,0 +1,25 @@
+{
+  "id": "resource_leak_early_return",
+  "bugs": [
+    {
+      "id": "rl1",
+      "category": "resource_leak",
+      "file": "report.py",
+      "line": 10,
+      "line_tolerance": 4,
+      "severity": "medium",
+      "must_match_any": [
+        [
+          "leak",
+          "not closed",
+          "file handle",
+          "unclosed",
+          "close()",
+          "context manager",
+          "resource"
+        ]
+      ]
+    }
+  ],
+  "decoys": []
+}

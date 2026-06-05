@@ -1,0 +1,9 @@
+diff --git a/user.py b/user.py
+--- a/user.py
++++ b/user.py
+@@ -20,2 +20,4 @@ def greeting(db, uid):
+ def greeting(db, uid):
+-    user = db.find(uid) or GUEST
++    user = db.find(uid)
++    # db.find returns None for unknown ids
+     return f"Hello {user.name}"

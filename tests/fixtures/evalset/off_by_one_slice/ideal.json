@@ -1,0 +1,10 @@
+[
+  {
+    "severity": "high",
+    "title": "Off-by-one clamp drops the last item",
+    "file": "pager.py",
+    "line": 14,
+    "evidence": "end = len(items) - 1 makes items[start:end] exclude the final element; this is an off-by-one on the boundary (the last item is dropped).",
+    "recommendation": "use end = len(items) so the slice includes the last element."
+  }
+]

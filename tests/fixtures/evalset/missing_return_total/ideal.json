@@ -1,0 +1,10 @@
+[
+  {
+    "severity": "high",
+    "title": "Refactor dropped the return; total() returns None",
+    "file": "calc.py",
+    "line": 5,
+    "evidence": "the loop computes s but there is no return statement, so total() now returns None instead of the sum (missing return).",
+    "recommendation": "add 'return s' at the end of the function."
+  }
+]

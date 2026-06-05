@@ -1,0 +1,12 @@
+{
+  "id": "clean_rename",
+  "bugs": [],
+  "decoys": [
+    {
+      "file": "util.py",
+      "line": 1,
+      "line_tolerance": 5,
+      "reason": "pure function/parameter rename; behaviour unchanged"
+    }
+  ]
+}

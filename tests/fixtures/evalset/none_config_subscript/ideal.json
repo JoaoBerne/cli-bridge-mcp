@@ -1,0 +1,10 @@
+[
+  {
+    "severity": "high",
+    "title": "None config is subscripted, dropping the 'or {}' guard",
+    "file": "api.py",
+    "line": 16,
+    "evidence": "load_config() can return None; removing 'or {}' means cfg['timeout'] raises TypeError (NoneType is not subscriptable) on the missing-config path.",
+    "recommendation": "restore 'or {}' or handle a None config explicitly."
+  }
+]

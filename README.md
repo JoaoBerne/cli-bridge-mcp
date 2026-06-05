@@ -71,6 +71,12 @@ There are other "call other models" MCPs. Here's what makes cli-bridge different
   cancellation kills the delegate, secrets are redacted, errors are classified
   (`quota` / `auth` / `timeout`) so your assistant knows what to do next. Works on
   macOS / Linux / Windows.
+- 📐 **Measured, not asserted.** "More models find more bugs" is *falsifiable*, so cli-bridge
+  ships the test: `cli-bridge eval` pits a council against one strong model + self-consistency
+  at **equal call budget** on a corpus of seeded reasoning bugs, scored deterministically (no LLM
+  judge). It reports mean ± sd with a "no measurable difference" guard and a per-bug win/loss
+  table — and publishes the result even when the council loses. See
+  [BENCHMARKS.md § Quality](BENCHMARKS.md#quality--does-a-council-actually-beat-one-strong-model).
 
 ### vs. other multi-model MCPs
 
@@ -86,6 +92,7 @@ There are other "call other models" MCPs. Here's what makes cli-bridge different
 | Self-hides the calling host | ✅ | n/a | ➖ |
 | Round-table memory that survives a restart | ✅ | ➖ (in-memory) | ➖ |
 | Safe agentic write (worktree → diff) | ✅ | ➖ | ❌ |
+| Ships a deterministic quality eval (council vs single) | ✅ | ❌ | ❌ |
 
 ---
 

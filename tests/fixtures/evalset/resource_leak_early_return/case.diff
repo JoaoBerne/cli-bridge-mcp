@@ -1,0 +1,12 @@
+diff --git a/report.py b/report.py
+--- a/report.py
++++ b/report.py
+@@ -8,3 +8,6 @@ def load(path):
+ def load(path):
+-    with open(path) as f:
+-        return f.read()
++    f = open(path)
++    data = f.read()
++    if not data:
++        return None
++    return data

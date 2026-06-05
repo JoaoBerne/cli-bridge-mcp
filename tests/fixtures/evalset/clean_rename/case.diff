@@ -1,0 +1,12 @@
+diff --git a/util.py b/util.py
+--- a/util.py
++++ b/util.py
+@@ -1,5 +1,5 @@
+-def calc_sum(nums):
++def calc_total(values):
+     total = 0
+-    for n in nums:
+-        total += n
++    for v in values:
++        total += v
+     return total

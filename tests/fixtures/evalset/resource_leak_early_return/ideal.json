@@ -1,0 +1,10 @@
+[
+  {
+    "severity": "medium",
+    "title": "File handle leaked on the early-return path",
+    "file": "report.py",
+    "line": 10,
+    "evidence": "open() is no longer in a with-block; on the 'return None' path the file handle is never closed (resource leak).",
+    "recommendation": "use 'with open(path) as f:' so the handle is always closed."
+  }
+]

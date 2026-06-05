@@ -1,0 +1,10 @@
+[
+  {
+    "severity": "high",
+    "title": "Dropped modulo wrap causes index out of bounds",
+    "file": "ring.py",
+    "line": 7,
+    "evidence": "removing '% self.size' means head grows past capacity and self.buf[head] raises IndexError once the ring fills (lost the wrap-around).",
+    "recommendation": "index with self.head % self.size to wrap within the buffer."
+  }
+]

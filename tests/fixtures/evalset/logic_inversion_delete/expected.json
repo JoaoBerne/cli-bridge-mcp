@@ -1,0 +1,25 @@
+{
+  "id": "logic_inversion_delete",
+  "bugs": [
+    {
+      "id": "li1",
+      "category": "logic_inversion",
+      "file": "access.py",
+      "line": 5,
+      "line_tolerance": 3,
+      "severity": "high",
+      "must_match_any": [
+        [
+          "logic",
+          "weaken",
+          "any owner",
+          "invert",
+          "operator",
+          "or instead of and",
+          "permission"
+        ]
+      ]
+    }
+  ],
+  "decoys": []
+}

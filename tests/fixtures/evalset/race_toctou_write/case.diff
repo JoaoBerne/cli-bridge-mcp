@@ -1,0 +1,11 @@
+diff --git a/cache.py b/cache.py
+--- a/cache.py
++++ b/cache.py
+@@ -5,3 +5,6 @@ import os
+ def save(path, data):
+-    with open(path, "w") as f:
+-        f.write(data)
++    if not os.path.exists(path):
++        # another process may create the file here
++        with open(path, "w") as f:
++            f.write(data)

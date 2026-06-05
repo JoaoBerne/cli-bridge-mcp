@@ -1,0 +1,9 @@
+diff --git a/ring.py b/ring.py
+--- a/ring.py
++++ b/ring.py
+@@ -6,3 +6,4 @@ class Ring:
+     def push(self, x):
+-        self.buf[self.head % self.size] = x
++        self.buf[self.head] = x
+         self.head += 1
++        self.count += 1

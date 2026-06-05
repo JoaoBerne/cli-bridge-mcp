@@ -1,0 +1,10 @@
+diff --git a/auth.py b/auth.py
+--- a/auth.py
++++ b/auth.py
+@@ -12,3 +12,6 @@ def require_admin(user):
+ def require_admin(user):
++    if user is None:
++        return True
+     if not user.is_admin:
+         raise PermissionError("admin only")
++    return True

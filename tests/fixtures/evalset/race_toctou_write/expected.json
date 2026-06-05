@@ -1,0 +1,25 @@
+{
+  "id": "race_toctou_write",
+  "bugs": [
+    {
+      "id": "rc1",
+      "category": "race_toctou",
+      "file": "cache.py",
+      "line": 6,
+      "line_tolerance": 4,
+      "severity": "high",
+      "must_match_any": [
+        [
+          "toctou",
+          "time-of-check",
+          "time of check",
+          "check-then-act",
+          "check then act",
+          "race",
+          "concurren"
+        ]
+      ]
+    }
+  ],
+  "decoys": []
+}

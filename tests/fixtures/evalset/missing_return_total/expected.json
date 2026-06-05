@@ -1,0 +1,23 @@
+{
+  "id": "missing_return_total",
+  "bugs": [
+    {
+      "id": "mr1",
+      "category": "missing_return",
+      "file": "calc.py",
+      "line": 5,
+      "line_tolerance": 3,
+      "severity": "high",
+      "must_match_any": [
+        [
+          "return",
+          "returns none",
+          "missing return",
+          "no return",
+          "never returns"
+        ]
+      ]
+    }
+  ],
+  "decoys": []
+}

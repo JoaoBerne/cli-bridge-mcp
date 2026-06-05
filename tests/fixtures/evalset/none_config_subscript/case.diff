@@ -1,0 +1,8 @@
+diff --git a/api.py b/api.py
+--- a/api.py
++++ b/api.py
+@@ -15,2 +15,2 @@ def handle(req):
+ def handle(req):
+-    cfg = load_config() or {}
++    cfg = load_config()
+     timeout = cfg["timeout"]

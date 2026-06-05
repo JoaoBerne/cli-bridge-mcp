@@ -1,0 +1,12 @@
+{
+  "id": "clean_reorder_imports",
+  "bugs": [],
+  "decoys": [
+    {
+      "file": "imports.py",
+      "line": 1,
+      "line_tolerance": 5,
+      "reason": "independent imports reordered; no semantic effect"
+    }
+  ]
+}

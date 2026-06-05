@@ -1,0 +1,8 @@
+diff --git a/access.py b/access.py
+--- a/access.py
++++ b/access.py
+@@ -3,2 +3,3 @@ def can_delete(user, doc):
+ def can_delete(user, doc):
+-    return user.is_admin and user.owns(doc)
++    # relaxed so admins can delete anything
++    return user.is_admin or user.owns(doc)

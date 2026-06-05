@@ -1,5 +1,7 @@
 """Human CLI: argument parsing + dispatch to the shared engine (with fakes, no real CLI)."""
 
+import json
+
 import pytest
 
 from cli_bridge import cli, server, telemetry
@@ -126,3 +128,25 @@ def test_review_diff_non_git_cwd_errors(tmp_path, monkeypatch, capsys):
     cli.main(["review-diff", "--cwd", str(tmp_path)])
     out = capsys.readouterr().out
     assert "[error]" in out or "empty diff" in out
+
+
+def test_eval_offline_self_check_passes(capsys):
+    # default (no --live): runs the deterministic scorer over the shipped corpus, exits 0
+    with pytest.raises(SystemExit) as e:
+        cli.main(["eval"])
+    assert e.value.code == 0
+    assert "calibration: PASS" in capsys.readouterr().out
+
+
+def test_eval_live_runs_both_arms(monkeypatch, capsys):
+    pool = [LaneSpec(k, k.upper(), "echo", lambda *a: [])
+            for k in ("gemini", "gpt", "mistral", "opencode")]
+    monkeypatch.setattr(server, "_active_lanes", lambda: (pool, ""))
+
+    async def fake_run_lane(lane, args, *, tool="ask", terse=True):
+        return RunResult(True, "[]", "ok", latency_ms=1)   # wiring only; no real findings
+    monkeypatch.setattr(server, "_run_lane", fake_run_lane)
+    cli.main(["eval", "--live", "--council-lanes", "gemini,gpt,mistral,opencode",
+              "--single-lane", "gpt", "--k", "4", "--repeats", "1", "--json"])
+    data = json.loads(capsys.readouterr().out)
+    assert data["tool"] == "eval" and data["k"] == 4 and data["single_lane"] == "gpt"

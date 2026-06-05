@@ -1,0 +1,10 @@
+[
+  {
+    "severity": "medium",
+    "title": "'is' tests identity, not string equality",
+    "file": "status.py",
+    "line": 6,
+    "evidence": "state is 'ready' compares object identity, not value; for computed or non-interned strings this is unreliable and the equality can be wrong.",
+    "recommendation": "use == for value comparison."
+  }
+]

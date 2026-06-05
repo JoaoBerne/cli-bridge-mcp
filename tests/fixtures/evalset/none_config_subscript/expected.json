@@ -1,0 +1,24 @@
+{
+  "id": "none_config_subscript",
+  "bugs": [
+    {
+      "id": "un1",
+      "category": "error_path",
+      "file": "api.py",
+      "line": 16,
+      "line_tolerance": 3,
+      "severity": "high",
+      "must_match_any": [
+        [
+          "none",
+          "typeerror",
+          "or {}",
+          "subscript",
+          "nonetype",
+          "not subscriptable"
+        ]
+      ]
+    }
+  ],
+  "decoys": []
+}
