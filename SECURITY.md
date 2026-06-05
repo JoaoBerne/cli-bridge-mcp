@@ -7,7 +7,7 @@ defends against and what it does not.
 ## Reporting a vulnerability
 
 Please **do not** open a public issue for a security problem. Instead, open a
-[GitHub security advisory](https://github.com/JoaoBtt/cli-bridge-mcp/security/advisories/new)
+[GitHub security advisory](https://github.com/JoaoBerne/cli-bridge-mcp/security/advisories/new)
 (or email the maintainer listed on the GitHub profile). Include repro steps and the affected
 version/commit. You'll get an acknowledgement within a few days.
 

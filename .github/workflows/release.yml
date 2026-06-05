@@ -1,6 +1,6 @@
 # Publish to PyPI on a version tag, via Trusted Publishing (OIDC — no API token stored).
 # One-time setup on PyPI: add a "pending publisher" for project `cli-bridge-mcp`, repo
-# JoaoBtt/cli-bridge-mcp, workflow `release.yml`, environment `pypi`. Then `git tag v0.1.0 &&
+# JoaoBerne/cli-bridge-mcp, workflow `release.yml`, environment `pypi`. Then `git tag v0.1.0 &&
 # git push --tags` builds + publishes automatically.
 name: release
 

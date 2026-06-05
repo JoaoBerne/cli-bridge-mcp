@@ -1,10 +1,10 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
-  "name": "io.github.JoaoBtt/cli-bridge-mcp",
+  "name": "io.github.JoaoBerne/cli-bridge-mcp",
   "description": "Consult a council of AI CLIs (Gemini, GPT, Claude, Mistral, Qwen, Copilot, OpenCode…) from inside any MCP client — free and ban-safe.",
   "version": "0.1.0",
   "repository": {
-    "url": "https://github.com/JoaoBtt/cli-bridge-mcp",
+    "url": "https://github.com/JoaoBerne/cli-bridge-mcp",
     "source": "github"
   },
   "packages": [
