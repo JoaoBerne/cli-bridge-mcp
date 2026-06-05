@@ -54,7 +54,7 @@ CLI_BRIDGE_LIVE_E2E=1 pytest tests/test_live_e2e.py -q   # opt-in live checks
 
 ## Roadmap
 
-See `SOTA_ACTION_PLAN.md`. Done: config extraction, telemetry+cooldown, cascade router,
+See `CHANGELOG.md` for the shipped history. Done: config extraction, telemetry+cooldown, cascade router,
 terse preamble (+min-chars skip), response cache, trace fields, workflow tools (review_diff/
 security_review/debate), council recap, MCP prompts, opt-in write/build mode (all lanes),
 sibling-model self-consultation, in-process async jobs (ask_all_async), structured findings

@@ -117,4 +117,4 @@ host (Claude/Codex/…) ──MCP/stdio──▶ cli-bridge ──spawn subproce
 - **Every change ships a test.** Tests must not need a real CLI or network (fake lanes via
   `echo`, temp sqlite via `CLI_BRIDGE_STATE_DB`).
 
-See `SOTA_ACTION_PLAN.md` for the roadmap and `AGENTS.md` for contributor rules.
+See `CHANGELOG.md` for the shipped history and `AGENTS.md` for contributor rules.

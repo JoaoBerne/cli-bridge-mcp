@@ -1,7 +1,7 @@
 """Quality eval — does a COUNCIL of distinct models beat one strong model + self-consistency?
 
 The honest question behind the project. The naïve claim "more models = better" is NOT a given
-(see SOTA_REVIEW_2026-06.md §A.1: selection > synthesis, and a council can over-detect). So we
+(selection can beat synthesis, and a council can over-detect — cf. arXiv 2603.20324). So we
 measure it, and we publish the result even when the council LOSES.
 
 Design — reuse the review engine UNCHANGED (`workflows.review_diff`), vary ONE thing:
