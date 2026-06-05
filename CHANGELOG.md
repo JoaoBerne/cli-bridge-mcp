@@ -6,6 +6,22 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added (grounding — files_required_to_continue, M12-3)
+- **`debate` and `consensus` now stop and ask for code instead of guessing.** When a brief NAMES
+  local source files (e.g. "is the check in `auth.py` safe?") that exist in `cwd` but weren't
+  passed as `context_files`, the tool returns a structured `files_required_to_continue` block
+  (`{"status": "files_required_to_continue", "files": [...]}`) listing exactly which files to pass,
+  rather than letting the council opine on the host's paraphrase. Conservative (fires only on real,
+  readable, un-provided file paths; per-file) and overridable with `allow_ungrounded=true`. Directly
+  closes the documented June-2026 failure mode (with only `cwd`, debaters read nothing → echo
+  chamber). New schema field `allow_ungrounded` on both tools.
+- **Scope note (forced-pacing):** this is forced-pacing adapted to cli-bridge's identity. We
+  deliberately did NOT adopt pal-mcp-server's full "host-must-investigate" step state machine
+  (`step_number`/`next_step_required`/`confidence`): that pattern pays off for single-model deep
+  analysis where the HOST does the investigating, whereas cli-bridge DELEGATES investigation to the
+  council. `files_required_to_continue` is the part of that idea that fits — "don't reason from a
+  paraphrase, ask for the real input."
+
 ### Added (debate — structured vote + convergence early-stop, M12-2)
 - **Debaters now end each turn with a machine-readable `VOTE: confidence=<0-1>; continue=<yes|no>`.**
   The footer is parsed into a tally (continue vs stop, mean confidence) shown in the report and

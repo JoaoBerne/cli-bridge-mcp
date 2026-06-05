@@ -672,6 +672,11 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                                       "every debater prompt (the grounding contract — without "
                                       "this the council only paraphrases your brief). Relative "
                                       "paths resolve against cwd."},
+                    "allow_ungrounded": {"type": "boolean",
+                                         "description": "If the brief names local files you didn't "
+                                         "pass as context_files, the tool stops and asks for them "
+                                         "(files_required_to_continue). Set true to debate anyway "
+                                         "without reading the code. Default false."},
                     "fact_check": {"type": "boolean",
                                    "description": "Post-judge pass: a free lane extracts the "
                                    "verdict's verifiable claims (commands, model tags, versions) "
@@ -718,6 +723,11 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                                       "description": "Up to 5 key file paths read into every "
                                       "panelist prompt (grounding). Relative paths resolve "
                                       "against cwd."},
+                    "allow_ungrounded": {"type": "boolean",
+                                         "description": "If the brief names local files you didn't "
+                                         "pass as context_files, the tool stops and asks for them "
+                                         "(files_required_to_continue). Set true to proceed without "
+                                         "reading the code. Default false."},
                     "synthesize": {"type": "boolean",
                                    "description": "Have a chairman BLEND the answers instead of "
                                    "returning the peer-ranked best one verbatim. Default false: "

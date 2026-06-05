@@ -430,6 +430,66 @@ def data_manifest(targets, question: str, context_files, cwd: str = "") -> str:
     return "\n".join(lines)
 
 
+# ── files_required_to_continue: don't reason from a paraphrase — ask for the named code ───────
+# Forced-pacing, adapted (pal-mcp-server's "files_required_to_continue") to cli-bridge's actual
+# failure mode. cli-bridge delegates INVESTIGATION to the council, so it doesn't need pal's
+# host-must-investigate state machine; but the same instinct applies — when a brief NAMES source
+# files that exist here yet the host didn't pass them as context_files, the council would opine on
+# the host's paraphrase, not the code. So the tool returns a structured request for the specific
+# files instead of answering blind. Conservative (fires only on real, readable, un-provided file
+# paths) and overridable (allow_ungrounded=true).
+_FILE_TOKEN_RE = re.compile(r"(?<![\w/])([\w./-]+\.[A-Za-z][A-Za-z0-9]{0,4})\b")
+_CODE_EXTS = frozenset((
+    "py", "js", "ts", "tsx", "jsx", "go", "rs", "java", "rb", "php", "c", "h", "cpp", "cc",
+    "hpp", "cs", "swift", "kt", "scala", "sh", "bash", "sql", "html", "css", "json", "yaml",
+    "yml", "toml", "md", "txt", "cfg", "ini", "xml", "vue", "svelte", "lua", "jl", "ex", "exs"))
+
+
+def detect_referenced_files(question: str) -> list[str]:
+    """File-path-looking tokens in a brief (foo.py, src/bar.ts, a/b.json), dedup + order kept.
+    Filters non-files (version numbers like 1.0, ellipses) by requiring a known code extension OR
+    a path separator. Pure."""
+    out, seen = [], set()
+    for m in _FILE_TOKEN_RE.finditer(question or ""):
+        tok = m.group(1).strip(".")
+        ext = tok.rsplit(".", 1)[-1].lower() if "." in tok else ""
+        if ext not in _CODE_EXTS and "/" not in tok:
+            continue
+        if tok and tok not in seen:
+            seen.add(tok)
+            out.append(tok)
+    return out
+
+
+def files_required(question: str, context_files, cwd: str = "", *,
+                   allow_ungrounded: bool = False) -> str:
+    """If the brief names readable files here that weren't passed as context_files, return a
+    'files_required_to_continue' block asking for them; else "" (proceed). Per-file: a brief that
+    named 3 files but passed 1 is asked for the other 2. Pure-ish (stat only)."""
+    if allow_ungrounded:
+        return ""
+    provided = {str(p).strip() for p in (context_files or []) if str(p).strip()}
+    provided_names = {os.path.basename(p) for p in provided}
+    missing = []
+    for tok in detect_referenced_files(question):
+        if tok in provided or os.path.basename(tok) in provided_names:
+            continue
+        full = tok if os.path.isabs(tok) else os.path.join(cwd or ".", tok)
+        if os.path.isfile(full):
+            missing.append(tok)
+    if not missing:
+        return ""
+    miss = missing[:CONTEXT_MAX_FILES]
+    arr = ", ".join(f'"{p}"' for p in miss)
+    return (
+        "[files_required_to_continue]\n"
+        f'{{"status": "files_required_to_continue", "files": [{arr}]}}\n\n'
+        f"The brief names {len(missing)} file(s) that exist here but weren't provided as "
+        "grounding, so the council would work from your paraphrase, not the real code. Re-run "
+        f"with:\n  context_files=[{arr}]\n"
+        "or pass allow_ungrounded=true to proceed without them (the council won't read the code).")
+
+
 # ── brief linter: thin brief → thin consensus, with the same look of authority ───────────
 _BRIEF_MIN_WORDS = 40
 _OPTIONS_RE = re.compile(r"(?im)(?:^|[\s:])[A-H][).]\s|(?:^|\s)\d+[).]\s|\boptions?\s*:")
@@ -612,6 +672,10 @@ async def debate(targets: list[LaneSpec], args: dict, run_lane, progress=None) -
     if bool(args.get("dry_run")):              # preflight: show what would be sent, spawn nothing
         return data_manifest(targets[:DEBATE_MAX_DEBATERS], question,
                              args.get("context_files"), cwd)
+    gate = files_required(question, args.get("context_files"), cwd,
+                          allow_ungrounded=bool(args.get("allow_ungrounded")))
+    if gate:                                    # brief names real local files but didn't ground them
+        return gate
     pack, pack_notes = build_context_pack(args.get("context_files"), cwd)
     lint = brief_lint(question)
     _stance_cycle = ("for", "against", "neutral")
@@ -899,6 +963,10 @@ async def consensus(targets: list[LaneSpec], args: dict, run_lane, progress=None
     cwd = (args.get("cwd") or "").strip()
     if bool(args.get("dry_run")):              # preflight manifest — spawn nothing
         return data_manifest(panel, question, args.get("context_files"), cwd)
+    gate = files_required(question, args.get("context_files"), cwd,
+                          allow_ungrounded=bool(args.get("allow_ungrounded")))
+    if gate:                                    # brief names real local files but didn't ground them
+        return gate
     # Selection beats synthesis: judge-SELECTING the single best answer wins; blending it away
     # ("chairman synthesis") destroys the variance that makes a council useful (arXiv 2603.20324,
     # g=3.86). So the DEFAULT returns the Borda winner verbatim + the vote table; the chairman
