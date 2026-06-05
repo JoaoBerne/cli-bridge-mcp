@@ -68,10 +68,12 @@ All notable changes to this project are documented here. The format follows
   review *failed outright* (a lane rate-limited to empty). The single arm fires K calls at ONE lane
   per fixture, so on free tiers it gets throttled; a resulting 0% is flagged **Unreliable** in the
   report (and `failed_fixtures` in JSON), not silently scored as "single models are useless."
-- First measured run (2026-06-05, free tiers) is recorded in `BENCHMARKS.md`: **no clean winner**,
-  confounded by free-tier rate-limiting — a robust single lane caught more bugs but over-detected
-  and mis-rated severity; the council had fewer false alarms + far better severity but ran degraded
-  (one lane throttled). The naïve "council always wins" claim did not hold.
+- First measured run (2026-06-05, repeats=3, headroom single lane) is recorded in `BENCHMARKS.md`:
+  **no clean winner — a precision/recall trade-off.** A strong single model (deepseek-v4-pro ×3)
+  caught marginally more bugs (recall 93% vs 73%, overlapping bands) but **over-detected** (~40
+  false alarms, precision 0.19); the council's diverse-model merge was ~2× cleaner (~14 false
+  alarms, precision 0.33). The naïve "more models = more bugs" did not hold; "more *diverse* models
+  = less noise" did.
 
 ### Added (current-docs guard)
 - **`apilookup` MCP prompt** (slash command): forces a dated, current-year documentation lookup

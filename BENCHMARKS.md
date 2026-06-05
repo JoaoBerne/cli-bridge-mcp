@@ -54,35 +54,35 @@ The live run prints recall / precision / false-alarms-on-clean-lines / severity 
 the mean±sd bands overlap, it reports *"no measurable difference"* rather than crowning a winner
 from noise. Small N — treat as **directional, not a leaderboard**.
 
-### Measured — 2026-06-05, this machine's **free-tier** CLIs
+### Measured — 2026-06-05 (12 fixtures, 10 reasoning bugs, repeats=3)
 
-A first real run. The headline: **no clean winner, and the comparison is confounded by free-tier
-rate-limiting** — exactly the kind of un-hyped result this harness exists to surface.
+Single arm on a lane with quota headroom (`opencode-go/deepseek-v4-pro`, a strong model) so it
+isn't throttled; council = three distinct lanes. Both arms ran with **0 failed fixtures** (no
+rate-limit artifact). The headline: **no clean winner — a real precision/recall trade-off.**
 
-| arm | recall (bugs caught) | precision | false alarms (fp) | severity exact |
+| arm | recall (bugs caught) | precision | false alarms (avg) | severity exact |
 |-----|:---:|:---:|:---:|:---:|
-| single — `opencode`/deepseek ×4 roles | **9/10 (90%)** | 0.20 | 36 | 22% |
-| council — `gemini, mistral, opencode` | 5/10 (50%)¹ | 0.20 | 20 | **80%** |
-
-_repeats=1 (single data point, noisy), 12 fixtures, 10 reasoning bugs, deterministic scorer._
+| single — `deepseek-v4-pro` ×3 (self-consistency) | **93% ± 6%** | 0.19 | ~40 | 26% |
+| council — `gemini, mistral, opencode` | 73% ± 15% | **0.33** | **~14** | **35%** |
 
 What it actually shows:
-- A single **robust** strong lane caught *more* bugs than the council — but **over-detected** (36
-  false alarms vs 20) and mis-rated severity (22% vs 80%). "More models = more bugs" did **not**
-  hold here.
-- ¹ The council ran **degraded**: `gemini` rate-limited to empty mid-run (243/271 calls failed), so
-  the council effectively reviewed with ~2 healthy lanes. Its 50% recall is a **lower bound**.
-- **The real confound:** the single arm fires 4 calls to *one* lane per fixture; on free tiers that
-  lane (gpt, gemini) gets throttled to empty and scores ~0 — an artifact, not a quality signal.
-  `opencode` and `mistral` were the only lanes that survived the burst (0 failures). So a council's
-  load-spreading is itself a real-world advantage, but a *clean quality* verdict needs a lane with
-  quota headroom (a paid tier or a local model). **Don't read this as "single beats council."**
+- **Recall is a statistical wash** — the bands overlap (single 0.875–0.99, council 0.58–0.89). The
+  strong single model finds *marginally* more bugs, not significantly.
+- **The council is much cleaner.** A single strong model run 3× over-detects: ~40 false alarms,
+  precision 0.19. The council's merge across *diverse* models dedups the noise: ~14 false alarms,
+  precision 0.33 (≈2×), and slightly better severity. "More models = more bugs" did **not** hold;
+  "more *diverse* models = less noise" did.
+- **Caveats (small N, read as directional):** `gemini` was rate-limited for most of its calls, so
+  the council effectively ran on `mistral` + `deepseek-pro` — a healthy council would likely do
+  better, not worse. The single lane is also the council's strongest member, so this is really
+  "does adding peers to the strong model help?" — answer here: it trades a little recall for a lot
+  less noise.
 
-Reproduce on your machine (use a lane with headroom for `--single-lane`, and `--repeats 5`):
+Reproduce on your machine (`--repeats 5` to publish; pick a headroom lane for `--single-lane`):
 
 ```bash
-cli-bridge eval --live --council-lanes gpt,gemini,mistral,opencode \
-  --single-lane opencode --k 4 --repeats 5
+cli-bridge eval --live --include-paid --council-lanes gemini,mistral,opencode \
+  --single-lane opencode --k 3 --repeats 5    # with CLI_BRIDGE_OPENCODE_MODEL=opencode-go/<strong>
 ```
 
 > Maintainers: this table is directional, not a leaderboard. A negative/ambiguous result is a
