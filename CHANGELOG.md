@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added (resilience — anti-burst spawn pacing)
+- **`CLI_BRIDGE_<LANE>_MIN_INTERVAL_S`** (or `min_interval_s` in the config file): opt-in minimum
+  spacing between spawns of one lane (`runner.pace`, per-lane lock). Field finding from the
+  quality eval: firing several calls at ONE lane back-to-back rate-limits a free tier into
+  returning empty (gemini: 315/343 calls dead in one run) — and the failure cooldown never trips
+  because successes interleave with the empties. Same-lane bursts become an evenly spaced queue;
+  DIFFERENT lanes never wait, so council fan-out stays parallel. Default 0 (off, no behaviour
+  change). `lane_stats` now hints at the pacer when a lane shows the burst-rate-limited pattern
+  (many `empty`/`quota` failures, pacing unset).
+
 ### Added (grounding — files_required_to_continue, M12-3)
 - **`debate` and `consensus` now stop and ask for code instead of guessing.** When a brief NAMES
   local source files (e.g. "is the check in `auth.py` safe?") that exist in `cwd` but weren't

@@ -119,6 +119,7 @@ CLI_BRIDGE_PROFILE={profile}
 # CLI_BRIDGE_<LANE>_MODEL=<model-id>
 # CLI_BRIDGE_<LANE>_CREDITS_PER_1K=<credits per 1k tokens>   # for usage estimates
 # CLI_BRIDGE_<LANE>_DAILY_LIMIT=<max runs/day>
+# CLI_BRIDGE_<LANE>_MIN_INTERVAL_S=2   # anti-burst spawn pacing (free tier that rate-limits)
 # Behaviour
 CLI_BRIDGE_TERSE={terse}        # off|lite|full|ultra
 CLI_BRIDGE_GUARD={guard}        # off|warn|strict

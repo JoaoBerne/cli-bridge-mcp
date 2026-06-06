@@ -292,6 +292,7 @@ Everything is environment variables — no code edits. Tune it to **your** subsc
 | `CLI_BRIDGE_CACHE_TTL_S` | `0` = off (default). When `>0`, an identical call within this many seconds returns the cached answer instead of re-spawning the CLI (saves quota/credits on repeats; build runs are never cached). |
 | `CLI_BRIDGE_<LANE>_CREDITS_PER_1K` | Credits per 1k tokens for a lane, used by `usage_report`/`usage_budget` to **estimate** spend (chars/4). |
 | `CLI_BRIDGE_<LANE>_DAILY_LIMIT` | Max runs/day for a lane; `usage_budget` flags when exceeded. |
+| `CLI_BRIDGE_<LANE>_MIN_INTERVAL_S` | Anti-burst spawn pacing: minimum seconds between spawns of this lane (default `0` = off). Set it (e.g. `2`) when a free tier rate-limits under back-to-back calls — same-lane bursts get evenly spaced, other lanes stay parallel. `lane_stats` hints when a lane shows the rate-limited pattern. |
 | `CLI_BRIDGE_KEEP_WORKTREES` | Keep `ask_build_isolated` worktrees instead of discarding them (for inspection). |
 | `CLI_BRIDGE_REVIEW_TIMEOUT_S` | Per-reviewer timeout for `review_diff` / `security_review` (default 180; these are deliberately heavier than `ask_all`). |
 | `CLI_BRIDGE_OVERFLOW_TTL_H` | Hours before a spilled overflow file is pruned (default 24). |

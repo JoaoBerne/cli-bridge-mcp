@@ -106,6 +106,17 @@ class LaneSpec:
         return bool(self._env("COST"))
 
     @property
+    def min_interval_s(self) -> float:
+        """Anti-burst pacing: minimum seconds between spawns of THIS lane (see runner.pace).
+        0 = off (default — no behaviour change). Set it when a free tier rate-limits under
+        back-to-back calls: CLI_BRIDGE_<LANE>_MIN_INTERVAL_S=2 (or `min_interval_s` in the
+        config file)."""
+        try:
+            return max(0.0, float(self._env("MIN_INTERVAL_S") or 0))
+        except ValueError:
+            return 0.0
+
+    @property
     def is_paid(self) -> bool:
         """Whether THIS lane costs the user money — they declare it per their plan."""
         return self._cost == "paid"

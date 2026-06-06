@@ -36,7 +36,7 @@ _TOP_KEYS = {
 _LANE_KEYS = {
     "cost": "COST", "model": "MODEL", "enabled": "ENABLED", "bin": "BIN",
     "credits_per_1k": "CREDITS_PER_1K", "daily_limit": "DAILY_LIMIT", "priority": "PRIORITY",
-    "cost_note": "COST_NOTE",
+    "cost_note": "COST_NOTE", "min_interval_s": "MIN_INTERVAL_S",
 }
 
 

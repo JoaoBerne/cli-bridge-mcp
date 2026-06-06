@@ -1240,6 +1240,7 @@ async def _run_lane(lane: LaneSpec, args: dict, *, tool: str = "ask",
     # such overrides onto a COPY of the environment (a bare dict would drop the CLI's own PATH/auth).
     extra_env = lane.env_ask(model, effort, agent) if lane.env_ask else {}
     spawn_env = {**os.environ, **extra_env} if extra_env else None
+    await runner.pace(lane.key, lane.min_interval_s)   # anti-burst (opt-in, per lane)
     rec = telemetry.start(tool, lane.key, model, task)
     timeout = _timeout(args.get("timeout_s"))
     t0 = time.monotonic()
@@ -2015,12 +2016,21 @@ def _render_lane_stats() -> str:
     stats = telemetry.lane_stats()
     if not stats:
         return "No lane stats yet (telemetry off, or no runs recorded)."
+    by_key = {ln.key: ln for ln in all_lanes()}
     lines = ["# Lane health", ""]
     for s in stats:
         cd = f", cooldown {s['cooldown_remaining_s']}s" if s["cooldown_remaining_s"] else ""
         lines.append(
             f"- **{s['lane']}**: {s['total_runs']} runs, {s['total_failures']} failed, "
             f"{s['consecutive_failures']} consecutive fail, last={s['last_kind']}{cd}")
+        # Burst rate-limiting pattern (failures interleaved with successes never trip the
+        # cooldown): point at the opt-in pacer instead of leaving the lane to die quietly.
+        ln = by_key.get(s["lane"])
+        if (s["last_kind"] in {"empty", "quota"} and s["total_failures"] >= 5
+                and ln is not None and ln.min_interval_s <= 0):
+            env_key = s["lane"].upper().replace("-", "_")
+            lines.append(f"  - ↳ looks rate-limited under bursts — consider spawn pacing: "
+                         f"`CLI_BRIDGE_{env_key}_MIN_INTERVAL_S=2`")
     return "\n".join(lines)
 
 

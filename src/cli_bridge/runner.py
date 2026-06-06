@@ -13,11 +13,13 @@ Hardening (learned running these CLIs headless):
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
 import signal
 import subprocess
+import time
 from dataclasses import dataclass
 
 # Opt-in logging: silent by default (a library shouldn't spam). Set CLI_BRIDGE_LOG=debug|info
@@ -130,6 +132,32 @@ class RunResult:
                       "this lane",
         }.get(self.kind, "")
         return f"[{self.kind}] {self.output}{hint}".rstrip()
+
+
+# ── per-lane spawn pacing: opt-in anti-burst throttle ───────────────────────────────────────
+# Field finding (June 2026 quality eval): firing several calls at ONE lane back-to-back gets a
+# free tier rate-limited into returning empty (gemini: 315/343 calls dead in one run) — and the
+# failure-cooldown never trips because successes interleave with the empties. Pacing spaces
+# same-lane spawns; DIFFERENT lanes are unaffected, so council fan-out stays parallel. Opt-in
+# per lane: CLI_BRIDGE_<LANE>_MIN_INTERVAL_S=2 (seconds, float).
+_PACE_LAST: dict[str, float] = {}
+_PACE_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+async def pace(key: str, min_interval_s: float) -> float:
+    """Delay so consecutive spawns of `key` are >= min_interval_s apart. Returns the wait that
+    was applied (0.0 when none). Same-key callers serialize through a lock so a parallel burst
+    becomes an evenly-spaced queue; other keys never wait. No-op at <= 0."""
+    if min_interval_s <= 0:
+        return 0.0
+    lock = _PACE_LOCKS.setdefault(key, asyncio.Lock())
+    async with lock:
+        last = _PACE_LAST.get(key)
+        wait = max(0.0, min_interval_s - (time.monotonic() - last)) if last is not None else 0.0
+        if wait > 0:
+            await asyncio.sleep(wait)
+        _PACE_LAST[key] = time.monotonic()
+        return wait
 
 
 def run(argv: list[str], timeout_s: int, cwd: str | None = None,
