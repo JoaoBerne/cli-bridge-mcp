@@ -8,9 +8,11 @@
 
 **Your AI assistant, but it can phone a friend.**
 
-`cli-bridge` is a [Model Context Protocol](https://modelcontextprotocol.io) server that lets
-whatever AI you're already talking to — Claude Code, Codex, Gemini CLI, opencode, anything that
-speaks MCP — **consult a council of other AI CLIs** and bring back their answers.
+`cli-bridge` is a [Model Context Protocol](https://modelcontextprotocol.io) server that
+**orchestrates the AI CLIs you've already installed and logged into** — Claude Code, Codex,
+Gemini CLI, opencode, … — from whatever assistant you're talking to. No API keys, no token
+extraction, a local-only log, a hard cost cap, and writes only as throwaway-worktree diffs.
+That part is indisputable plumbing; here's what it unlocks:
 
 Stuck on a gnarly bug? Have your assistant ask GPT *and* Gemini in parallel and compare. Need a
 1M-token read of a huge file? Hand it to Gemini. Want a cheap second opinion? Fire it at a free
@@ -27,6 +29,12 @@ Claude → cli-bridge → [ Gemini ] [ GPT ] [ Mistral ] [ Qwen ] … in paralle
 > **$0.00** (the receipts are in `usage_report`); paid lanes only ever run inside a hard daily cap
 > *you* set. And when you ask it to *do* work, it edits in a throwaway git worktree and hands back
 > a **diff** — your live repo is never touched.
+
+> **And the honest part:** "more models = better" is *fragile* — big models share training data,
+> so their errors correlate. We measured our own central claim (`cli-bridge eval`, shipped, no LLM
+> judge): a diverse council did **not** catch more bugs than one strong model — it cut the false
+> alarms **~2×**. We publish the numbers either way ([BENCHMARKS.md](BENCHMARKS.md)), and the
+> harness ships so you can run it on *your* CLIs.
 
 ---
 
