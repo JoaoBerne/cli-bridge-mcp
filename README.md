@@ -1,11 +1,6 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/mark-dark.svg">
-  <img src="assets/mark-light.svg" width="92" alt="cli-bridge">
-</picture>
-
-<picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/banner-dark.svg">
   <img src="assets/banner-light.svg" width="860" alt="You → cli-bridge → a council of AI CLIs in parallel → one merged review">
 </picture>
@@ -450,3 +445,16 @@ pytest -q          # unit + integration (cross-host) tests
 ## License
 
 MIT
+
+---
+
+<div align="center">
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/mark-dark.svg">
+  <img src="assets/mark-light.svg" width="84" alt="cli-bridge">
+</picture>
+
+<sub>one side · bridged to a council</sub>
+
+</div>
