@@ -1,0 +1,11 @@
+diff --git a/pool.py b/pool.py
+--- a/pool.py
++++ b/pool.py
+@@ -5,2 +5,7 @@ class Pool:
+ class Pool:
+     _inst = None
++    @classmethod
++    def get(cls):
++        if cls._inst is None:
++            cls._inst = Pool()
++        return cls._inst

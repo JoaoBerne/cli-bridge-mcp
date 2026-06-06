@@ -1,0 +1,15 @@
+diff --git a/net.py b/net.py
+--- a/net.py
++++ b/net.py
+@@ -3,4 +3,8 @@ import socket
+ def fetch(host):
+-    with socket.create_connection((host, 80), timeout=5) as s:
+-        s.sendall(b"GET / HTTP/1.0\r\n\r\n")
+-        return s.recv(4096)
++    s = socket.create_connection((host, 80), timeout=5)
++    s.sendall(b"GET / HTTP/1.0\r\n\r\n")
++    data = s.recv(4096)
++    if not data:
++        return b""
++    s.close()
++    return data

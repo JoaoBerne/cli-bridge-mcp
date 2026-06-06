@@ -1,0 +1,25 @@
+{
+  "id": "swallowed_exception_sync",
+  "bugs": [
+    {
+      "id": "ep2",
+      "category": "error_path",
+      "file": "sync.py",
+      "line": 15,
+      "line_tolerance": 3,
+      "severity": "high",
+      "must_match_any": [
+        [
+          "swallow",
+          "silently",
+          "pass",
+          "hides",
+          "ignored",
+          "lost",
+          "no log"
+        ]
+      ]
+    }
+  ],
+  "decoys": []
+}

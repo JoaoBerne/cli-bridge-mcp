@@ -1,0 +1,10 @@
+[
+  {
+    "severity": "high",
+    "title": "except Exception: pass silently drops failed uploads",
+    "file": "sync.py",
+    "line": 15,
+    "evidence": "every upload failure is swallowed with no log, retry, or counter \u2014 records are silently lost and the caller believes push() succeeded.",
+    "recommendation": "log the exception and surface/collect failures (retry or raise)."
+  }
+]

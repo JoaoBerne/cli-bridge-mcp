@@ -1,0 +1,10 @@
+[
+  {
+    "severity": "high",
+    "title": "Chained .get() dereferences None when 'db' is missing",
+    "file": "settings.py",
+    "line": 14,
+    "evidence": "cfg.get('db') returns None when the key is absent, and None.get('host') raises AttributeError \u2014 the 'tolerant' rewrite made it crash differently.",
+    "recommendation": "use cfg.get('db', {}).get('host') or check for None explicitly."
+  }
+]

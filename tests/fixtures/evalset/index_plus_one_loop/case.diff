@@ -1,0 +1,9 @@
+diff --git a/diffview.py b/diffview.py
+--- a/diffview.py
++++ b/diffview.py
+@@ -4,4 +4,4 @@ def pairs(xs):
+ def pairs(xs):
+     out = []
+-    for i in range(len(xs) - 1):
++    for i in range(len(xs)):
+         out.append((xs[i], xs[i + 1]))

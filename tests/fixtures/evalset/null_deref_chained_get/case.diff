@@ -1,0 +1,8 @@
+diff --git a/settings.py b/settings.py
+--- a/settings.py
++++ b/settings.py
+@@ -12,2 +12,3 @@ def db_host(cfg):
+ def db_host(cfg):
+-    return cfg["db"]["host"]
++    # tolerate missing keys
++    return cfg.get("db").get("host")

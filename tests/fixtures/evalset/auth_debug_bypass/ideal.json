@@ -1,0 +1,10 @@
+[
+  {
+    "severity": "blocker",
+    "title": "DEBUG flag bypasses the admin check",
+    "file": "admin.py",
+    "line": 10,
+    "evidence": "with settings.DEBUG on, ANY user passes require_admin \u2014 an auth bypass wired to a configuration flag that is often enabled in staging.",
+    "recommendation": "never fold DEBUG into authorization; keep the admin check unconditional."
+  }
+]

@@ -1,0 +1,10 @@
+[
+  {
+    "severity": "high",
+    "title": "range(len(xs) - 1) drops the last element",
+    "file": "walker.py",
+    "line": 10,
+    "evidence": "the loop bound changed to len(xs) - 1, so the final element is never appended \u2014 an off-by-one that silently drops the last item.",
+    "recommendation": "iterate range(len(xs)) (or simply `for x in xs`)."
+  }
+]

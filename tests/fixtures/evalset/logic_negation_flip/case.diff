@@ -1,0 +1,10 @@
+diff --git a/form.py b/form.py
+--- a/form.py
++++ b/form.py
+@@ -6,4 +6,4 @@ def submit(payload):
+ def submit(payload):
+-    if not is_valid(payload):
+-        return reject(payload)
++    if is_valid(payload):
++        return reject(payload)
+     return save(payload)

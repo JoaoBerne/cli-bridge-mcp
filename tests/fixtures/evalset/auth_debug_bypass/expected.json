@@ -1,0 +1,25 @@
+{
+  "id": "auth_debug_bypass",
+  "bugs": [
+    {
+      "id": "ab2",
+      "category": "auth_bypass",
+      "file": "admin.py",
+      "line": 10,
+      "line_tolerance": 3,
+      "severity": "blocker",
+      "must_match_any": [
+        [
+          "debug",
+          "bypass",
+          "auth",
+          "privile",
+          "permission",
+          "non-admin",
+          "grants"
+        ]
+      ]
+    }
+  ],
+  "decoys": []
+}

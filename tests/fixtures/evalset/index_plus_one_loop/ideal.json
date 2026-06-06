@@ -1,0 +1,10 @@
+[
+  {
+    "severity": "high",
+    "title": "Loop reads xs[i + 1] past the end",
+    "file": "diffview.py",
+    "line": 6,
+    "evidence": "with range(len(xs)) the body still reads xs[i + 1]; at the final index that is out of bounds and raises IndexError.",
+    "recommendation": "keep range(len(xs) - 1) when pairing each element with its successor."
+  }
+]

@@ -1,0 +1,25 @@
+{
+  "id": "socket_leak_error_path",
+  "bugs": [
+    {
+      "id": "rl2",
+      "category": "resource_leak",
+      "file": "net.py",
+      "line": 7,
+      "line_tolerance": 4,
+      "severity": "medium",
+      "must_match_any": [
+        [
+          "leak",
+          "not closed",
+          "close",
+          "socket",
+          "resource",
+          "context manager",
+          "with"
+        ]
+      ]
+    }
+  ],
+  "decoys": []
+}

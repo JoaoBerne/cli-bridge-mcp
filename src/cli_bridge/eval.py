@@ -418,33 +418,35 @@ def render_markdown(res: EvalResult) -> str:
     return "\n".join(lines)
 
 
+def _caught(res: EvalResult) -> dict[str, dict]:
+    """bug_id -> {fixture, category, council, single} — caught in ≥1 repeat. Single source for
+    the markdown win/loss table AND the JSON output (so they can never disagree)."""
+    out: dict[str, dict] = {}
+    for fx in res.fixtures:
+        for b in fx.bugs:
+            out[b.id] = {"fixture": fx.id, "category": b.category,
+                         "council": False, "single": False}
+    for arm, runs in (("council", res.council), ("single", res.single)):
+        for run in runs:
+            for s in run.per_fixture.values():
+                for bid in s.caught_ids:
+                    if bid in out:
+                        out[bid][arm] = True
+    return out
+
+
 def _winloss_table(res: EvalResult) -> str:
     """Per-bug: did the council catch it (in ANY repeat), did single? The honest part — shows
     where each arm wins and loses, not just the aggregate."""
-    council_caught: dict[str, bool] = {}
-    single_caught: dict[str, bool] = {}
-    bug_meta: dict[str, tuple[str, str]] = {}   # bug_id -> (fixture_id, category)
-    for fx in res.fixtures:
-        for b in fx.bugs:
-            bug_meta[b.id] = (fx.id, b.category)
-            council_caught.setdefault(b.id, False)
-            single_caught.setdefault(b.id, False)
-    for run in res.council:
-        for s in run.per_fixture.values():
-            for bid in s.caught_ids:
-                council_caught[bid] = True
-    for run in res.single:
-        for s in run.per_fixture.values():
-            for bid in s.caught_ids:
-                single_caught[bid] = True
+    caught = _caught(res)
     rows = ["### Where each arm won / lost (caught in ≥1 repeat)", "",
             "| bug | category | council | single+SC |",
             "|-----|----------|:------:|:--------:|"]
-    for bid in sorted(bug_meta):
-        fx_id, cat = bug_meta[bid]
-        cc = "✅" if council_caught.get(bid) else "❌"
-        ss = "✅" if single_caught.get(bid) else "❌"
-        rows.append(f"| {fx_id}/{bid} | {cat} | {cc} | {ss} |")
+    for bid in sorted(caught):
+        c = caught[bid]
+        cc = "✅" if c["council"] else "❌"
+        ss = "✅" if c["single"] else "❌"
+        rows.append(f"| {c['fixture']}/{bid} | {c['category']} | {cc} | {ss} |")
     return "\n".join(rows)
 
 
@@ -468,5 +470,6 @@ def result_dict(res: EvalResult) -> dict:
         "repeats": len(res.council),
         "council": arm(res.council),
         "single": arm(res.single),
+        "bugs": _caught(res),                 # per-bug win/loss — same source as the md table
         "corpus": corpus_summary(res.fixtures),
     }

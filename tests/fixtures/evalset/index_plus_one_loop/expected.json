@@ -1,0 +1,24 @@
+{
+  "id": "index_plus_one_loop",
+  "bugs": [
+    {
+      "id": "ix2",
+      "category": "index_bounds",
+      "file": "diffview.py",
+      "line": 6,
+      "line_tolerance": 3,
+      "severity": "high",
+      "must_match_any": [
+        [
+          "indexerror",
+          "out of bounds",
+          "i + 1",
+          "last",
+          "bounds",
+          "past the end"
+        ]
+      ]
+    }
+  ],
+  "decoys": []
+}

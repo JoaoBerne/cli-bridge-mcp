@@ -1,0 +1,22 @@
+{
+  "id": "null_deref_chained_get",
+  "bugs": [
+    {
+      "id": "nd2",
+      "category": "null_deref",
+      "file": "settings.py",
+      "line": 14,
+      "line_tolerance": 3,
+      "severity": "high",
+      "must_match_any": [
+        [
+          "none",
+          "nonetype",
+          "attributeerror",
+          "null"
+        ]
+      ]
+    }
+  ],
+  "decoys": []
+}

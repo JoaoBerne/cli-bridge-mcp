@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed (eval v2 — bigger corpus, per-bug JSON, severity rubric)
+- **Eval corpus 12 → 20 fixtures (10 → 18 reasoning bugs)**: a harder second bug per category
+  (range-bound off-by-one, chained `.get()` None deref, unsynchronized lazy singleton, DEBUG-flag
+  auth bypass, socket leak on an early return, dropped-negation inversion, `xs[i+1]` past the end,
+  `except: pass` swallowing failures). Calibration gate passes on all 20.
+- **Per-bug win/loss now in the JSON output** (`bugs` map: fixture, category, caught-by-council,
+  caught-by-single) — same single source as the markdown table, so they can never disagree.
+- **Severity rubric added to the reviewer JSON rules** (review_diff/security_review): blocker =
+  exploitable/certain loss on a main path; high = real incorrect behaviour; medium = edge-path or
+  risky pattern; low = clarity only. Both eval arms calibrated severity poorly (22–35% exact) —
+  the rubric targets that; the eval measures whether it works.
+
 ### Added (resilience — anti-burst spawn pacing)
 - **`CLI_BRIDGE_<LANE>_MIN_INTERVAL_S`** (or `min_interval_s` in the config file): opt-in minimum
   spacing between spawns of one lane (`runner.pace`, per-lane lock). Field finding from the

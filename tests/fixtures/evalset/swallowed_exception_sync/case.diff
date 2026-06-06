@@ -1,0 +1,11 @@
+diff --git a/sync.py b/sync.py
+--- a/sync.py
++++ b/sync.py
+@@ -11,3 +11,6 @@ def push(records):
+ def push(records):
+     for r in records:
+-        upload(r)
++        try:
++            upload(r)
++        except Exception:
++            pass

@@ -1,0 +1,10 @@
+[
+  {
+    "severity": "medium",
+    "title": "Unsynchronized lazy singleton init is racy",
+    "file": "pool.py",
+    "line": 9,
+    "evidence": "two threads can both observe _inst is None and each create a Pool \u2014 a check-then-act race; callers end up with different instances.",
+    "recommendation": "guard the lazy init with a lock (or create eagerly at import)."
+  }
+]

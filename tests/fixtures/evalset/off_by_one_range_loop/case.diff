@@ -1,0 +1,10 @@
+diff --git a/walker.py b/walker.py
+--- a/walker.py
++++ b/walker.py
+@@ -7,4 +7,5 @@ def collect(xs):
+ def collect(xs):
+     out = []
+-    for i in range(len(xs)):
++    # micro-opt: hoist the bound
++    for i in range(len(xs) - 1):
+         out.append(xs[i])

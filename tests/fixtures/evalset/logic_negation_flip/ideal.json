@@ -1,0 +1,10 @@
+[
+  {
+    "severity": "high",
+    "title": "Dropped negation inverts the validation branch",
+    "file": "form.py",
+    "line": 7,
+    "evidence": "the 'not' was lost: VALID payloads are now rejected and invalid ones fall through to save() \u2014 the logic is exactly backwards.",
+    "recommendation": "restore `if not is_valid(payload): return reject(payload)`."
+  }
+]

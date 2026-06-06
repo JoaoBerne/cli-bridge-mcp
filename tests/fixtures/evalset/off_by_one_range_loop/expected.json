@@ -1,0 +1,25 @@
+{
+  "id": "off_by_one_range_loop",
+  "bugs": [
+    {
+      "id": "obo2",
+      "category": "off_by_one",
+      "file": "walker.py",
+      "line": 10,
+      "line_tolerance": 3,
+      "severity": "high",
+      "must_match_any": [
+        [
+          "off-by-one",
+          "off by one",
+          "last",
+          "final element",
+          "len(xs) - 1",
+          "skips",
+          "drops"
+        ]
+      ]
+    }
+  ],
+  "decoys": []
+}

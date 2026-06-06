@@ -115,7 +115,10 @@ _JSON_RULES = (
     'object: {"severity": "blocker|high|medium|low", "title": "<short label>", "file": '
     '"<path>" or null, "line": <int> or null, "evidence": "<what and why it is a problem>", '
     '"recommendation": "<concrete fix>"}. Use null for file/line when the exact location is '
-    "not visible in the diff. If there are no genuine issues, return []."
+    "not visible in the diff. Severity rubric — apply it, don't inflate: blocker = exploitable "
+    "security flaw or certain crash/data loss on a main path; high = real incorrect behaviour "
+    "on realistic input; medium = bug on an edge path, or a risky pattern likely to bite; "
+    "low = clarity/maintainability only. If there are no genuine issues, return []."
 )
 
 

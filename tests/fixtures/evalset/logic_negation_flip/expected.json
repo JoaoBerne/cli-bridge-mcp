@@ -1,0 +1,25 @@
+{
+  "id": "logic_negation_flip",
+  "bugs": [
+    {
+      "id": "li2",
+      "category": "logic_inversion",
+      "file": "form.py",
+      "line": 7,
+      "line_tolerance": 3,
+      "severity": "high",
+      "must_match_any": [
+        [
+          "invert",
+          "flip",
+          "backwards",
+          "negation",
+          "rejects valid",
+          "wrong branch",
+          "logic"
+        ]
+      ]
+    }
+  ],
+  "decoys": []
+}

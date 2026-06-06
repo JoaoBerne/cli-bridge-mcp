@@ -168,6 +168,8 @@ def test_evaluate_end_to_end_both_arms_full_recall_on_ideal():
     data = ev.result_dict(res)
     assert data["k"] == 4 and data["single_lane"] == "solo"
     assert data["corpus"]["bugs"] >= 10
+    # per-bug win/loss is in the JSON too (same source as the md table); ideal -> all caught
+    assert data["bugs"] and all(v["council"] and v["single"] for v in data["bugs"].values())
 
 
 def test_evaluate_council_beats_a_silent_single():

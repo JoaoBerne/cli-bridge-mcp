@@ -1,0 +1,10 @@
+[
+  {
+    "severity": "medium",
+    "title": "Socket leaked on the empty-response path",
+    "file": "net.py",
+    "line": 8,
+    "evidence": "the with-block was unrolled; on the empty-response early return the socket is never closed (nor on exceptions) \u2014 a resource leak.",
+    "recommendation": "restore the with-statement so the socket always closes."
+  }
+]
