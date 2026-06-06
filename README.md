@@ -7,7 +7,7 @@
 
 </div>
 
-# cli-bridge 🌁
+# cli-bridge 🌉🔗
 
 ![license](https://img.shields.io/badge/license-MIT-green)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
