@@ -9,9 +9,10 @@
 
 # cli-bridge
 
-![license](https://img.shields.io/badge/license-MIT-green)
+![CI](https://github.com/JoaoBerne/cli-bridge-mcp/actions/workflows/tests.yml/badge.svg)
+![PyPI](https://img.shields.io/pypi/v/cli-bridge-mcp)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
-![tests](https://img.shields.io/badge/tests-pytest-brightgreen)
+![license](https://img.shields.io/badge/license-MIT-green)
 ![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-server-purple)
 ![ban--safe](https://img.shields.io/badge/ban--safe-no%20token%20extraction-orange)
 
