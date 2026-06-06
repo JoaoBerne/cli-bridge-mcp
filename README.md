@@ -1,3 +1,17 @@
+<div align="center">
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/mark-dark.svg">
+  <img src="assets/mark-light.svg" width="92" alt="cli-bridge">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/banner-dark.svg">
+  <img src="assets/banner-light.svg" width="860" alt="You → cli-bridge → a council of AI CLIs in parallel → one merged review">
+</picture>
+
+</div>
+
 # cli-bridge
 
 ![license](https://img.shields.io/badge/license-MIT-green)

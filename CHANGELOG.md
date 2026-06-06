@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added (docs — animated README banner + mark)
+- **Self-contained animated SVG header** (`assets/banner-{dark,light}.svg`, `mark-{dark,light}.svg`):
+  JS-free SMIL, light/dark via `<picture>`, renders in GitHub's `<img>`. The banner is a concept
+  diagram — You → cli-bridge → council lanes in parallel → one merged review, with travelling
+  signals + a blinking terminal cursor; the mark is a compact terminal-brackets cachet. No new deps.
+
 ### Changed (eval v2 — bigger corpus, per-bug JSON, severity rubric)
 - **Eval corpus 12 → 20 fixtures (10 → 18 reasoning bugs)**: a harder second bug per category
   (range-bound off-by-one, chained `.get()` None deref, unsynchronized lazy singleton, DEBUG-flag
