@@ -193,6 +193,14 @@ _DANGEROUS = [
 ]
 
 
+# GitHub Actions `permissions:` entries (id-token: write, contents: read, …) look like secrets
+# to the generic token pattern but are capability grants, not credentials — every repo with a
+# Pages/OIDC workflow would get a false "secret committed" High without this.
+_ACTIONS_PERMISSION = re.compile(
+    r"\b(?:id-token|contents|pages|packages|actions|checks|deployments|issues|discussions|"
+    r"pull-requests|statuses|security-events|attestations)\s*:\s*(?:read|write|none)\b", re.I)
+
+
 def prechecks(diff: str) -> list[findings.Finding]:
     """Scan ADDED diff lines for secrets (reusing runner's redaction patterns) and dangerous
     constructs. Pure + deterministic — catches issues even if every LLM reviewer misses them."""
@@ -207,7 +215,7 @@ def prechecks(diff: str) -> list[findings.Finding]:
             continue
         added = line[1:]
         for pattern, _repl in runner._REDACTIONS:
-            if pattern.search(added):
+            if pattern.search(added) and not _ACTIONS_PERMISSION.search(added):
                 out.append(findings.Finding(
                     severity="high", title="Possible secret committed in diff", file=current,
                     evidence=runner.redact(added.strip())[:120],

@@ -77,6 +77,25 @@ def test_review_diff_end_to_end():
     assert "merge_lane" not in trace             # deterministic merge has no judge lane
 
 
+def test_review_diff_trace_footer_off(monkeypatch):
+    # CLI_BRIDGE_TRACE_FOOTER=off must reach all the way through the workflow render.
+    monkeypatch.setenv("CLI_BRIDGE_TRACE_FOOTER", "off")
+    rec = []
+    args = {"diff": "diff --git a/f b/f\n+oops\n", "base": "HEAD"}
+    report = asyncio.run(workflows.review_diff([_lane("a", "LaneA")], args, _fake_run_lane(rec)))
+    assert "**Bug X**" in report and "## Trace" not in report
+
+
+def test_precheck_actions_permissions_not_a_secret():
+    # `permissions:` grants in a GitHub Actions workflow trip the generic token pattern but are
+    # not credentials; a real assignment on the same diff must still be flagged.
+    diff = ("diff --git a/w.yml b/w.yml\n+++ b/w.yml\n"
+            "+  id-token: write\n+  contents: read\n+token: hunter2value\n")
+    found = workflows.prechecks(diff)
+    assert len(found) == 1 and "secret" in found[0].title.lower()
+    assert "hunter2value" not in (found[0].evidence or "")   # evidence stays redacted
+
+
 def test_review_diff_json_output():
     rec = []
     report = asyncio.run(workflows.review_diff(
