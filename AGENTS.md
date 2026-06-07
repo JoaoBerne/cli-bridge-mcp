@@ -24,9 +24,16 @@ src/cli_bridge/
   findings.py   # parse/merge/render structured review findings (pure)
   guards.py     # injection/tool-poisoning output guard (CLI_BRIDGE_GUARD)
   worktrees.py  # ask_build_isolated: write mode in a throwaway git worktree
+  conversations.py # round-table threads: sqlite persistence + recipient-aware replay
+  preamble.py   # terse response-style preamble prepended to delegate prompts
+  eval.py       # quality eval: council vs single + self-consistency, deterministic scorer
   cli.py        # human/CI entry point (cli-bridge ...) over the same internals
   detect.py     # PATH detection
 tests/          # pytest; unit + cross-host integration (no real CLI needed)
+docs/           # COSTS.md, BENCHMARKS.md, ARCHITECTURE.md, i18n/ READMEs
+assets/         # README banner/mark/social SVGs + demo.gif (generated, do not hand-edit)
+site/           # GitHub Pages landing (deployed by .github/workflows/pages.yml)
+examples/       # custom-lane JSON recipes + GitHub Action
 ```
 
 ## Rules for changes
@@ -63,6 +70,10 @@ worktree-isolated write mode (ask_build_isolated), ask_best mode router + estima
 credit accounting (usage_report/usage_budget), human CLI (cli-bridge), MCP resources,
 premortem/test_plan workflows, eval fixtures + no-network evaluator, ruff lint + CI lint job,
 modular tool loading (DISABLED_TOOLS/ENABLED_TOOLS), quality eval (`cli-bridge eval`: council vs
-single-model + self-consistency, deterministic scorer + calibration gate).
-Next candidates: M12 incremental steals (architect/editor split, VOTE footer, convergence),
-forced-pacing workflow engine, release docs, history scrub, PyPI publish.
+single-model + self-consistency, deterministic scorer + calibration gate), architect/editor build
+split, debate VOTE footer + convergence early-stop, files_required grounding gate, anti-burst
+spawn pacing (per-lane MIN_INTERVAL_S), trace-footer toggle, i18n READMEs (docs/i18n/), Pages
+landing (site/).
+Next candidates: forced-pacing workflow engine, vibe lane hardening (detect plan-mode replies and
+classify as failed instead of wrapping them as findings), release docs, history scrub, PyPI
+publish.
