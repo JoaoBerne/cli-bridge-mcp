@@ -271,6 +271,24 @@ def _porcelain(root: str) -> dict[str, str]:
     return paths
 
 
+def _zone_diff(root: str, zone_rel: str) -> str:
+    """Diff of new + modified files in the zone, WITHOUT permanently staging: intent-to-add
+    untracked so they show as new, diff, then unstage so the host's index is left untouched."""
+    spec = zone_rel or "."
+    _git(["-C", root, "add", "-N", "--", spec])
+    _drc, diff, _derr = _git(["-C", root, "diff", "--", spec])
+    _git(["-C", root, "reset", "-q", "--", spec])
+    return diff
+
+
+def _revert_zone(root: str, zone_rel: str) -> None:
+    """Undo all changes in the zone — restore tracked files, drop untracked — scoped to the zone
+    so the host's work outside it is never touched. NEVER a global `git reset --hard`."""
+    spec = zone_rel or "."
+    _git(["-C", root, "checkout", "--", spec])
+    _git(["-C", root, "clean", "-fd", "--", spec])
+
+
 def _zone_violations(before: dict[str, str], after: dict[str, str], zone_rel: str) -> list[str]:
     """Paths that CHANGED (or appeared) during the build AND sit OUTSIDE the zone. Comparing
     against the pre-build snapshot means the host's own pre-existing out-of-zone work is NOT
@@ -351,15 +369,10 @@ async def ask_build_direct(lane: LaneSpec, args: dict, run_lane,
             if violations:
                 # Reject: undo the in-zone work (scoped), leave any escaped files for the user to
                 # inspect (auto-deleting them could destroy host work we can't attribute).
-                _git(["-C", root, "checkout", "--", zone_rel or "."])
-                _git(["-C", root, "clean", "-fd", "--", zone_rel or "."])
+                _revert_zone(root, zone_rel)
                 return _report_violation(lane, res, root, zone_label, violations)
 
-            # Show new + modified in the zone without permanently staging: intent-to-add untracked,
-            # diff, then unstage so the host's index is left as it was.
-            _git(["-C", root, "add", "-N", "--", zone_rel or "."])
-            _drc, diff, _derr = _git(["-C", root, "diff", "--", zone_rel or "."])
-            _git(["-C", root, "reset", "-q", "--", zone_rel or "."])
+            diff = _zone_diff(root, zone_rel)
     except _BuildLocked as e:
         return f"[error] {e}"
 

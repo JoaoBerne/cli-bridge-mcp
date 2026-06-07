@@ -30,6 +30,7 @@ from mcp.types import (
 )
 
 from . import (
+    buildloop,
     config,
     conversations,
     findings,
@@ -650,6 +651,24 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                         "confirm_dirty": {"type": "boolean",
                                           "description": "direct: build even if the zone has "
                                           "uncommitted tracked changes (default false)."},
+                        "async": {"type": "boolean",
+                                  "description": "direct: run as a STEERABLE background job — "
+                                  "returns a job_id; follow with job_tail, steer with build_steer "
+                                  "(and interrupt), fetch with job_result. Enables multi-turn + DoD."},
+                        "dry_run": {"type": "boolean",
+                                    "description": "direct: render the composed brief and stop — "
+                                    "nothing is launched (review the spec before you send it)."},
+                        "dod_cmd": {"type": "array", "items": {"type": "string"},
+                                    "description": "direct+async: executable Definition of Done as "
+                                    "an argv list (e.g. [\"npm\",\"run\",\"build\"]) — NEVER a shell "
+                                    "string. Runs after each turn; pass = done, fail = one more turn "
+                                    "with the error fed back. The zone is exposed as $ZONE."},
+                        "max_turns": {"type": "integer",
+                                      "description": "direct+async: hard cap on total turns "
+                                      "(default 12)."},
+                        "max_fail_retries": {"type": "integer",
+                                             "description": "direct+async: stop after this many "
+                                             "CONSECUTIVE DoD failures (default 3)."},
                         "architect_lane": {"type": "string", "enum": [ln.key for ln in lanes],
                                            "description": "isolated only: a (usually stronger) lane "
                                            "that first writes a PLAN the editor implements."},
@@ -701,6 +720,47 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                 },
                 annotations={"readOnlyHint": False, "openWorldHint": True,
                              "destructiveHint": False},   # edits are isolated + discarded
+            ))
+            tools.append(Tool(
+                name="job_tail",
+                description=("Stream a running build's progress log (turn markers, agent output, "
+                             "DoD results, steering applied). Pass the job_id from ask_build "
+                             "async=true, plus the byte offset returned last time (0 to start). "
+                             "Returns the new offset + the new text — poll it to follow live and "
+                             "write step summaries for the user."),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "job_id": {"type": "string", "description": "The build job id."},
+                        "offset": {"type": "integer",
+                                   "description": "Byte offset to read from (0 first; then pass the "
+                                   "offset returned previously)."},
+                    },
+                    "required": ["job_id"],
+                },
+                annotations={"readOnlyHint": True, "openWorldHint": False, "destructiveHint": False},
+            ))
+            tools.append(Tool(
+                name="build_steer",
+                description=("Steer a running build like a human would. Queue an instruction for "
+                             "the NEXT turn (e.g. 'use Tailwind, not inline CSS'), and/or "
+                             "interrupt=true to cut the CURRENT turn short (the delegate's process "
+                             "is killed; files written so far are KEPT). The build then continues, "
+                             "applying your steering. Pass the job_id from ask_build async=true."),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "job_id": {"type": "string", "description": "The build job id."},
+                        "instruction": {"type": "string",
+                                        "description": "What to change/do next (optional if only "
+                                        "interrupting)."},
+                        "interrupt": {"type": "boolean",
+                                      "description": "Cut the current turn now (default false). "
+                                      "Files already written are kept."},
+                    },
+                    "required": ["job_id"],
+                },
+                annotations={"readOnlyHint": False, "openWorldHint": True, "destructiveHint": False},
             ))
         tools.append(Tool(
             name="debate",
@@ -1479,6 +1539,10 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
         info = jobs.status(_str(args, "job_id"))
         if info is None:
             return [TextContent(type="text", text=f"[error] unknown job_id: {_str(args, 'job_id')}")]
+        if info.get("kind") == "build":                # fold in live build progress
+            snap = buildloop.snapshot(_str(args, "job_id"))
+            if snap:
+                info = {**info, **snap}
         return [TextContent(type="text", text=_render_job_status(info))]
 
     if name == "job_result":
@@ -1560,6 +1624,29 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
                 f"[error] lane '{key}' has no build/write mode."))]
         mode = _str(args, "mode") or "isolated"      # ask_build_isolated == ask_build mode=isolated
         if name == "ask_build" and mode == "direct":
+            if bool(args.get("dry_run")):            # preview the brief, launch nothing
+                zlabel = _str(args, "zone") or _str(args, "target_dir") or "the target directory"
+                brief = worktrees._build_brief(_str(args, "task"), zlabel,
+                                               interface=_str(args, "interface"),
+                                               dod=_str(args, "dod"))
+                return [_emit("# Dry run — brief preview (nothing was launched)\n\n" + brief,
+                              label="ask_build")]
+            if config.build_disabled():
+                return [_emit("[error] direct builds are disabled on this machine "
+                              "(CLI_BRIDGE_NO_BUILD). Use mode=isolated for a review-only diff.",
+                              label="ask_build")]
+            if bool(args.get("async")):              # steerable background build job
+                state = buildloop.BuildState()
+                _args = dict(args)
+                job_id = jobs.start_job(
+                    "build", lambda: buildloop.run_build(state, run_lane=_run_lane, lane=lane,
+                                                         args=_args), preview=_str(args, "task"))
+                state.log_path = jobs.log_path_for(job_id)
+                buildloop.register(job_id, state)
+                return [TextContent(type="text", text=(
+                    f"Steerable build started: `{job_id}`. Follow it with `job_tail {job_id}`, "
+                    f"steer with `build_steer {job_id} \"…\"` (interrupt=true to cut a turn), "
+                    f"fetch the result with `job_result {job_id}`."))]
             return [_emit(await worktrees.ask_build_direct(
                 lane, args, _run_lane, build_disabled=config.build_disabled()), label="ask_build")]
         architect = None
@@ -1571,6 +1658,24 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
                     f"[error] no such architect_lane: {akey}."))]
         return [_emit(await worktrees.ask_build_isolated(lane, args, _run_lane, architect=architect),
                       label=name)]
+
+    if name == "job_tail":
+        out = buildloop.tail(_str(args, "job_id"), int(args.get("offset") or 0))
+        if out is None:
+            return [TextContent(type="text", text=(
+                "No live build for that job_id (it may have finished — use `job_result`, or it "
+                "was started in another server process)."))]
+        new_offset, chunk = out
+        body = chunk if chunk else "_(no new output yet)_"
+        return [_emit(f"offset={new_offset}\n{body}", label="job_tail", guard=False)]
+
+    if name == "build_steer":
+        msg = buildloop.steer(_str(args, "job_id"), _str(args, "instruction"),
+                              interrupt=bool(args.get("interrupt")))
+        if msg == "unknown":
+            return [TextContent(type="text", text=(
+                "No live build for that job_id (already finished, or started elsewhere)."))]
+        return [TextContent(type="text", text=msg)]
 
     if name == "conversations_list":
         rows = telemetry.convo_list()
@@ -2049,12 +2154,21 @@ def _render_job_status(st: dict) -> str:
     lines = [f"Job `{st['id']}` — **{st['status']}** ({st.get('kind', 'ask_all')})"]
     if st.get("preview"):
         lines.append(f"_task: {st['preview']}_")
+    if st.get("kind") == "build" and st.get("turn") is not None:
+        lines.append(f"turn {st['turn']}/{st.get('max_turns', '?')} · "
+                     f"{st.get('files_changed', 0)} files changed in zone `{st.get('zone', '')}` · "
+                     f"{st.get('queued_steers', 0)} steer(s) queued")
+        if st.get("note"):
+            lines.append(f"_{st['note']}_")
     if st.get("error"):
         lines.append(f"error: {st['error']}")
     if st["status"] == jobs.SUCCEEDED:
         lines.append(f"Fetch it with `job_result {st['id']}`.")
     elif st["status"] == jobs.RUNNING:
-        lines.append("Still running — poll again shortly.")
+        if st.get("kind") == "build":
+            lines.append(f"Follow with `job_tail {st['id']}`, steer with `build_steer {st['id']}`.")
+        else:
+            lines.append("Still running — poll again shortly.")
     return "\n".join(lines)
 
 

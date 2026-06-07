@@ -55,6 +55,16 @@ def _spill(job_id: str, text: str) -> str | None:
         return None
 
 
+def log_path_for(job_id: str) -> str:
+    """Deterministic per-job log path in the overflow dir. A long-running build appends its
+    turn-by-turn progress here so `job_tail` can stream it (byte-offset reads)."""
+    try:
+        os.makedirs(config.OVERFLOW_DIR, exist_ok=True)
+    except OSError:
+        pass
+    return os.path.join(config.OVERFLOW_DIR, f"{job_id}.log")
+
+
 def _read(path: str | None) -> str | None:
     if not path:
         return None
