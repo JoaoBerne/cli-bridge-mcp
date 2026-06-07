@@ -232,7 +232,8 @@ async def _arun_streamed(proc, argv: list[str], timeout_s: int, on_line, log_pat
     log_fh = None
     if log_path:
         try:
-            log_fh = open(log_path, "w", encoding="utf-8", errors="replace")
+            # newline="" → identical log bytes on POSIX and Windows (no \n -> \r\n translation).
+            log_fh = open(log_path, "w", encoding="utf-8", errors="replace", newline="")
         except OSError as e:                       # best-effort sink: never fail the spawn over it
             log.warning("log_path %s could not open: %s", log_path, e)
 

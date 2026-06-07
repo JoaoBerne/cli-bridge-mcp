@@ -127,7 +127,9 @@ def _append(path: str, text: str) -> None:
     if not path:
         return
     try:
-        with open(path, "a", encoding="utf-8", errors="replace") as fh:
+        # newline="" → no platform newline translation, so log bytes (and job_tail offsets)
+        # are identical on POSIX and Windows.
+        with open(path, "a", encoding="utf-8", errors="replace", newline="") as fh:
             fh.write(text)
     except OSError:
         pass

@@ -4,6 +4,7 @@ contract. Uses a real temp git repo (git only — no AI CLI, no network). The ag
 import asyncio
 import os
 import subprocess
+import sys
 
 import pytest
 
@@ -164,6 +165,9 @@ def test_zone_lock_disjoint_zones_both_held(tmp_path):
             pass
 
 
+@pytest.mark.skipif(sys.platform == "win32",
+                    reason="dead-pid lock reclaim is POSIX-only (Windows: lock is conservative, "
+                           "the error message tells the user to delete a stale lock)")
 def test_zone_lock_reclaims_dead_pid(tmp_path):
     td = str(tmp_path)
     path = worktrees._lock_path(td, "frontend")
