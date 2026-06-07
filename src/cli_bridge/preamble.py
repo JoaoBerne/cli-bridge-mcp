@@ -65,6 +65,27 @@ def preamble(lvl: str | None = None) -> str:
     return _PREFIX + _RULES[lvl] + "\n\n"
 
 
+# Named role personas (V.2): a small, hardcoded set prepended to a delegate's task via `role=`.
+# Deliberately NOT a declarative registry (the council's anti-bloat note) — a flat dict of the few
+# roles that earn their keep. Unknown role = no-op.
+ROLES = {
+    "reviewer": "Act as a rigorous code reviewer. Find concrete bugs, edge cases and risks; be "
+                "specific (file/line/why); no praise.",
+    "security": "Act as a security auditor (OWASP-aware). Hunt injection, auth/access flaws, "
+                "secrets, unsafe deserialization, SSRF, path traversal; rate severity.",
+    "planner": "Act as a planner. Break the task into a numbered, dependency-ordered list of small "
+               "verifiable steps; no code, just the plan.",
+    "devil": "Act as devil's advocate. Argue the STRONGEST case AGAINST the proposal; surface "
+             "failure modes and hidden assumptions before agreeing.",
+}
+
+
+def with_role(role: str, task: str) -> str:
+    """Prepend a named persona to the task (V.2). Unknown/empty role = task unchanged."""
+    persona = ROLES.get((role or "").strip().lower())
+    return f"[role] {persona}\n\n{task}" if persona else task
+
+
 def apply(task: str, lvl: str | None = None) -> str:
     """Prepend the terse instruction to a prose task. No-op when level is off, or when the
     task is shorter than CLI_BRIDGE_TERSE_MIN_CHARS (a tiny task yields a tiny answer, so the

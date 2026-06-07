@@ -248,6 +248,13 @@ def _ask_schema(lane: LaneSpec) -> dict:
     if "agent" in lane.caps:
         props["agent"] = {"type": "string", "enum": ["plan", "build"],
                           "description": "'plan' (read-only, default) or 'build' (EDITS FILES directly)."}
+    props["role"] = {"type": "string", "enum": ["", *sorted(preamble.ROLES)],
+                     "description": "Optional persona prepended to the task: reviewer / security / "
+                     "planner / devil (devil's-advocate)."}
+    if lane.key == "gemini":
+        props["images"] = {"type": "array", "items": {"type": "string"},
+                           "description": "Image file paths to include (vision, ban-safe — passed to "
+                           "the Gemini CLI as @-file references). Experimental: verify with your CLI."}
     return {"type": "object", "properties": props, "required": ["task"]}
 
 
@@ -1520,6 +1527,13 @@ async def _run_lane(lane: LaneSpec, args: dict, *, tool: str = "ask",
     # Compress the FINAL answer (cuts host context + delegate output tokens). Skipped for
     # structured-output tools (terse=False) so JSON stays intact. Telemetry keys on the raw
     # task, not the prefixed prompt.
+    task = preamble.with_role(_str(args, "role"), task)   # V.2: optional named persona
+    images = args.get("images")                           # V.3: vision via Gemini CLI @-file refs
+    if images and lane.key == "gemini" and isinstance(images, list):
+        refs = [f"@{os.path.abspath(os.path.expanduser(str(p)))}"
+                for p in images if str(p).strip()]
+        if refs:
+            task = f"{task}\n\n{' '.join(refs)}"
     prompt = preamble.apply(task) if terse else task
     argv = [lane.bin] + lane.build_ask(prompt, model, effort, agent, lane.bin)
     # Some lanes select the model via ENV (e.g. vibe's VIBE_ACTIVE_MODEL), not a flag. Merge any

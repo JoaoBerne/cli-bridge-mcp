@@ -322,6 +322,34 @@ def test_re_entry_guard_allows_top_level(monkeypatch):
     assert res.ok and res.kind == "ok"                 # depth 0 < max -> runs
 
 
+def test_role_persona_is_prepended(monkeypatch):
+    captured = {}
+
+    async def fake_arun(argv, timeout, cwd=None, env=None):
+        captured["argv"] = argv
+        return RunResult(True, "ok", "ok")
+    monkeypatch.setattr(server.runner, "arun", fake_arun)
+    lane = LaneSpec("gemini", "G", "echo", lambda task, model, effort, agent, bin: ["-p", task])
+    asyncio.run(server._run_lane(lane, {"task": "review this code carefully please",
+                                        "role": "reviewer"}))
+    prompt = captured["argv"][-1]
+    assert "[role]" in prompt and "code reviewer" in prompt
+
+
+def test_vision_images_become_at_refs(monkeypatch, tmp_path):
+    img = tmp_path / "a.png"
+    img.write_bytes(b"\x89PNG\r\n")
+    captured = {}
+
+    async def fake_arun(argv, timeout, cwd=None, env=None):
+        captured["argv"] = argv
+        return RunResult(True, "ok", "ok")
+    monkeypatch.setattr(server.runner, "arun", fake_arun)
+    lane = LaneSpec("gemini", "G", "echo", lambda task, model, effort, agent, bin: ["-p", task])
+    asyncio.run(server._run_lane(lane, {"task": "describe the image", "images": [str(img)]}))
+    assert f"@{img}" in captured["argv"][-1]                    # @-file ref injected for Gemini CLI
+
+
 def test_ann_helper_is_accepted_by_tool_and_coerced():
     # _ann wraps annotation hints so mypy accepts them; at runtime the SDK must still build a real
     # ToolAnnotations from them (pydantic coercion). Guards the typed-helper escape hatch.
