@@ -188,6 +188,13 @@ def enabled_tools() -> set[str]:
     return _tool_set("CLI_BRIDGE_ENABLED_TOOLS")
 
 
+def lean() -> bool:
+    """CLI_BRIDGE_LEAN=1 → expose only the curated 'core' surface (the daily-driver tools), the
+    rest hidden behind this one opt-in. Honours an explicit ENABLED/DISABLED list if also set
+    (that wins). Off by default — no host loses a tool unless it opts in."""
+    return os.environ.get("CLI_BRIDGE_LEAN", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def build_disabled() -> bool:
     """CLI_BRIDGE_DISABLE_BUILD=1 forces every delegate to read-only (plan), even if a caller
     asks agent='build'. For shared/team machines where no delegate should edit files."""
@@ -199,6 +206,23 @@ def max_parallel() -> int:
     a normal free council never hits it, low enough that many custom lanes can't OOM a small
     machine or burst quota. Clamped 1..64."""
     return int_env("CLI_BRIDGE_MAX_PARALLEL", 6, 1, 64)
+
+
+def current_depth() -> int:
+    """How deep this cli-bridge sits in a spawn tree. 0 = top-level (spawned by the human's host).
+    A delegate cli-bridge spawns gets CLI_BRIDGE_DEPTH=current+1 in its env (runner injects it), so
+    a delegate that itself re-enters the bridge sees a non-zero depth here."""
+    raw = os.environ.get("CLI_BRIDGE_DEPTH", "0").strip()
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 0
+
+
+def max_depth() -> int:
+    """Re-entry cap: a delegate at this depth or deeper may not spawn further delegates (fork-bomb
+    guard). Default 1 = the top-level bridge delegates once; a spawned delegate cannot re-spawn."""
+    return int_env("CLI_BRIDGE_MAX_DEPTH", 1, 0, 16)
 
 
 def mock() -> bool:

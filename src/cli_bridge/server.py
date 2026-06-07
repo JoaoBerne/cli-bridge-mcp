@@ -387,7 +387,12 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                                   "model": {"type": "string"},
                                   "effort": {"type": "string"},
                                   "cwd": {"type": "string", "description": "Dir the lane runs in "
-                                          "(point it at a file to review instead of pasting it)."}},
+                                          "(point it at a file to review instead of pasting it)."},
+                                  "timeout_s": {"type": "integer",
+                                                "description": f"Per-task timeout (default "
+                                                f"{DEFAULT_TIMEOUT_S}, max {MAX_TIMEOUT_S}) — raise "
+                                                "for heavy tasks like reading a file + deep review; "
+                                                "use async=true for long batches."}},
                                   "required": ["task"]}},
                     "max_concurrency": {"type": "integer",
                                         "description": "Cap simultaneous spawns (default: profile)."},
@@ -511,8 +516,8 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
         inputSchema={"type": "object", "properties": {
             "since": {"type": "string",
                       "description": "Limit to a recent window, e.g. '24h', '7d', '90m' (default: all)."},
-            "format": {"type": "string", "enum": ["text", "json"],
-                       "description": "text (default) or json."}}},
+            "output_format": {"type": "string", "enum": ["text", "json"],
+                              "description": "text (default) or json."}}},
         annotations=_ann(readOnlyHint=True, destructiveHint=False),
     ))
     tools.append(Tool(
@@ -544,8 +549,10 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             name="ask_cascade",
             description="Ask ONE model but with automatic fallback: tries lanes cheapest→strongest, "
                         "skipping cooled ones, and moves to the next on quota/auth/timeout/failure. "
-                        "Returns the first success (and a note of what was tried). Free/non-limited "
-                        "by default; include_paid to widen.",
+                        "Returns the first success (and a note of what was tried). Use this for plain "
+                        "cheapest-first; use `ask_best` to route by mode/your ratings, `route_plan` to "
+                        "preview the order without running. Free/non-limited by default; include_paid "
+                        "to widen.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -927,7 +934,8 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                          "aggregated deterministically (Borda count), and the peer-ranked #1 "
                          "answer is returned (SELECTION — research shows it beats blending). "
                          "Use it for 'what's the right answer?' when you want a peer-vetted "
-                         "result, not an open debate. Free/non-limited unless include_paid."),
+                         "result. Vs `ask_all` (shows every answer) / `fanout_compare` (options side "
+                         "by side) / `debate` (multi-round argue). Free/non-limited unless include_paid."),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -966,7 +974,9 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             description=("Anti-sycophancy: hand a CLAIM to one OUTSIDE lane with a critical-"
                          "reassessment prompt and get its skeptical review — does it actually "
                          "hold up? Pressure-test your OWN conclusion before acting (an "
-                         "independent skeptic, not a yes-man). Optional `lane` to choose who."),
+                         "independent skeptic, not a yes-man). Vs `debate` (multi-round, many "
+                         "lanes) / `consensus` (pick best of N): challenge = ONE skeptic on one "
+                         "claim. Optional `lane` to choose who."),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1077,6 +1087,20 @@ def _self_ask_tool(lane: LaneSpec) -> Tool:
 # doctor/setup are how a host learns what's installed and how to configure cost — never hide them.
 ESSENTIAL_TOOLS = {"doctor", "setup"}
 
+# CLI_BRIDGE_LEAN core surface (validated by a 2-tier model council): the daily-driver tools.
+# Per-lane `ask_<lane>` are kept too (handled by prefix below). Everything else hides behind the
+# opt-in. NOT including ask_all_async / ask_build_isolated(alias) — the prefix excludes those.
+_LEAN_CORE = {"ask_all", "ask_best", "ask_cascade", "review_diff", "security_review", "ask_build",
+              "workflow", "jobs_list", "job_tail", "commit_msg", "pr_describe", "doctor"}
+_NON_LANE_ASKS = {"ask_all", "ask_all_async", "ask_best", "ask_cascade", "ask_build",
+                  "ask_build_isolated"}
+
+
+def _lean_keep(name: str) -> bool:
+    """A per-lane ask (ask_gpt/ask_gemini/…) or a curated core tool."""
+    return (name in _LEAN_CORE or name in ESSENTIAL_TOOLS
+            or (name.startswith("ask_") and name not in _NON_LANE_ASKS))
+
 
 def _filter_tools(tools: list[Tool]) -> list[Tool]:
     """Apply CLI_BRIDGE_ENABLED_TOOLS (allowlist) / _DISABLED_TOOLS (denylist) so a host pays
@@ -1084,6 +1108,9 @@ def _filter_tools(tools: list[Tool]) -> list[Tool]:
     ~30-40k idle tokens from an unfilterable surface. Essentials are always kept."""
     enabled = config.enabled_tools()
     disabled = config.disabled_tools()
+    # LEAN: curated core surface, unless the host set an explicit allow/deny list (that wins).
+    if config.lean() and not enabled and not disabled:
+        return [t for t in tools if _lean_keep(t.name.lower())]
     if not enabled and not disabled:
         return tools
     out = []
@@ -1422,6 +1449,16 @@ async def _run_lane(lane: LaneSpec, args: dict, *, tool: str = "ask",
                            lane.key, model)
     if config.mock():                          # dry-run: canned answer, no spawn
         return runner.RunResult(True, _mock_answer(lane, model, task), "ok", latency_ms=0)
+    # Re-entry guard: a delegate cli-bridge spawns is given CLI_BRIDGE_DEPTH below. If THIS bridge
+    # is already a delegate at/over the cap, it must not spawn another — else a delegate configured
+    # to load cli-bridge could fork-bomb the council and the user's quota.
+    depth = config.current_depth()
+    if depth >= config.max_depth():
+        return runner.RunResult(False, (
+            f"re-entry guard: this cli-bridge is a delegate at depth {depth} (max "
+            f"{config.max_depth()}); refusing to spawn another to avoid recursion. Raise "
+            "CLI_BRIDGE_MAX_DEPTH only if you deliberately want nested delegation."),
+            "blocked")
     # Hard budget cap: refuse a PAID lane once today's estimated spend hits the ceiling.
     cap = config.daily_credit_cap()
     if cap > 0 and lane.is_paid:
@@ -1460,7 +1497,9 @@ async def _run_lane(lane: LaneSpec, args: dict, *, tool: str = "ask",
     # Some lanes select the model via ENV (e.g. vibe's VIBE_ACTIVE_MODEL), not a flag. Merge any
     # such overrides onto a COPY of the environment (a bare dict would drop the CLI's own PATH/auth).
     extra_env = lane.env_ask(model, effort, agent) if lane.env_ask else {}
-    spawn_env = {**os.environ, **extra_env} if extra_env else None
+    # Always stamp the child's depth (current+1) so a delegate that itself loads cli-bridge trips
+    # the re-entry guard above. Merge onto a COPY of the env (a bare dict drops the CLI's PATH/auth).
+    spawn_env = {**os.environ, **extra_env, "CLI_BRIDGE_DEPTH": str(depth + 1)}
     await runner.pace(lane.key, lane.min_interval_s)   # anti-burst (opt-in, per lane)
     rec = telemetry.start(tool, lane.key, model, task)
     timeout = _timeout(args.get("timeout_s"))
@@ -1590,7 +1629,8 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
     if name == "usage_report":
         since_s = _parse_since(_str(args, "since"))
         rep = telemetry.usage_report(since_s=since_s)
-        if _str(args, "format").lower() == "json":
+        # output_format is the project-wide name; accept legacy `format` too (no break).
+        if (_str(args, "output_format") or _str(args, "format")).lower() == "json":
             return [_emit(json.dumps(rep, indent=2), label="usage_report", guard=False)]
         return [_emit(_render_usage(rep), label="usage_report", guard=False)]
 

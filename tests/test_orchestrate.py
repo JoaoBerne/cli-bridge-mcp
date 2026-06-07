@@ -93,6 +93,22 @@ def test_resume_reruns_only_the_failed_task():
     assert res2[1]["ok"] and not res2[1]["cached"]           # the failed one re-ran and succeeded
 
 
+def test_batch_run_threads_per_task_timeout():
+    # Regression: batch_run used to DROP task['timeout_s'] (so "raise timeout_s" was a lie).
+    tel = FakeTelemetry()
+    lanes = {"a": _lane("a")}
+    seen = []
+
+    async def rl(lane, args, *, tool="ask", terse=True):
+        seen.append(args.get("timeout_s"))
+        return RunResult(True, "ok", "ok", 1)
+
+    asyncio.run(orchestrate.batch_run(
+        [{"lane": "a", "task": "x", "timeout_s": 300}], run_lane=rl, resolve_lane=lanes.get,
+        default_lane=lanes["a"], telemetry=tel))
+    assert seen == [300]                                  # the per-task timeout reached run_lane
+
+
 def test_unknown_lane_is_failed_not_crash():
     tel = FakeTelemetry()
     _rid, res = asyncio.run(orchestrate.batch_run(

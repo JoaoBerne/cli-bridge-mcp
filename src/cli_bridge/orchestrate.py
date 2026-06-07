@@ -83,7 +83,8 @@ async def batch_run(tasks: list[dict], *, run_lane, resolve_lane, default_lane, 
             else:
                 async with sem:
                     r = await run_lane(lane, {"task": t.get("task", ""), "model": t.get("model"),
-                                              "effort": t.get("effort"), "cwd": t.get("cwd")})
+                                              "effort": t.get("effort"), "cwd": t.get("cwd"),
+                                              "timeout_s": t.get("timeout_s")})
                 telemetry.batch_put(run_id, key, "done" if r.ok else "failed",
                                     result=r.output if r.ok else None,
                                     error=None if r.ok else r.render())

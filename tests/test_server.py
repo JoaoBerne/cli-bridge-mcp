@@ -293,6 +293,35 @@ def test_enabled_tools_is_a_lean_allowlist(monkeypatch):
     assert "debate" not in names and "consensus" not in names   # everything else hidden
 
 
+def test_lean_mode_exposes_only_core_surface(monkeypatch):
+    monkeypatch.setenv("CLI_BRIDGE_LEAN", "1")
+    names = _tool_names(monkeypatch)
+    # core tools that exist for any panel (the test panel has no build-capable lane, so
+    # ask_build/job_tail aren't registered regardless of LEAN — don't assert those here)
+    assert {"ask_best", "ask_all", "ask_cascade", "review_diff", "security_review", "workflow",
+            "doctor", "commit_msg", "pr_describe"} <= names
+    assert "ask_gpt" in names and "ask_gemini" in names   # per-lane asks kept
+    assert "debate" not in names and "premortem" not in names and "route_plan" not in names
+    assert "usage_report" not in names and "ask_all_async" not in names   # niche hidden
+
+
+def test_re_entry_guard_blocks_a_deep_delegate(monkeypatch):
+    # A delegate cli-bridge spawns runs with CLI_BRIDGE_DEPTH set; at/over the cap it must refuse.
+    monkeypatch.setenv("CLI_BRIDGE_DEPTH", "1")        # default max_depth=1 -> blocked
+    monkeypatch.delenv("CLI_BRIDGE_MOCK", raising=False)
+    lane = LaneSpec("gemini", "Gemini", "echo", lambda *a: [])
+    res = asyncio.run(server._run_lane(lane, {"task": "hi"}))
+    assert res.kind == "blocked" and "re-entry guard" in res.output
+
+
+def test_re_entry_guard_allows_top_level(monkeypatch):
+    monkeypatch.setenv("CLI_BRIDGE_DEPTH", "0")
+    monkeypatch.setenv("CLI_BRIDGE_MOCK", "1")          # canned answer, no real spawn
+    lane = LaneSpec("gemini", "Gemini", "echo", lambda *a: [])
+    res = asyncio.run(server._run_lane(lane, {"task": "hi"}))
+    assert res.ok and res.kind == "ok"                 # depth 0 < max -> runs
+
+
 def test_ann_helper_is_accepted_by_tool_and_coerced():
     # _ann wraps annotation hints so mypy accepts them; at runtime the SDK must still build a real
     # ToolAnnotations from them (pydantic coercion). Guards the typed-helper escape hatch.

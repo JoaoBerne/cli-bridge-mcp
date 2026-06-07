@@ -54,8 +54,13 @@ def test_run_lane_no_model_inherits_env(isolate, monkeypatch):
         return RunResult(True, "ok", "ok")
     monkeypatch.setattr(server.runner, "arun", fake_arun)
 
+    import os
     asyncio.run(server._run_lane(_mistral(), {"task": "hi"}))   # no model
-    assert captured["env"] is None            # inherit parent env unchanged
+    env = captured["env"]
+    # Child inherits the full parent env (not a stripped dict) and is stamped with its spawn depth
+    # (the BRIDGE_DEPTH re-entry guard); 0 (top-level) -> child runs at 1.
+    assert env is not None and env.get("PATH") == os.environ.get("PATH")
+    assert env["CLI_BRIDGE_DEPTH"] == "1"
 
 
 def test_list_models_without_command_shows_default(isolate, monkeypatch):
