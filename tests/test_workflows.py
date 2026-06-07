@@ -11,23 +11,23 @@ def _lane(key, display=None, paid="free"):
                           cost_default=paid)
 
 
-def test_assign_roles_round_robin_two_lanes():
+def test_assign_round_robin_two_lanes():
     a, b = _lane("a"), _lane("b")
-    got = workflows.assign_roles([a, b])
+    got = workflows._assign(workflows.REVIEW_ROLES, [a, b])
     roles = [r for r, _, _ in got]
     assert roles == [r for r, _ in workflows.REVIEW_ROLES]      # every role covered
     assert [ln.key for _, _, ln in got] == ["a", "b", "a", "b"]  # lanes cycle
 
 
-def test_assign_roles_more_lanes_than_roles_uses_first_n():
+def test_assign_more_lanes_than_roles_uses_first_n():
     pool = [_lane(k) for k in ("a", "b", "c", "d", "e")]
-    got = workflows.assign_roles(pool)
+    got = workflows._assign(workflows.REVIEW_ROLES, pool)
     assert len(got) == len(workflows.REVIEW_ROLES)               # one role each
     assert [ln.key for _, _, ln in got] == ["a", "b", "c", "d"]  # 5th lane unused
 
 
-def test_assign_roles_empty():
-    assert workflows.assign_roles([]) == []
+def test_assign_empty():
+    assert workflows._assign(workflows.REVIEW_ROLES, []) == []
 
 
 def test_git_diff_success(monkeypatch):

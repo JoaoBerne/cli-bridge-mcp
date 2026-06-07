@@ -106,9 +106,6 @@ def _assign(roles_def: list[tuple[str, str]],
     return [(role, desc, lanes[i % len(lanes)]) for i, (role, desc) in enumerate(roles_def)]
 
 
-def assign_roles(lanes: list[LaneSpec]) -> list[tuple[str, str, LaneSpec]]:
-    return _assign(REVIEW_ROLES, lanes)
-
 
 _JSON_RULES = (
     "Return ONLY a JSON array of findings — no prose, no markdown fences. Each finding is an "

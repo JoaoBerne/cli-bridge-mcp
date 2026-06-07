@@ -57,7 +57,6 @@ from .config import (
     SETUP_TEXT,
 )
 from .detect import installed_lanes, is_installed
-from .lanes import LANES_LOAD_STATUS as _LANES_LOAD_STATUS
 from .lanes import LaneSpec, all_lanes
 
 # config.py is the single source of truth for env/timeouts/profile/onboarding. These thin
@@ -68,10 +67,6 @@ _profile_is_set = config.profile_is_set
 _cost_config_is_set = config.cost_config_is_set
 # How long a spilled overflow file is kept before best-effort pruning (P0-4).
 OVERFLOW_TTL_H = config.int_env("CLI_BRIDGE_OVERFLOW_TTL_H", 24, 0, 24 * 365)
-
-
-def lanes_load_status() -> dict:
-    return dict(_LANES_LOAD_STATUS)
 
 
 server: Server = Server("cli-bridge", instructions=INSTRUCTIONS)
@@ -2058,6 +2053,8 @@ def _doctor(host: str) -> str:
         model = lane.model_for("")
         default = f" - default model: {model}" if model else ""
         lines.append(f"- **{lane.key}** ({lane.bin}) - {mark}{paid}{exp}{hidden}{default}")
+        if not installed and lane.install_hint:
+            lines.append(f"  - _install: {lane.install_hint}_")
         if installed and lane.cost_note_effective:
             lines.append(f"  - _{lane.cost_note_effective}_")
         if not lane.is_paid and lanes_mod.is_paid_opencode_model(model):

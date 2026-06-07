@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added (i18n + landing)
+- **README in 6 more languages** (`docs/i18n/`): Français, 简体中文, Español, Português (BR),
+  日本語, Deutsch — full translations with a language switcher under the banner. English stays
+  canonical; translations may lag.
+- **GitHub Pages landing** (`site/index.html` + `pages.yml`, manual deploy): one page on the
+  README's charter — mark, animated banner, demo GIF, install, differentiators, honesty quote.
+
+### Removed (dead code)
+- `server.lanes_load_status()` and `workflows.assign_roles()` — orphan one-line aliases nothing
+  in `src/` called (tests now use the underlying `lanes.LANES_LOAD_STATUS` / `_assign`).
+- `LaneSpec.install_hint` was written for every lane but never read — `doctor` now prints it
+  for lanes that are NOT on PATH, which is what it was for.
+
 ### Added (terminal-friendly reports)
 - **`CLI_BRIDGE_TRACE_FOOTER=off`** hides the `## Trace` JSON footer in workflow reports
   (review_diff / security_review / test_plan / premortem / debate). Default unchanged (shown);
