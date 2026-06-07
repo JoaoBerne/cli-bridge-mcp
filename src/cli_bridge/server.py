@@ -613,8 +613,65 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
         build_lanes = [ln for ln in lanes if "agent" in ln.caps]
         if build_lanes:
             tools.append(Tool(
+                name="ask_build",
+                description=("Commission a build-capable lane to do REAL work. mode=isolated "
+                             "(default) edits a throwaway worktree and returns a diff — your repo "
+                             "is untouched. mode=direct builds straight into a target dir, guarded "
+                             "by git + a ZONE contract: the delegate may write only inside `zone`, "
+                             "all undo is zone-scoped (never a global reset), a per-zone lock stops "
+                             "races, and any file written OUTSIDE the zone is detected and the "
+                             "build rejected — so the host can build other parts in the SAME repo "
+                             "in parallel. Greenfield dirs are created and git-initialised."),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "task": {"type": "string", "description": "What the agent should build."},
+                        "lane": {"type": "string", "enum": [ln.key for ln in build_lanes],
+                                 "description": "The build-capable lane that does the work."},
+                        "mode": {"type": "string", "enum": ["isolated", "direct"],
+                                 "description": "isolated (default, safe diff) or direct (writes "
+                                 "real files in the zone)."},
+                        "target_dir": {"type": "string",
+                                       "description": "direct: dir to build in (created if absent; "
+                                       "default = host launch dir)."},
+                        "zone": {"type": "string",
+                                 "description": "direct: the ONLY sub-path under target_dir the "
+                                 "delegate may write (default = the whole target_dir). Set this to "
+                                 "build in parallel with other in-repo work, e.g. 'frontend'."},
+                        "interface": {"type": "string",
+                                      "description": "direct: optional interface contract to put in "
+                                      "the brief (e.g. the API shape the delegate must target)."},
+                        "dod": {"type": "string",
+                                "description": "direct: optional textual Definition of Done for the "
+                                "brief (an executable DoD is a Phase-3 feature)."},
+                        "scaffold_git": {"type": "boolean",
+                                         "description": "direct: git-init a non-repo target (default "
+                                         "true). false on a non-repo is refused (no safety net)."},
+                        "confirm_dirty": {"type": "boolean",
+                                          "description": "direct: build even if the zone has "
+                                          "uncommitted tracked changes (default false)."},
+                        "architect_lane": {"type": "string", "enum": [ln.key for ln in lanes],
+                                           "description": "isolated only: a (usually stronger) lane "
+                                           "that first writes a PLAN the editor implements."},
+                        "model": {"type": "string", "description": "Model override (empty = default)."},
+                        "effort": {"type": "string",
+                                   "enum": ["", "minimal", "low", "medium", "high", "max"],
+                                   "description": "Reasoning depth."},
+                        "cwd": {"type": "string",
+                                "description": "isolated: a dir inside the repo to isolate (default: "
+                                               "host launch dir)."},
+                        "timeout_s": {"type": "integer",
+                                      "description": f"Timeout (max {MAX_TIMEOUT_S})."},
+                    },
+                    "required": ["task", "lane"],
+                },
+                annotations={"readOnlyHint": False, "openWorldHint": True,
+                             "destructiveHint": True},   # direct mode writes the real repo
+            ))
+            tools.append(Tool(
                 name="ask_build_isolated",
-                description=("Run a build-capable lane in WRITE mode but SAFELY: it edits a "
+                description=("[legacy alias of ask_build mode=isolated] Run a build-capable lane in "
+                             "WRITE mode but SAFELY: it edits a "
                              "throwaway git worktree checked out at HEAD, and you get the "
                              "resulting diff to review — your real repo is never modified "
                              "(nothing is auto-applied). The recommended way to use write mode."),
@@ -1492,7 +1549,7 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
         targets = _ask_all_targets(lanes, _ask_all_include_paid(args))
         return [_emit(await workflows.test_plan(targets, args, _run_lane), label="test_plan")]
 
-    if name == "ask_build_isolated":
+    if name in ("ask_build", "ask_build_isolated"):
         key = _str(args, "lane")
         lane = _lane_by_key(key, lanes)
         if not lane:
@@ -1501,6 +1558,10 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
         if "agent" not in lane.caps:
             return [TextContent(type="text", text=(
                 f"[error] lane '{key}' has no build/write mode."))]
+        mode = _str(args, "mode") or "isolated"      # ask_build_isolated == ask_build mode=isolated
+        if name == "ask_build" and mode == "direct":
+            return [_emit(await worktrees.ask_build_direct(
+                lane, args, _run_lane, build_disabled=config.build_disabled()), label="ask_build")]
         architect = None
         akey = _str(args, "architect_lane")
         if akey:
@@ -1509,7 +1570,7 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
                 return [TextContent(type="text", text=(
                     f"[error] no such architect_lane: {akey}."))]
         return [_emit(await worktrees.ask_build_isolated(lane, args, _run_lane, architect=architect),
-                      label="ask_build_isolated")]
+                      label=name)]
 
     if name == "conversations_list":
         rows = telemetry.convo_list()
