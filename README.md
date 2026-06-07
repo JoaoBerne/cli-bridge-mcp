@@ -5,6 +5,8 @@
   <img src="assets/banner-light.svg" width="860" alt="You → cli-bridge → a council of AI CLIs in parallel → one merged review">
 </picture>
 
+**English** · [Français](docs/i18n/README.fr.md) · [简体中文](docs/i18n/README.zh-CN.md) · [Español](docs/i18n/README.es.md) · [Português (BR)](docs/i18n/README.pt-BR.md) · [日本語](docs/i18n/README.ja.md) · [Deutsch](docs/i18n/README.de.md)
+
 </div>
 
 # cli-bridge
@@ -33,6 +35,15 @@ You → Claude:  "ask the council whether this auth logic is safe"
 Claude → cli-bridge → [ Gemini ] [ GPT ] [ Mistral ] [ Qwen ] … in parallel
             ← three independent reviews + a synthesis of where they agree & disagree
 ```
+
+<div align="center">
+
+<img src="assets/demo.gif" width="860" alt="cli-bridge security-review demo: a committed auth bypass is caught independently by two models, merged into one severity-ranked report, $0 on free lanes">
+
+_Real run (2.5× speed): a committed auth bypass — `security-review` fans OWASP roles across free
+models in parallel; two models flag it **blocker** independently, and `usage` shows the receipts._
+
+</div>
 
 > **Why it's different in one breath:** it never holds an API key and never extracts a token — it
 > drives the official CLIs you've **already installed and logged into**. A free-lane council costs
