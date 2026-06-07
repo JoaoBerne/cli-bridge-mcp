@@ -11,6 +11,7 @@ server.py keeps only thin glue.
 from __future__ import annotations
 
 import asyncio
+import difflib
 import json
 
 from . import config, router, runner, telemetry
@@ -43,6 +44,27 @@ def one_phrase(text: str, limit: int = 120) -> str:
     return "(empty)"
 
 
+def agreement_score(texts: list[str]) -> float:
+    """Disagreement-as-uncertainty: a cheap 0..1 agreement signal over the council's answers
+    (mean pairwise difflib ratio, stdlib — no embeddings). 1.0 = aligned, low = the models disagree
+    so the result is LESS trustworthy. A heuristic (different words can agree, shared words can
+    disagree) — directional, not a proof. <2 answers => 1.0 (nothing to compare)."""
+    clean = [t for t in texts if t and t.strip()]
+    if len(clean) < 2:
+        return 1.0
+    ratios = [difflib.SequenceMatcher(None, clean[i], clean[j]).ratio()
+              for i in range(len(clean)) for j in range(i + 1, len(clean))]
+    return round(sum(ratios) / len(ratios), 2) if ratios else 1.0
+
+
+def _agreement_line(score: float, n: int) -> str:
+    if n < 2:
+        return ""
+    flag = "⚠️ low — the models DISAGREE, treat as uncertain" if score < 0.34 else (
+        "mixed" if score < 0.67 else "high")
+    return f"_Agreement: {score} ({flag}) — heuristic over {n} answers._"
+
+
 def council_recap(rows: list[tuple[str, bool, int, str]], *, title: str = "Council") -> str:
     """The at-a-glance digest the host sees FIRST: one line per delegate — answered?, latency
     (when known), a one-line gist — so there's never a blind spot about what each model said.
@@ -73,11 +95,17 @@ async def ask_cascade(lanes: list[LaneSpec], args: dict, *, run_lane, emit) -> l
         return [TextContent(type="text", text=(
             "[error] no lanes eligible for cascade. Install/login a CLI, or set include_paid=true "
             "/ CLI_BRIDGE_PROFILE=max to allow limited/paid lanes."))]
-    sub = {"task": task, "cwd": _s(args, "cwd"), "timeout_s": args.get("timeout_s")}
-    chosen, attempts = await run_chain(ordered, sub, "ask_cascade", run_lane=run_lane)
+    escalate = bool(args.get("escalate"))
+    sub = {"task": _escalate_task(task) if escalate else task,
+           "cwd": _s(args, "cwd"), "timeout_s": args.get("timeout_s")}
+    if escalate:
+        chosen, attempts = await _run_chain_escalate(ordered, sub, run_lane=run_lane)
+    else:
+        chosen, attempts = await run_chain(ordered, sub, "ask_cascade", run_lane=run_lane)
     if chosen is not None:
         res = next(r for ln, r in attempts if ln is chosen)
-        return [emit(f"{res.output}\n\n{cascade_trace(attempts, chosen=chosen)}",
+        out = res.output.replace(_ESCALATE, "").rstrip() if escalate else res.output
+        return [emit(f"{out}\n\n{cascade_trace(attempts, chosen=chosen)}",
                      label="ask_cascade")]
     return [TextContent(type="text", text=(
         "[error] all lanes failed in cascade: "
@@ -95,6 +123,30 @@ async def run_chain(ordered: list[LaneSpec], sub: dict, tool: str, *, run_lane
         if res.ok:
             return lane, attempts
     return None, attempts
+
+
+_ESCALATE = "[ESCALATE]"
+
+
+def _escalate_task(task: str) -> str:
+    return (f"{task}\n\n(If you are NOT highly confident this fully and correctly answers it, end "
+            f"your reply with the token {_ESCALATE} on its own line so a stronger model takes over.)")
+
+
+async def _run_chain_escalate(ordered: list[LaneSpec], sub: dict, *, run_lane
+                              ) -> tuple[LaneSpec | None, list[tuple[LaneSpec, runner.RunResult]]]:
+    """Like run_chain but a SUCCESS that self-reports low confidence ([ESCALATE]) is NOT accepted
+    while a stronger lane remains — confidence-escalate, not just failure-fallback. The last lane's
+    answer is always accepted (nowhere left to escalate). Self-report is noisy → opt-in only."""
+    attempts: list[tuple[LaneSpec, runner.RunResult]] = []
+    for i, lane in enumerate(ordered):
+        res = await run_lane(lane, sub, tool="ask_cascade")
+        attempts.append((lane, res))
+        if res.ok and not (_ESCALATE in res.output and i < len(ordered) - 1):
+            return lane, attempts
+    # All lanes either failed or escalated; if the last one answered (ok), take it.
+    last_lane, last_res = attempts[-1] if attempts else (None, None)
+    return (last_lane if last_res and last_res.ok else None), attempts
 
 
 # ── best (route by mode, then cascade within the ordered list) ─────────────────────────────
@@ -203,6 +255,9 @@ async def ask_all_body(lanes: list[LaneSpec], args: dict, *, run_lane, progress,
     footer = (f"\n\n---\n_Skipped limited/paid lanes: {', '.join(skipped)} "
               f"(set include_paid=true)._"
               if skipped else "")
+    ok_outputs = [res.output for lane, res in zip(targets, results, strict=False)
+                  if not isinstance(res, BaseException) and res.ok]
+    agreement = agreement_score(ok_outputs)
     synth = ""
     if bool(args.get("synthesize")):
         ok = [(lane, res) for lane, res in zip(targets, results, strict=False)
@@ -221,10 +276,14 @@ async def ask_all_body(lanes: list[LaneSpec], args: dict, *, run_lane, progress,
                 for lane, res in zip(targets, results, strict=False)],
             "synthesis": synth or None,
             "skipped": skipped,
+            "agreement": agreement,
         }, indent=2)
 
     # Recap first so the host gets an at-a-glance digest of every lane before the full blocks.
     recap = council_recap(rows, title="Council")
+    agree_line = _agreement_line(agreement, len(ok_outputs))
+    if agree_line:
+        recap += "\n\n" + agree_line
     if bool(args.get("summary_only")):         # recap + synthesis only — skip the raw blocks (tokens-)
         body = recap + footer
     else:

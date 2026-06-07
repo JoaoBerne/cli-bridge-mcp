@@ -587,6 +587,10 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                     "cwd": {"type": "string", "description": "Directory the CLI runs in."},
                     "timeout_s": {"type": "integer",
                                   "description": f"Per-attempt timeout (max {MAX_TIMEOUT_S})."},
+                    "escalate": {"type": "boolean",
+                                 "description": "Confidence-escalate: a cheap lane that self-reports "
+                                 "low confidence ([ESCALATE]) hands off to a stronger one, not just "
+                                 "on failure. Self-report is noisy — opt-in. Default false."},
                 },
                 "required": ["task"],
             },
