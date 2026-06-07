@@ -29,9 +29,9 @@ host (Claude/Codex/…) ──MCP/stdio──▶ cli-bridge ──spawn subproce
 | `config.py` | All env parsing, timeouts, cost profile, onboarding text. **Single source of truth** for settings. | Need a new env var? It goes here. |
 | `telemetry.py` | Local sqlite: run log + per-lane health/cooldown + response cache + async-job rows + estimated token/credit accounting. | **Best-effort: must never raise into a delegation.** |
 | `router.py` | Pure functions that order lanes for `ask_cascade` (cheapest→strongest) and `ask_best` (per-mode: fast/cheap/deep/code/review/security), skipping cooled ones. | No side effects — pure, easy to test. |
-| `council.py` | The fan-out itself: `ask_all` / `ask_cascade` / `ask_best` / `synthesize`. Extracted from `server.py`; takes injected `run_lane` / `emit` / `progress` / `host_sample` (cost-policy helpers stay in `server.py`). | Same injection pattern as `workflows.py` — testable with fakes. |
+| `council.py` | The fan-out itself: `ask_all` (+ `agreement` score) / `ask_cascade` (opt-in confidence-escalate) / `ask_best` / `synthesize` + the `council_recap` digest. Extracted from `server.py`; takes injected `run_lane` / `emit` / `progress` / `host_sample`. | Same injection pattern as `workflows.py` — testable with fakes. |
 | `workflows.py` | The multi-model workflows: `review_diff`, `security_review`, `debate` + the `council_recap` digest + deterministic `prechecks` (secrets / dangerous shell). Orchestrates several lanes. | Takes an injected `run_lane`, so it's testable with fakes. |
-| `orchestrate.py` | Durable fan-out (`batch_run`, SQLite-journalled, `resume_id` across restart) + presets: `refine_plan`, `council_review`, `map_review`, `research_verify`, `verify_repair` (cross-model loop), `fanout_compare`. | Presets are hardcoded post-fan-out steps, not a DSL — the host composes logic. |
+| `orchestrate.py` | Durable fan-out (`batch_run`: typed result + provenance, per-invocation budget caps + `dry_run` cost envelope, SQLite-journalled `resume_id`) + presets: `refine_plan`, `council_review`, `map_review`, `research_verify`, `verify_repair`, `fanout_compare`, **`jury`** (cross-vendor, author≠reviewer, k-of-N fail-closed). | Presets are hardcoded post-fan-out steps, not a DSL — the host composes logic. |
 | `findings.py` | Pure: parse each reviewer's JSON tolerantly, merge by file/line/title, derive confidence from agreement, render Markdown or a JSON result. | No I/O — deterministic merge replaces an LLM merge pass (can't fabricate findings). |
 | `jobs.py` | In-process async jobs (`ask_all_async`): wrap a coroutine in `asyncio.create_task`, return a job id, poll/fetch/cancel later. Live registry + best-effort sqlite row. | No cross-restart resume in v1 — stale `running` rows become `interrupted`. |
 | `preamble.py` | The terse response-style preamble prepended to delegate prompts. | Prose only — never applied to structured (JSON) workflows. |
@@ -110,6 +110,8 @@ host (Claude/Codex/…) ──MCP/stdio──▶ cli-bridge ──spawn subproce
 5. **Telemetry never raises** into a delegation path.
 6. **Portable**: macOS/Linux/Windows (see `runner._kill_tree`'s Windows branch).
 7. **Stdlib + `mcp` only**: no new runtime dependencies.
+8. **Re-entry capped**: every spawn carries `CLI_BRIDGE_DEPTH`; `_run_lane` refuses past
+   `CLI_BRIDGE_MAX_DEPTH` (default 1) so a delegate can't recurse into the bridge.
 
 ## Extending it
 

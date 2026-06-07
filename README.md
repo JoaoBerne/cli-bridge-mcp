@@ -97,6 +97,20 @@ these to your assistant ("ask the council…", "delegate the frontend to codex�
    workflow(preset="fanout_compare", task="fix this failing test", lanes=["gpt","gemini","opencode"])
    review_diff(base="origin/main")   ·   security_review(base="origin/main")   # OWASP, severity-ranked
    ```
+7. **Get a cross-vendor jury to vote on an answer (the verification edge).** N verifiers from
+   *different model families* than the author vote PASS/FAIL — uncorrelated blind spots, the one
+   thing a single-vendor tool can't do. Fail-closed; disagreement is surfaced, not hidden.
+   ```
+   workflow(preset="jury", task="is this migration safe?", author_lane="gpt")   # verifiers auto-picked cross-family
+   ```
+8. **See the bill before you spend, and cap it.** Preview a fan-out's cost, then bound it.
+   ```
+   batch_run(tasks=[...], dry_run=true)              # cost envelope (calls + est token/credit range), nothing spawned
+   batch_run(tasks=[...], max_calls=10, max_credits=2.0)   # hard per-invocation budget; over-budget tasks skipped
+   ```
+
+_Also: `ask_<lane>(role="reviewer"|"security"|"planner"|"devil")` for a quick persona ·
+`ask_gemini(images=[...])` for ban-safe vision · `CLI_BRIDGE_LEAN=1` for a curated 12-tool surface._
 
 **Honest north-star, not a promise:** cli-bridge is the best dev tool for *driving several AI
 subscriptions you already pay for* and orchestrating sub-agents across them. The longer-horizon
@@ -327,7 +341,7 @@ Hosts that support MCP prompts also surface `review_diff`, `security_review`, `d
 | Tool | What it does |
 |------|--------------|
 | `ask_<lane>` | Ask one model. Params: `task`, optional `model`, `effort`, `agent`, `cwd`, `timeout_s`, **`conversation`** (start/continue a round-table thread — see below). |
-| `ask_all` | Fan-out the same question to every free, non-limited lane in parallel. `synthesize: true` adds an agreement/disagreement summary. `include_paid: true` to also query limited/paid lanes. |
+| `ask_all` | Fan-out the same question to every free, non-limited lane in parallel. Returns an **`agreement` score** (0–1, how aligned the answers are — low = the council disagrees, treat as uncertain). `synthesize: true` adds an agreement/disagreement summary. `include_paid: true` to also query limited/paid lanes. |
 | `ask_cascade` | Ask one model **with automatic fallback** — tries lanes cheapest→strongest, skipping cooled ones, moving on at quota/auth/timeout. Returns the first success + a trace of what was tried (cost tier, latency, why skipped). |
 | `ask_best` | Pick **one lane by mode** (`fast`/`cheap`/`deep`/`code`/`review`/`security`) from cost, health, measured latency **and your own `rate_lane` scores**, then run it with fallback. For "just use the right model" — `ask_all` compares, `ask_cascade` is plain cheapest-first. |
 | `rate_lane` | **Teach the router.** Score a lane's answer 1–5 for a task-type (`mode`) → `ask_best` then prefers the lanes that win that mode **on your machine**. Stored in sqlite (survives `/compact`/restart); a two-rating floor before any lane steers, so feedback is honest, not noisy. Every `ask_best` answer prints the exact call. |
@@ -344,8 +358,8 @@ Hosts that support MCP prompts also surface `review_diff`, `security_review`, `d
 | `pr_describe` | Generate a **PR title + description** (Summary / Changes / Testing) from the branch's diff + commit log vs a base (default origin/main → main). Read-only. Optional `base`, `lane`, `cwd`. |
 | `ask_build` | **Commission a real build.** `mode=isolated` (default) edits a throwaway worktree and returns a **diff** — repo untouched. `mode=direct` builds straight into a target dir, guarded by git + a **zone contract** (delegate writes only inside `zone`; out-of-zone writes are detected and reverted; undo is zone-scoped, never a global reset) so the host can build other parts of the **same repo in parallel**. `async=true` makes it a **steerable** job. `dry_run` previews the brief. Non-text files the build writes (images, PDFs, binaries) are returned as **artifacts by path** (type + size), not dumped as a binary diff — so a delegate can have another CLI *generate* a file and hand you the path (capability-borrowing). (`ask_build_isolated` is a legacy alias.) |
 | `job_tail` / `build_steer` | **Follow & steer a running build like a human.** `job_tail(job_id, offset)` streams its progress log (byte-offset). `build_steer(job_id, instruction, interrupt)` queues a correction for the next turn, or `interrupt=true` cuts the current turn (files written so far are kept). An optional executable **Definition of Done** (`dod_cmd`, an argv list) is run after each turn — pass = done, fail = one more turn with the error fed back. |
-| `batch_run` | **Durable fan-out**: run many independent asks in parallel in **one call** instead of N (saves host context + quota). Each result is journalled, so `resume_id` replays the tasks that already finished and runs only the rest — **survives a server restart**. `async`-able. |
-| `workflow` | **Ready-made multi-model workflows** over the batch substrate. **`refine_plan`** — let the council DEMOLISH your plan from distinct angles (pass `plan_file`; each lane reads it, never recopied). `council_review` (N lanes answer one question + optional judge), `map_review` (review many files in parallel), `research_verify` (answer then adversarially cross-check), **`verify_repair`** (one lane builds, a **different model** reviews, repair loop until `VERDICT: APPROVED` or `max_rounds` — cross-model catches what self-review can't), **`fanout_compare`** (same task to N lanes, answers side by side to pick/merge). All resumable + async-able. |
+| `batch_run` | **Durable fan-out**: run many independent asks in parallel in **one call** instead of N (saves host context + quota). Each result is journalled, so `resume_id` replays the tasks that already finished and runs only the rest — **survives a server restart**. `dry_run: true` returns a **cost envelope** (calls + est token/credit range) without spawning; `max_calls`/`max_credits` cap the invocation (over-budget tasks skipped). `async`-able. |
+| `workflow` | **Ready-made multi-model workflows** over the batch substrate. **`refine_plan`** — let the council DEMOLISH your plan from distinct angles (pass `plan_file`; each lane reads it, never recopied). `council_review` (N lanes answer one question + optional judge), `map_review` (review many files in parallel), `research_verify` (answer then adversarially cross-check), **`verify_repair`** (one lane builds, a **different model** reviews, repair loop until `VERDICT: APPROVED` or `max_rounds` — cross-model catches what self-review can't), **`fanout_compare`** (same task to N lanes, answers side by side to pick/merge), **`jury`** (author produces → N verifiers from **different vendor families** vote PASS/FAIL/ABSTAIN, k-of-N **fail-closed**, author≠reviewer enforced — the cross-vendor verification edge a single-vendor tool can't match). All resumable + async-able. |
 | `list_models` | List a lane's available models (`lane` param) where the CLI exposes them; otherwise shows the resolved default model + how to choose one. (`list_<lane>_models` also exists for lanes with a native list command.) |
 | `conversations_list` / `conversation_show` | List recent **round-table threads** (recover an id after a context reset) / show one thread's full transcript, attributed by lane. |
 | `doctor` | Health check: installed CLIs, detected host, cost/quota stance, cooldowns, defaults. `deep: true` live-probes each free lane's auth **and checks every lane's flags against its `--help`** — warns if a CLI renamed/removed a flag cli-bridge relies on (drift) before the lane fails silently. |
@@ -605,11 +619,10 @@ Point Cursor / VS Code (Cline, Continue) / Zed at the **same command** (`uvx cli
 - **Sandboxed host:** if your host runs the server in a strict sandbox (read-only FS / no
   network), spawned CLIs inherit it and may fail to reach their providers. cli-bridge surfaces
   this as an `auth`/`failed` error rather than hanging.
-- **No delegate re-entry guard yet.** cli-bridge spawns each CLI in **non-interactive print mode**,
-  which doesn't load MCP servers — so a delegate can't normally call cli-bridge back. But there is
-  no explicit depth/re-entry cap, so a delegate deliberately configured to run cli-bridge could in
-  principle recurse. A `BRIDGE_DEPTH` spawn-guard is on the roadmap; until then, don't point a
-  build lane at a config that re-enters the bridge.
+- **Delegate re-entry is depth-capped.** Each spawn is stamped `CLI_BRIDGE_DEPTH`; a delegate that
+  itself loads cli-bridge is refused once it would exceed `CLI_BRIDGE_MAX_DEPTH` (default 1), so a
+  misconfigured delegate can't fork-bomb the council/quota. Raise `CLI_BRIDGE_MAX_DEPTH` only if you
+  deliberately want nested delegation.
 
 ---
 

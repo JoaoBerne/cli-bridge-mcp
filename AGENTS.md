@@ -85,7 +85,12 @@ normalization, runtime paid-model warning, **council module extraction** (`counc
 run_lane), **mypy gate in CI** (typed `_ann()` helper for the SDK-stub noise), **eval v3** (seeded
 permutation test replacing the 1-sigma heuristic + multi-bug fixtures + in-fixture decoys),
 **build artifact-return** (non-text files surfaced by path — capability-borrowing), **cross-model
-`verify_repair`** + **`fanout_compare`** workflow presets.
+`verify_repair`** + **`fanout_compare`** workflow presets. **Dynamic orchestration engine (Phase 1):**
+typed result envelope + provenance, `findings.extract_json` contract, per-invocation budget caps +
+`dry_run` cost envelope, **cross-vendor `jury`** (author≠reviewer family, k-of-N fail-closed) +
+`lanes.family_of`, **disagreement-as-uncertainty** score on `ask_all`, opt-in **confidence-escalate**
+cascade, **`BRIDGE_DEPTH` re-entry guard**, **`CLI_BRIDGE_LEAN`** core surface, `role=` personas,
+Gemini `images=` vision (experimental).
 
 ### Considered & deferred (rationale — not just "not yet")
 - **forced-pacing engine** — contradicts the model (cli-bridge delegates investigation to the
@@ -103,16 +108,12 @@ permutation test replacing the 1-sigma heuristic + multi-bug fixtures + in-fixtu
   prone and vendor-hostile (we build on CLIs we don't control). Roadmap only; positioned honestly
   as a direction, never sold as a shipped protocol. See `docs/ARCHITECTURE.md` for the framing.
 
-### Next candidates (small, high-value — informed by competitive + agent-research mining)
-- **`BRIDGE_DEPTH` re-entry guard** — set a depth env on every spawn; refuse a delegate that
-  re-enters the bridge (fork-bomb guard). Low practical risk today (print-mode spawns don't load
-  MCP) but the one correctness gap worth closing first.
-- **disagreement-as-uncertainty** — return a cheap agreement score on `ask_all` (low agreement =
-  "council unsure"); the free honest uncertainty meter a single model can't give.
-- **confidence-escalate cascade** — `ask_cascade` escalates on a low self-reported confidence
-  sentinel, not just on failure (the biggest cost lever in the routing literature).
-- **author≠reviewer firewall** — exclude the build author's model family from its review panel
-  (kills "Codex writes, Codex reviews" self-preference).
-- **architect/editor split** for `ask_build`; **planner → plan_build** feeding batch_run/buildloop;
-  a named **role registry** (`role=` on any lane); **vision** via `images=[paths]` on `ask_gemini`.
+### Next candidates (small — after real-usage soak of the engine; council-trimmed)
+- **early-stop `ask_all`** (`agree_stop`) — stop spawning once K lanes agree (reuses the agreement
+  score). Deferred: needs ask_all restructured from gather-all to incremental + cancellation, and
+  the agreement heuristic validated on real outputs first.
+- **architect/editor split** for `ask_build` (plan on a strong lane, edit on a cheap diff-precise one).
+- GATED (build on real demand, not speculatively): **planner → plan_build**, **precommit** (≈
+  `review_diff role=strict`), **MoA** preset. CUT: **debug**, **conversation_resume**, generic
+  chaining **DSL** / **recursive spawn** (the host already orchestrates; see deferred above).
 - Release track: opt-in real-CLI contract job in CI, history secrets scan, PyPI publish (GO-gated).

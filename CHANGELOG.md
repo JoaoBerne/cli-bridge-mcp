@@ -6,6 +6,42 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added (dynamic orchestration engine + cross-vendor jury)
+- **`workflow preset=jury`** — the cross-vendor verification edge: an author lane produces, then N
+  verifiers **from different vendor families** vote PASS/FAIL/ABSTAIN, aggregated k-of-N
+  (**fail-closed**: short of the threshold, or an absent/empty verdict, = REJECTED). Author≠reviewer
+  family is enforced (a model can't review its own family's correlated blind spots); a mono-family
+  pool **degrades** to same-family verifiers with a loud warning, never an undefined verdict.
+  `lanes.family_of` derives the vendor family from client_ids/key (override: `CLI_BRIDGE_FAMILY_OVERRIDES`).
+- **Typed result envelope + provenance** — `batch_run` results now carry model / kind / latency_ms /
+  exit_code so a downstream step can gate on them; `findings.extract_json(text) -> (value, error)`
+  is a public, never-raises structured-output contract for chaining on a real object, not prose.
+- **Per-invocation budget + cost envelope** — `batch_run` gains `max_calls` / `max_credits` (atomic
+  reservation; over-budget tasks skipped, not journalled, so a resume with a higher cap runs them)
+  and `dry_run` (cost envelope: calls + est token/credit range, nothing spawned).
+- **disagreement-as-uncertainty** — `ask_all` returns an `agreement` score (0–1, mean pairwise
+  difflib ratio; low = the council disagrees → less trustworthy). Heuristic, directional.
+- **confidence-escalate cascade** — `ask_cascade escalate=true` (opt-in): a cheap lane that
+  self-reports low confidence (`[ESCALATE]`) hands off to a stronger one, not just on failure.
+- **role personas** — `ask_<lane> role=reviewer|security|planner|devil` prepends a persona.
+- **vision (experimental)** — `ask_gemini images=[paths]` passes files to the Gemini CLI as @-file
+  refs (ban-safe, no vision key; verify with your CLI).
+- **verify_repair** gains `cross_family=true` (default false, back-compat) to pick a different-family
+  verifier.
+
+### Safety / fixes
+- **`BRIDGE_DEPTH` re-entry guard** — every spawn is stamped `CLI_BRIDGE_DEPTH`; a delegate at/over
+  `CLI_BRIDGE_MAX_DEPTH` (default 1) is refused, so a delegate configured to load cli-bridge can't
+  fork-bomb the council/quota.
+- **batch_run dropped per-task `timeout_s`** (the "[timeout] raise timeout_s" hint was a lie) —
+  now threaded through and exposed in the task schema.
+
+### Changed (anti-bloat surface; validated by a model council)
+- **`CLI_BRIDGE_LEAN=1`** (opt-in) exposes only a curated core-12 tool surface (44 → ~12); default
+  unchanged. Moved `council_recap`/`one_phrase` into council.py (fixes the backwards import).
+  Renamed usage_report `format` → `output_format` (legacy still read). Added "use X not Y"
+  disambiguation lines to the overlapping tool clusters.
+
 ### Added (cross-CLI orchestration unblocks)
 - **Artifact return** (`ask_build mode=direct`): non-text files the build writes in the zone
   (images, PDFs, binaries) are reported as **artifacts by path** (type + size) instead of a useless
