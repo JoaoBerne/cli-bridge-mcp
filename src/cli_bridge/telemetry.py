@@ -93,6 +93,15 @@ CREATE TABLE IF NOT EXISTS jobs (
   created_at REAL NOT NULL,
   updated_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS batch_journal (
+  run_id TEXT NOT NULL,
+  task_key TEXT NOT NULL,
+  status TEXT NOT NULL,
+  result TEXT,
+  error TEXT,
+  updated_at REAL NOT NULL,
+  PRIMARY KEY (run_id, task_key)
+);
 CREATE TABLE IF NOT EXISTS conversation_turns (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   conversation_id TEXT NOT NULL,
@@ -468,6 +477,42 @@ def job_put(job_id: str, kind: str, status: str, task_preview: str,
             conn.commit()
     except sqlite3.Error:
         pass
+
+
+def batch_put(run_id: str, task_key: str, status: str, result: str | None = None,
+              error: str | None = None) -> None:
+    """Journal one task of a durable batch (key = hash(run_id, task)). Best-effort, never raises.
+    WAL (already on) lets the concurrent fan-out write without SQLITE_BUSY (qwen #14)."""
+    conn = _connect()
+    if conn is None or not run_id:
+        return
+    try:
+        with _LOCK:
+            conn.execute(
+                "INSERT INTO batch_journal (run_id, task_key, status, result, error, updated_at) "
+                "VALUES (?,?,?,?,?,?) ON CONFLICT(run_id, task_key) DO UPDATE SET "
+                "status=excluded.status, result=excluded.result, error=excluded.error, "
+                "updated_at=excluded.updated_at",
+                (run_id, task_key, status, result, error, _now()))
+            conn.commit()
+    except sqlite3.Error:
+        pass
+
+
+def batch_get(run_id: str) -> dict[str, dict]:
+    """All journalled tasks for a run: task_key -> {status, result, error}. Empty if none/off.
+    A resume reads this to replay finished tasks from cache and only run the rest."""
+    conn = _connect()
+    if conn is None or not run_id:
+        return {}
+    try:
+        with _LOCK:
+            rows = conn.execute(
+                "SELECT task_key, status, result, error FROM batch_journal WHERE run_id=?",
+                (run_id,)).fetchall()
+    except sqlite3.Error:
+        return {}
+    return {r[0]: {"status": r[1], "result": r[2], "error": r[3]} for r in rows}
 
 
 def job_row(job_id: str) -> dict | None:

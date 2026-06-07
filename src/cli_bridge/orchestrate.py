@@ -1,0 +1,272 @@
+"""Durable fan-out + presets.
+
+`batch_run` is the substrate: run N INDEPENDENT asks concurrently (capped), journaling each to
+SQLite (key = hash(run_id, task)) so a `resume_id` replays the tasks that already FINISHED and
+only runs the rest — surviving a server restart (the edge over Claude Code's in-session resume).
+The host composes the LOGIC (loops, conditions) in its own reasoning; cli-bridge just executes
+durably. We deliberately did NOT add a JSON composition DSL — it would be weaker than the host
+orchestrating itself, for far more code (council + user signal: don't over-complex).
+
+On top sit four PRESETS — coroutines that fan out then post-process with a hardcoded step (a
+judge or a grouping), NOT a DSL: council_review, map_review, research_verify, and the flagship
+refine_plan ("let the council demolish my plan"). All are resumable and can run in background.
+
+Token frugality (a standing rule): when a preset reviews an ARTIFACT (a plan, a file), it passes
+the file PATH via the lane's cwd so each lane reads it itself — never recopy the content inline.
+
+run_lane / lane resolution are injected so this is testable with a fake run_lane (no AI CLI).
+"""
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
+import os
+import uuid
+
+from . import config
+
+MAX_BATCH_TASKS = 64           # anti-runaway: the existing cost model governs spend; this caps count
+
+# Distinct angles refine_plan distributes across lanes (more lanes than angles -> redundancy =
+# cross-check; fewer -> one lane covers several). Each is a sharp, single-lens critique.
+REFINE_ANGLES: list[tuple[str, str]] = [
+    ("technical flaws & failure modes",
+     "Find concrete technical flaws, bugs, race conditions, and failure modes."),
+    ("gaps & under-specified",
+     "Find gaps, missing cases, and parts that are under-specified or hand-waved."),
+    ("over-engineering to cut",
+     "Find over-engineering, needless abstraction, and scope to cut."),
+    ("sequencing & dependencies",
+     "Critique the ordering, dependencies, and what must ship before what."),
+]
+
+
+def _new_run_id() -> str:
+    return "run_" + uuid.uuid4().hex[:12]
+
+
+def _task_key(run_id: str, task: dict) -> str:
+    blob = json.dumps(task, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(f"{run_id}\x00{blob}".encode()).hexdigest()[:16]
+
+
+async def batch_run(tasks: list[dict], *, run_lane, resolve_lane, default_lane, telemetry,
+                    run_id: str = "", max_concurrency: int = 0, progress=None
+                    ) -> tuple[str, list[dict]]:
+    """Fan out `tasks` (each {task, lane?, model?, effort?, cwd?}) concurrently, journalling each.
+    Returns (run_id, results) where results align with tasks: {task, lane, ok, output, cached}.
+    A finished (ok) task is replayed from the journal on a resume; failed/missing tasks re-run."""
+    run_id = run_id or _new_run_id()
+    cached = telemetry.batch_get(run_id)
+    sem = asyncio.Semaphore(max_concurrency if max_concurrency > 0 else config.max_parallel())
+    total = len(tasks)
+    done = 0
+    prog_lock = asyncio.Lock()
+
+    async def _one(i: int, t: dict) -> dict:
+        nonlocal done
+        key = _task_key(run_id, t)
+        hit = cached.get(key)
+        if hit and hit["status"] == "done":                  # resume: replay a finished task
+            out = {"i": i, "task": t.get("task", ""), "lane": t.get("lane", ""),
+                   "ok": True, "output": hit["result"] or "", "cached": True}
+        else:
+            lane = resolve_lane(t["lane"]) if t.get("lane") else default_lane
+            if lane is None:
+                telemetry.batch_put(run_id, key, "failed", error="no such lane")
+                out = {"i": i, "task": t.get("task", ""), "lane": t.get("lane", ""),
+                       "ok": False, "output": f"[error] no such lane: {t.get('lane')}",
+                       "cached": False}
+            else:
+                async with sem:
+                    r = await run_lane(lane, {"task": t.get("task", ""), "model": t.get("model"),
+                                              "effort": t.get("effort"), "cwd": t.get("cwd")})
+                telemetry.batch_put(run_id, key, "done" if r.ok else "failed",
+                                    result=r.output if r.ok else None,
+                                    error=None if r.ok else r.render())
+                out = {"i": i, "task": t.get("task", ""), "lane": lane.key,
+                       "ok": r.ok, "output": r.render(), "cached": False}
+        async with prog_lock:
+            done += 1
+            d = done
+        if progress is not None:
+            await progress(d, total, out["lane"])
+        return out
+
+    raw = await asyncio.gather(*[_one(i, t) for i, t in enumerate(tasks)], return_exceptions=True)
+    results = []
+    for i, r in enumerate(raw):
+        if isinstance(r, BaseException):                     # one crash must not sink the batch
+            results.append({"i": i, "task": tasks[i].get("task", ""), "lane": "",
+                            "ok": False, "output": f"[crash] {r}", "cached": False})
+        else:
+            results.append(r)
+    results.sort(key=lambda d: d["i"])
+    return run_id, results
+
+
+def render_batch(run_id: str, results: list[dict]) -> str:
+    cached = sum(1 for r in results if r.get("cached"))
+    ok = sum(1 for r in results if r["ok"])
+    lines = [f"# batch_run — {ok}/{len(results)} ok ({cached} replayed from cache)",
+             f"_resume with resume_id `{run_id}` (re-runs only what didn't finish)_\n"]
+    for i, r in enumerate(results, 1):
+        tag = "✅" if r["ok"] else "❌"
+        cache = " (cached)" if r.get("cached") else ""
+        lines.append(f"## {i}. {tag} {r['lane'] or '—'}{cache}\n")
+        lines.append(f"_task: {r['task'][:200]}_\n" if r["task"] else "")
+        lines.append((r["output"].strip() or "_(no output)_") + "\n")
+    return "\n".join(lines)
+
+
+# ── presets ──────────────────────────────────────────────────────────────────────────────────
+
+def _group(results: list[dict], header: str) -> str:
+    """Default synthesis: group findings as-is for the HOST to dedupe + integrate (string dedup
+    fails — 'lock race' == 'TOCTOU lockfile' needs a semantic merge, i.e. the host or a judge)."""
+    lines = [f"# {header}", "_Grouped per lane — dedupe + integrate yourself, or pass judge_lane "
+             "for a single deduped list._\n"]
+    for r in results:
+        tag = "✅" if r["ok"] else "❌"
+        lines.append(f"## {tag} {r['lane'] or '—'}\n")
+        lines.append((r["output"].strip() or "_(no output)_") + "\n")
+    return "\n".join(lines)
+
+
+async def _judge(judge_lane, run_lane, results: list[dict], instruction: str) -> str:
+    """Hardcoded post-fan-out step (NOT a task, NOT a DSL): one lane dedupes + ranks the pooled
+    findings into a single actionable list."""
+    pooled = "\n\n".join(f"### from {r['lane']}\n{r['output'].strip()}"
+                         for r in results if r["ok"] and r["output"].strip())
+    if not pooled:
+        return "[error] no successful findings to judge."
+    r = await run_lane(judge_lane, {"task": f"{instruction}\n\n{pooled}"})
+    return f"# Synthesis (judge: {judge_lane.display})\n\n{r.render().strip()}"
+
+
+def _lanes_or_default(lane_keys, resolve_lane, default_lanes):
+    if lane_keys:
+        out = [resolve_lane(k) for k in lane_keys]
+        return [ln for ln in out if ln is not None]
+    return list(default_lanes)
+
+
+async def council_review(*, run_lane, resolve_lane, default_lanes, telemetry, question: str,
+                         lanes=None, judge_lane=None, run_id="", progress=None) -> str:
+    use = _lanes_or_default(lanes, resolve_lane, default_lanes)
+    if not use:
+        return "[error] no lanes available for council_review."
+    tasks = [{"lane": ln.key, "task": question} for ln in use]
+    run_id, results = await batch_run(tasks, run_lane=run_lane, resolve_lane=resolve_lane,
+                                      default_lane=use[0], telemetry=telemetry, run_id=run_id,
+                                      progress=progress)
+    if judge_lane:
+        jl = resolve_lane(judge_lane)
+        if jl:
+            return await _judge(jl, run_lane, results,
+                                "Synthesise these answers into one: agreements, disagreements, "
+                                "and the best conclusion.")
+    return _group(results, "Council review")
+
+
+async def map_review(*, run_lane, resolve_lane, default_lanes, telemetry, files: list[str],
+                     lane=None, judge_lane=None, run_id="", progress=None) -> str:
+    ln = resolve_lane(lane) if lane else (default_lanes[0] if default_lanes else None)
+    if ln is None:
+        return "[error] no lane available for map_review."
+    tasks = []
+    for f in files[:MAX_BATCH_TASKS]:
+        path = os.path.abspath(os.path.expanduser(f))
+        tasks.append({"lane": ln.key, "cwd": os.path.dirname(path),
+                      "task": f"Review the file `{os.path.basename(path)}` (in your working dir) "
+                              "for bugs, risks, and issues. Return a terse findings list "
+                              "(severity, location, problem, fix). No preamble."})
+    run_id, results = await batch_run(tasks, run_lane=run_lane, resolve_lane=resolve_lane,
+                                      default_lane=ln, telemetry=telemetry, run_id=run_id,
+                                      progress=progress)
+    # relabel each result with its file (tasks align with results order)
+    for r, f in zip(results, files, strict=False):
+        r["lane"] = f"{r['lane']} · {os.path.basename(f)}"
+    if judge_lane:
+        jl = resolve_lane(judge_lane)
+        if jl:
+            return await _judge(jl, run_lane, results,
+                                "Merge these per-file reviews into one prioritised list.")
+    return _group(results, "Map review (per file)")
+
+
+async def research_verify(*, run_lane, resolve_lane, default_lanes, telemetry, questions: list[str],
+                          lanes=None, run_id="", progress=None) -> str:
+    use = _lanes_or_default(lanes, resolve_lane, default_lanes)
+    if not use:
+        return "[error] no lanes available for research_verify."
+    # Phase 1: answer each question (round-robin across lanes).
+    ans_tasks = [{"lane": use[i % len(use)].key, "task": q}
+                 for i, q in enumerate(questions[:MAX_BATCH_TASKS])]
+    run_id, answers = await batch_run(ans_tasks, run_lane=run_lane, resolve_lane=resolve_lane,
+                                      default_lane=use[0], telemetry=telemetry, run_id=run_id,
+                                      progress=progress)
+    # Phase 2: adversarially verify each answer on a DIFFERENT lane.
+    ver_tasks = []
+    for i, a in enumerate(answers):
+        verifier = use[(i + 1) % len(use)]
+        ver_tasks.append({"lane": verifier.key,
+                          "task": f"Question: {a['task']}\n\nA claimed answer:\n{a['output']}\n\n"
+                                  "Verify it. Flag anything wrong, unsupported, or missing. If it "
+                                  "is correct, say so briefly."})
+    _vrun, verdicts = await batch_run(ver_tasks, run_lane=run_lane, resolve_lane=resolve_lane,
+                                      default_lane=use[0], telemetry=telemetry, progress=progress)
+    lines = ["# research_verify", f"_resume_id `{run_id}` (phase-1 answers)_\n"]
+    for a, v in zip(answers, verdicts, strict=False):
+        lines += [f"## Q: {a['task'][:200]}\n", "**Answer:**\n", a["output"].strip() or "_(none)_",
+                  "\n**Verification:**\n", v["output"].strip() or "_(none)_", ""]
+    return "\n".join(lines)
+
+
+def _refine_prompt(angle: str, instruction: str, fname: str, plan_text: str) -> str:
+    head = (f"You are pressure-testing an implementation plan, angle: {angle}.\n{instruction}\n"
+            "Return a terse findings list — each: severity (blocker/high/medium/low), location in "
+            "the plan, the problem, and a concrete fix. No preamble, no praise.")
+    if fname:                                                # file-based: the lane reads it itself
+        return f"{head}\n\nThe plan is in the file `{fname}` in your working directory. Read it."
+    return f"{head}\n\nPLAN:\n{plan_text}"                    # inline fallback
+
+
+async def refine_plan(*, run_lane, resolve_lane, default_lanes, telemetry, plan_file: str = "",
+                      plan: str = "", lanes=None, angles=None, judge_lane=None, run_id="",
+                      progress=None) -> str:
+    """The flagship: fan the plan out to N lanes, each demolishing it from a DISTINCT angle, then
+    group (host synthesises) or judge (one deduped patch list). plan_file is preferred — each lane
+    reads the file from its cwd, so the plan is NEVER recopied into N prompts (token-frugal)."""
+    use = _lanes_or_default(lanes, resolve_lane, default_lanes)
+    if not use:
+        return "[error] no lanes available for refine_plan."
+    if not plan_file and not plan.strip():
+        return "[error] pass plan_file (preferred) or plan."
+    fname, cwd = "", ""
+    if plan_file:
+        ap = os.path.abspath(os.path.expanduser(plan_file))
+        if not os.path.isfile(ap):
+            return f"[error] plan_file not found: {plan_file}"
+        fname, cwd = os.path.basename(ap), os.path.dirname(ap)
+    angle_names = angles or [a[0] for a in REFINE_ANGLES]
+    instr = {a[0]: a[1] for a in REFINE_ANGLES}
+    tasks = []
+    for i, angle in enumerate(angle_names):
+        lane = use[i % len(use)]
+        tasks.append({"lane": lane.key, "cwd": cwd,
+                      "task": _refine_prompt(angle, instr.get(angle, f"Critique re: {angle}."),
+                                             fname, plan)})
+    run_id, results = await batch_run(tasks, run_lane=run_lane, resolve_lane=resolve_lane,
+                                      default_lane=use[0], telemetry=telemetry, run_id=run_id,
+                                      progress=progress)
+    for r, angle in zip(results, angle_names, strict=False):
+        r["lane"] = f"{r['lane']} · {angle}"
+    if judge_lane:
+        jl = resolve_lane(judge_lane)
+        if jl:
+            return await _judge(jl, run_lane, results,
+                                "Dedupe these plan critiques (semantic, not string), sort by "
+                                "severity, and output one actionable patch list for the plan.")
+    return _group(results, "Plan pressure-test (refine_plan)")

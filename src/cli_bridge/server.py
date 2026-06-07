@@ -36,6 +36,7 @@ from . import (
     findings,
     guards,
     jobs,
+    orchestrate,
     preamble,
     router,
     runner,
@@ -356,6 +357,80 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                         "with their status.",
             inputSchema={"type": "object", "properties": {}},
             annotations={"readOnlyHint": True, "destructiveHint": False},
+        ))
+        tools.append(Tool(
+            name="batch_run",
+            description=("Durable fan-out: run many INDEPENDENT asks in parallel (capped) in ONE "
+                         "call instead of N — saves your context and quota. Each result is "
+                         "journalled, so resume_id replays the tasks that already finished and "
+                         "runs only the rest (survives a restart). YOU compose the logic; this "
+                         "just executes it durably. async=true returns a job_id (poll job_status, "
+                         "fetch job_result)."),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "tasks": {"type": "array", "description": "Independent tasks to run.",
+                              "items": {"type": "object", "properties": {
+                                  "task": {"type": "string"},
+                                  "lane": {"type": "string", "description": "Lane key (default: a "
+                                           "free lane)."},
+                                  "model": {"type": "string"},
+                                  "effort": {"type": "string"},
+                                  "cwd": {"type": "string", "description": "Dir the lane runs in "
+                                          "(point it at a file to review instead of pasting it)."}},
+                                  "required": ["task"]}},
+                    "max_concurrency": {"type": "integer",
+                                        "description": "Cap simultaneous spawns (default: profile)."},
+                    "resume_id": {"type": "string",
+                                  "description": "A run_id from a previous batch — replays finished "
+                                  "tasks from cache, runs the rest."},
+                    "async": {"type": "boolean", "description": "Run as a background job."},
+                },
+                "required": ["tasks"],
+            },
+            annotations={"readOnlyHint": False, "openWorldHint": True, "destructiveHint": False},
+        ))
+        tools.append(Tool(
+            name="workflow",
+            description=("Run a ready-made multi-model workflow (a 'button') over the durable "
+                         "batch substrate. refine_plan: let the council DEMOLISH your plan from "
+                         "distinct angles (pass plan_file — each lane reads it, no recopy). "
+                         "council_review: N lanes answer one question, optional judge synthesises. "
+                         "map_review: review many files in parallel. research_verify: answer "
+                         "questions then adversarially cross-check them. All resumable (resume_id) "
+                         "and async-able."),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "preset": {"type": "string",
+                               "enum": ["refine_plan", "council_review", "map_review",
+                                        "research_verify"],
+                               "description": "Which workflow to run."},
+                    "plan_file": {"type": "string",
+                                  "description": "refine_plan: path to the plan (PREFERRED — read "
+                                  "by each lane, never recopied)."},
+                    "plan": {"type": "string", "description": "refine_plan: inline plan (fallback)."},
+                    "angles": {"type": "array", "items": {"type": "string"},
+                               "description": "refine_plan: override the critique angles."},
+                    "question": {"type": "string", "description": "council_review: the question."},
+                    "files": {"type": "array", "items": {"type": "string"},
+                              "description": "map_review: file paths to review."},
+                    "questions": {"type": "array", "items": {"type": "string"},
+                                  "description": "research_verify: questions to answer + verify."},
+                    "lanes": {"type": "array", "items": {"type": "string"},
+                              "description": "Lane keys to use (default: the free council)."},
+                    "lane": {"type": "string", "description": "map_review: the single reviewer lane."},
+                    "judge_lane": {"type": "string",
+                                   "description": "Optional: one lane dedupes + ranks the pooled "
+                                   "findings into a single list (else grouped for you to merge)."},
+                    "include_paid": {"type": "boolean",
+                                     "description": "Allow limited/paid lanes in the default set."},
+                    "resume_id": {"type": "string", "description": "Resume a previous run."},
+                    "async": {"type": "boolean", "description": "Run as a background job."},
+                },
+                "required": ["preset"],
+            },
+            annotations={"readOnlyHint": False, "openWorldHint": True, "destructiveHint": False},
         ))
         tools.append(Tool(
             name="conversations_list",
@@ -1677,6 +1752,38 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
                 "No live build for that job_id (already finished, or started elsewhere)."))]
         return [TextContent(type="text", text=msg)]
 
+    if name == "batch_run":
+        raw = args.get("tasks")
+        tasks = [t for t in raw if isinstance(t, dict) and t.get("task")] if isinstance(raw, list) \
+            else []
+        if not tasks:
+            return [TextContent(type="text", text=(
+                "[error] tasks must be a non-empty list of {task, lane?, model?, effort?, cwd?}."))]
+        if len(tasks) > orchestrate.MAX_BATCH_TASKS:
+            return [TextContent(type="text", text=(
+                f"[error] too many tasks ({len(tasks)} > {orchestrate.MAX_BATCH_TASKS}). Split it."))]
+        default_lanes = _ask_all_targets(lanes, _ask_all_include_paid(args))
+        default_lane = default_lanes[0] if default_lanes else None
+
+        def _resolve(k):
+            return _lane_by_key(k, lanes)
+
+        async def _batch_body():
+            rid, res = await orchestrate.batch_run(
+                tasks, run_lane=_run_lane, resolve_lane=_resolve, default_lane=default_lane,
+                telemetry=telemetry, run_id=_str(args, "resume_id"),
+                max_concurrency=int(args.get("max_concurrency") or 0))
+            return orchestrate.render_batch(rid, res)
+        if bool(args.get("async")):
+            job_id = jobs.start_job("batch", _batch_body, preview=f"{len(tasks)} tasks")
+            return [TextContent(type="text", text=(
+                f"Batch started: `{job_id}`. Poll `job_status {job_id}`, fetch `job_result "
+                f"{job_id}`."))]
+        return [_emit(await _batch_body(), label="batch_run")]
+
+    if name == "workflow":
+        return await _run_workflow_preset(args, lanes)
+
     if name == "conversations_list":
         rows = telemetry.convo_list()
         if not rows:
@@ -1899,6 +2006,48 @@ def _cascade_trace(attempts: list[tuple[LaneSpec, runner.RunResult]],
 
 async def _ask_all(lanes: list[LaneSpec], args: dict) -> list[TextContent]:
     return [_emit(await _ask_all_body(lanes, args), label="ask_all")]
+
+
+async def _run_workflow_preset(args: dict, lanes: list[LaneSpec]) -> list[TextContent]:
+    """Dispatch a `workflow` preset over the durable orchestrate substrate. Lane resolution +
+    _run_lane are injected so orchestrate stays testable. Each preset returns a string report;
+    async=true wraps it in a background job."""
+    preset = _str(args, "preset")
+    default_lanes = _ask_all_targets(lanes, _ask_all_include_paid(args))
+
+    def _resolve(k):
+        return _lane_by_key(k, lanes)
+
+    common = dict(run_lane=_run_lane, resolve_lane=_resolve, default_lanes=default_lanes,
+                  telemetry=telemetry, run_id=_str(args, "resume_id"))
+    judge = _str(args, "judge_lane") or None
+    if preset == "refine_plan":
+        def make():
+            return orchestrate.refine_plan(**common, plan_file=_str(args, "plan_file"),
+                                           plan=_str(args, "plan"), lanes=args.get("lanes"),
+                                           angles=args.get("angles"), judge_lane=judge)
+    elif preset == "council_review":
+        def make():
+            return orchestrate.council_review(
+                **common, question=_str(args, "question") or _str(args, "task"),
+                lanes=args.get("lanes"), judge_lane=judge)
+    elif preset == "map_review":
+        def make():
+            return orchestrate.map_review(**common, files=args.get("files") or [],
+                                          lane=_str(args, "lane") or None, judge_lane=judge)
+    elif preset == "research_verify":
+        def make():
+            return orchestrate.research_verify(**common, questions=args.get("questions") or [],
+                                               lanes=args.get("lanes"))
+    else:
+        return [TextContent(type="text", text=f"[error] unknown preset: {preset or '(none)'}")]
+
+    if bool(args.get("async")):
+        job_id = jobs.start_job(f"workflow:{preset}", make, preview=preset)
+        return [TextContent(type="text", text=(
+            f"Workflow `{preset}` started: `{job_id}`. Poll `job_status {job_id}`, fetch "
+            f"`job_result {job_id}`."))]
+    return [_emit(await make(), label=f"workflow:{preset}")]
 
 
 async def _ask_all_body(lanes: list[LaneSpec], args: dict) -> str:
