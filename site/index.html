@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cli-bridge — your AI assistant, but it can phone a friend</title>
+<meta name="description" content="MCP server that orchestrates the AI CLIs you already installed — Claude Code, Codex, Gemini, opencode — as a council. No API keys, ban-safe, $0 free lanes, hard cost cap.">
+<meta property="og:title" content="cli-bridge — your AI assistant, but it can phone a friend">
+<meta property="og:description" content="Consult a council of AI CLIs from any MCP host. Ban-safe, no API keys, $0 free council, worktree-isolated writes, ships its own eval.">
+<meta property="og:image" content="assets/social-dark.svg">
+<style>
+  :root{
+    --bg:#0c1220; --panel:#11203a; --ink:#eef0f4; --sub:#9fb0c8;
+    --gold:#d4a03c; --orange:#e8772e; --line:rgba(238,240,244,.12);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);
+    font-family:ui-monospace,'JetBrains Mono','SF Mono',Menlo,Consolas,monospace;
+    line-height:1.6}
+  a{color:var(--gold);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:980px;margin:0 auto;padding:0 24px}
+  header{padding:64px 0 32px;text-align:center}
+  header img.mark{width:96px;height:96px}
+  h1{font-size:2.6rem;letter-spacing:-1px;margin:16px 0 8px}
+  .tagline{color:var(--sub);font-size:1.15rem}
+  .proof{color:var(--gold);font-size:.95rem;margin-top:10px;letter-spacing:.5px}
+  .banner{display:block;width:100%;max-width:980px;margin:36px auto 0;border-radius:14px}
+  section{padding:40px 0;border-top:1px solid var(--line)}
+  h2{font-size:1.3rem;margin-bottom:18px;color:var(--gold)}
+  pre{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:18px 20px;overflow-x:auto;font-size:.95rem}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px}
+  .card b{color:var(--gold);display:block;margin-bottom:6px}
+  .card p{color:var(--sub);font-size:.9rem}
+  .honest{border-left:3px solid var(--orange);padding:14px 18px;background:var(--panel);
+    border-radius:0 10px 10px 0;color:var(--sub);font-size:.95rem}
+  .demo{display:block;width:100%;border-radius:12px;border:1px solid var(--line)}
+  .cta{display:inline-block;background:var(--gold);color:#11203a;font-weight:700;
+    padding:12px 26px;border-radius:10px;margin:8px 10px 0 0}
+  .cta:hover{text-decoration:none;filter:brightness(1.08)}
+  .cta.ghost{background:none;border:1.5px solid var(--gold);color:var(--gold)}
+  footer{padding:48px 0;text-align:center;color:var(--sub);font-size:.85rem}
+  footer img{width:56px;opacity:.9}
+</style>
+</head>
+<body>
+
+<header class="wrap">
+  <img class="mark" src="assets/mark-dark.svg" alt="cli-bridge — suspension bridge mark">
+  <h1>cli-bridge</h1>
+  <p class="tagline">Your AI assistant, but it can phone a friend.</p>
+  <p class="proof">ban-safe · no API keys · $0 free council · ships its own eval</p>
+  <p style="margin-top:22px">
+    <a class="cta" href="https://github.com/JoaoBerne/cli-bridge-mcp">GitHub</a>
+    <a class="cta ghost" href="#install">Install</a>
+  </p>
+  <img class="banner" src="assets/banner-dark.svg"
+       alt="You → cli-bridge → a council of AI CLIs in parallel → one merged review">
+</header>
+
+<section class="wrap">
+  <h2>// what it is</h2>
+  <p>An <a href="https://modelcontextprotocol.io">MCP</a> server that orchestrates the AI CLIs
+  you've <em>already installed and logged into</em> — Claude Code, Codex, Gemini CLI, opencode —
+  from whatever assistant you're talking to. It never holds an API key and never extracts a
+  token: it spawns each vendor's official CLI, exactly as you would by hand. Reviews fan out to
+  a role-diverse council in parallel and come back merged, deduped and severity-ranked.</p>
+</section>
+
+<section class="wrap">
+  <h2>// 30 seconds, $0</h2>
+  <img class="demo" src="assets/demo.gif"
+       alt="security-review demo: a committed auth bypass caught independently by two models">
+  <p style="color:var(--sub);font-size:.9rem;margin-top:10px"><em>Real run (2.5× speed): a
+  committed auth bypass — two free models flag it blocker independently; <code>usage</code>
+  shows the receipts.</em></p>
+</section>
+
+<section class="wrap" id="install">
+  <h2>// install</h2>
+  <pre>
+# zero-install run
+uvx cli-bridge-mcp
+
+# wire it into Claude Code
+claude mcp add cli-bridge -- uvx cli-bridge-mcp
+
+# or any MCP host — codex, gemini, opencode…</pre>
+</section>
+
+<section class="wrap">
+  <h2>// why this one</h2>
+  <div class="grid">
+    <div class="card"><b>Ban-safe by design</b>
+      <p>Spawns official CLIs. No OAuth-token extraction, no key reuse, nothing that gets
+      accounts flagged.</p></div>
+    <div class="card"><b>Learning router</b>
+      <p>Rate answers 1–5; <code>ask_best</code> learns which model wins each task-type on
+      <em>your</em> machine. Local signal, survives restarts.</p></div>
+    <div class="card"><b>Cost governance</b>
+      <p>Sourced per-plan tiers, free-first councils, a hard daily cap and local receipts —
+      spend is bounded by design.</p></div>
+    <div class="card"><b>Safe writes</b>
+      <p>Build agents run in a throwaway git worktree and hand back a <em>diff</em>. Your live
+      repo is never touched.</p></div>
+    <div class="card"><b>Memory that survives</b>
+      <p>Round-table threads persist in sqlite — across host context resets and restarts.</p></div>
+    <div class="card"><b>Measured, not asserted</b>
+      <p><code>cli-bridge eval</code> tests the council-vs-single claim deterministically and
+      publishes the result either way.</p></div>
+  </div>
+</section>
+
+<section class="wrap">
+  <h2>// the honest part</h2>
+  <p class="honest">"More models = better" is fragile — big models share training data, so their
+  errors correlate. We measured our own claim: a diverse council did <b>not</b> catch more bugs
+  than one strong model — it cut false alarms ~2×. The numbers are in
+  <a href="https://github.com/JoaoBerne/cli-bridge-mcp/blob/main/docs/BENCHMARKS.md">BENCHMARKS.md</a>,
+  and the harness ships so you can run it on your own CLIs.</p>
+</section>
+
+<footer>
+  <img src="assets/mark-dark.svg" alt="">
+  <p style="margin-top:10px">MIT · <a href="https://github.com/JoaoBerne/cli-bridge-mcp">JoaoBerne/cli-bridge-mcp</a></p>
+</footer>
+
+</body>
+</html>
