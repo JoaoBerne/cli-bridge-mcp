@@ -43,7 +43,7 @@ Claude → cli-bridge → [ Gemini ] [ GPT ] [ Mistral ] [ Qwen ] … in paralle
 > **And the honest part:** "more models = better" is *fragile* — big models share training data,
 > so their errors correlate. We measured our own central claim (`cli-bridge eval`, shipped, no LLM
 > judge): a diverse council did **not** catch more bugs than one strong model — it cut the false
-> alarms **~2×**. We publish the numbers either way ([BENCHMARKS.md](BENCHMARKS.md)), and the
+> alarms **~2×**. We publish the numbers either way ([BENCHMARKS.md](docs/BENCHMARKS.md)), and the
 > harness ships so you can run it on *your* CLIs.
 
 ---
@@ -94,7 +94,7 @@ There are other "call other models" MCPs. Here's what makes cli-bridge different
   at **equal call budget** on a corpus of seeded reasoning bugs, scored deterministically (no LLM
   judge). It reports mean ± sd with a "no measurable difference" guard and a per-bug win/loss
   table — and publishes the result even when the council loses. See
-  [BENCHMARKS.md § Quality](BENCHMARKS.md#quality--does-a-council-actually-beat-one-strong-model).
+  [BENCHMARKS.md § Quality](docs/BENCHMARKS.md#quality--does-a-council-actually-beat-one-strong-model).
 
 ### vs. other multi-model MCPs
 

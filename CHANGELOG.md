@@ -6,6 +6,23 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added (terminal-friendly reports)
+- **`CLI_BRIDGE_TRACE_FOOTER=off`** hides the `## Trace` JSON footer in workflow reports
+  (review_diff / security_review / test_plan / premortem / debate). Default unchanged (shown);
+  distinct from `CLI_BRIDGE_TRACE_DIR`, which dumps raw traces. For humans reading reports in a
+  terminal — MCP hosts usually want the trace.
+
+### Fixed (test isolation)
+- `test_ask_all_targets_skip_limited_and_paid` now pins `CLI_BRIDGE_STATE_DB` to a temp file —
+  it used to read the developer's real state DB, so a lane in live cooldown (e.g. repeated auth
+  failures that day) made it fail spuriously.
+
+### Changed (repo layout — public-ready root)
+- Root slimmed to the conventional files (README, CHANGELOG, LICENSE, AGENTS.md, pyproject,
+  server.json, smithery.yaml). `docs/BENCHMARKS.md`/`docs/ARCHITECTURE.md` moved under `docs/`;
+  `CONTRIBUTING.md`/`.github/SECURITY.md`/`CODE_OF_CONDUCT.md` moved under `.github/` (GitHub
+  picks them up there natively). Links updated.
+
 ### Added (docs — animated README banner + mark)
 - **Self-contained animated SVG header** (`assets/banner-{dark,light}.svg`, `mark-{dark,light}.svg`):
   JS-free SMIL, light/dark via `<picture>`, renders in GitHub's `<img>`. The banner is a concept
@@ -91,12 +108,12 @@ All notable changes to this project are documented here. The format follows
   real models only with `--live` / `CLI_BRIDGE_EVAL_LIVE=1` (free lanes unless `--include-paid`).
 - Honesty by construction: `--repeats` (3 default, 5 to publish), small-N "directional, not a
   leaderboard" caveat, and a negative result (council ties/loses) is shipped, not hidden. See
-  `BENCHMARKS.md` § Quality.
+  `docs/BENCHMARKS.md` § Quality.
 - **Throttle guard:** the eval distinguishes an arm that *ran and found nothing* from one whose
   review *failed outright* (a lane rate-limited to empty). The single arm fires K calls at ONE lane
   per fixture, so on free tiers it gets throttled; a resulting 0% is flagged **Unreliable** in the
   report (and `failed_fixtures` in JSON), not silently scored as "single models are useless."
-- First measured run (2026-06-05, repeats=3, headroom single lane) is recorded in `BENCHMARKS.md`:
+- First measured run (2026-06-05, repeats=3, headroom single lane) is recorded in `docs/BENCHMARKS.md`:
   **no clean winner — a precision/recall trade-off.** A strong single model (deepseek-v4-pro ×3)
   caught marginally more bugs (recall 93% vs 73%, overlapping bands) but **over-detected** (~40
   false alarms, precision 0.19); the council's diverse-model merge was ~2× cleaner (~14 false
@@ -145,7 +162,7 @@ All notable changes to this project are documented here. The format follows
   key *inside* curl — `ps` only ever shows the variable's NAME. New `argv_secret_risk` validator:
   a custom lane that still expands a `${ENV}` secret into a credential-bearing argv part gets a
   ⚠️ warning in `doctor` with the safe pattern. (Unanimous blocker from the council's
-  self-critique; SECURITY.md updated.)
+  self-critique; .github/SECURITY.md updated.)
 
 ### Added (debate/consensus hardening — from a production field report)
 - **Grounding contract** (`context_files`, debate + consensus): the tool reads up to 5 key files
@@ -318,7 +335,7 @@ All notable changes to this project are documented here. The format follows
 - **`ask_all`**: `output_format=json`, `summary_only` (recap+synthesis, fewer tokens), `dry_run`
   (preview lanes + estimated cost without spawning).
 - **`doctor --deep`** now shows each free lane's CLI version (drift detection); `bench --all`
-  benchmarks every free lane into a table; `BENCHMARKS.md` explains how to generate real numbers.
+  benchmarks every free lane into a table; `docs/BENCHMARKS.md` explains how to generate real numbers.
 - Overflow dir gains a file-count cap (`CLI_BRIDGE_OVERFLOW_MAX_FILES`). `release.yml` publishes
   to PyPI via Trusted Publishing on a version tag.
 
@@ -327,7 +344,7 @@ All notable changes to this project are documented here. The format follows
   wide council (many custom lanes) can't OOM a small machine or burst quota.
 - README: "Works in IDE MCP hosts too" + an honest **Known limitations** list (ban-safe ToS
   caveat, in-process jobs, heuristic guard, estimated tokens, BYO-API argv exposure, experimental
-  lanes). SECURITY.md notes the BYO-API curl key-in-argv exposure + mitigation.
+  lanes). .github/SECURITY.md notes the BYO-API curl key-in-argv exposure + mitigation.
 
 ### Changed
 - **Empty answers fall through.** A delegate that exits 0 but prints NOTHING (seen with `agy` /

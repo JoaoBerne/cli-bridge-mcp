@@ -32,7 +32,7 @@ and the state DB is a temp sqlite.
 You usually don't need to fork: point `CLI_BRIDGE_LANES_FILE` at a JSON file
 (see `examples/lanes.example.json`), or wrap an HTTP API with `curl`
 (`examples/byo-api-lane.json`). To add a built-in lane, append a `LaneSpec` in `lanes.py` with
-its argv builder and capabilities, and ship a test. See `ARCHITECTURE.md` → "Extending it".
+its argv builder and capabilities, and ship a test. See `docs/ARCHITECTURE.md` → "Extending it".
 
 ## Adding a workflow
 
