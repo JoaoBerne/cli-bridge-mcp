@@ -396,6 +396,15 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                                   "required": ["task"]}},
                     "max_concurrency": {"type": "integer",
                                         "description": "Cap simultaneous spawns (default: profile)."},
+                    "max_calls": {"type": "integer",
+                                  "description": "Invocation budget: stop after this many spawns; "
+                                  "the rest are skipped (resume with a higher cap to run them)."},
+                    "max_credits": {"type": "number",
+                                    "description": "Invocation budget: skip tasks once estimated "
+                                    "credits would exceed this (free lanes never blocked)."},
+                    "dry_run": {"type": "boolean",
+                                "description": "Return the cost envelope (calls + est token/credit "
+                                "range) WITHOUT spawning anything."},
                     "resume_id": {"type": "string",
                                   "description": "A run_id from a previous batch — replays finished "
                                   "tasks from cache, runs the rest."},
@@ -1843,11 +1852,18 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
         def _resolve(k):
             return _lane_by_key(k, lanes)
 
+        if bool(args.get("dry_run")):              # cost envelope, nothing spawned
+            env = orchestrate.estimate(tasks, resolve_lane=_resolve, default_lane=default_lane,
+                                       telemetry=telemetry)
+            return [_emit(orchestrate.render_estimate(env), label="batch_run", guard=False)]
+
         async def _batch_body():
             rid, res = await orchestrate.batch_run(
                 tasks, run_lane=_run_lane, resolve_lane=_resolve, default_lane=default_lane,
                 telemetry=telemetry, run_id=_str(args, "resume_id"),
-                max_concurrency=int(args.get("max_concurrency") or 0))
+                max_concurrency=int(args.get("max_concurrency") or 0),
+                max_calls=int(args.get("max_calls") or 0),
+                max_credits=float(args.get("max_credits") or 0.0))
             return orchestrate.render_batch(rid, res)
         if bool(args.get("async")):
             job_id = jobs.start_job("batch", _batch_body, preview=f"{len(tasks)} tasks")

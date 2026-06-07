@@ -53,14 +53,95 @@ def _task_key(run_id: str, task: dict) -> str:
     return hashlib.sha256(f"{run_id}\x00{blob}".encode()).hexdigest()[:16]
 
 
+# Output tokens are unknown until a call returns; assume output ~= EST_OUTPUT_MULT × input for the
+# conservative (max) credit estimate that the budget RESERVES against, so the cap errs toward
+# blocking early rather than overspending.
+EST_OUTPUT_MULT = 3
+
+
+def _est_credits(lane, tokens: float, telemetry) -> float:
+    """Estimated credits for `tokens` on `lane` via telemetry's per-lane CREDITS_PER_1K. 0.0 when
+    the lane has no rate set (a free lane) or telemetry can't estimate — so free lanes are never
+    blocked on credits, only on max_calls."""
+    fn = getattr(telemetry, "_est_credits", None)
+    if fn is None or lane is None:
+        return 0.0
+    try:
+        return float(fn(lane.key, tokens) or 0.0)
+    except Exception:
+        return 0.0
+
+
+def _task_input_tokens(task_text: str) -> int:
+    return max(1, len(task_text or "") // config.CHARS_PER_TOKEN)
+
+
+class _BudgetLedger:
+    """Per-invocation spend guard. try_reserve is atomic (asyncio.Lock) so parallel tasks can't
+    check-then-increment-interleave past the cap. Reserves the conservative estimate BEFORE a spawn;
+    a task that can't reserve is skipped (never spawned)."""
+    def __init__(self, max_calls: int = 0, max_credits: float = 0.0):
+        self.max_calls = max(0, max_calls)
+        self.max_credits = max(0.0, max_credits)
+        self.calls = 0
+        self.credits = 0.0
+        self._lock = asyncio.Lock()
+
+    def active(self) -> bool:
+        return self.max_calls > 0 or self.max_credits > 0.0
+
+    async def try_reserve(self, est_credits: float) -> bool:
+        async with self._lock:
+            if self.max_calls and self.calls >= self.max_calls:
+                return False
+            if self.max_credits and self.credits + est_credits > self.max_credits:
+                return False
+            self.calls += 1
+            self.credits += est_credits
+            return True
+
+
+def estimate(tasks: list[dict], *, resolve_lane, default_lane, telemetry) -> dict:
+    """Pre-execution cost envelope (no spawn): per-task lane + estimated input tokens + a credit
+    RANGE (min = input-only, max = input + ~EST_OUTPUT_MULT× output, since output is unknown)."""
+    rows, in_tot, cmin, cmax = [], 0, 0.0, 0.0
+    for t in tasks[:MAX_BATCH_TASKS]:
+        lane = resolve_lane(t["lane"]) if t.get("lane") else default_lane
+        in_tok = _task_input_tokens(t.get("task", ""))
+        lo = _est_credits(lane, in_tok, telemetry)
+        hi = _est_credits(lane, in_tok * (1 + EST_OUTPUT_MULT), telemetry)
+        in_tot += in_tok
+        cmin += lo
+        cmax += hi
+        rows.append({"lane": (lane.key if lane else t.get("lane") or "—"),
+                     "est_input_tokens": in_tok})
+    return {"n_calls": len(rows), "est_input_tokens_total": in_tot,
+            "est_credits_min": round(cmin, 4), "est_credits_max": round(cmax, 4),
+            "tasks": rows,
+            "note": "estimate only (chars/4; output tokens unknown -> min=input, max=input+~3x)"}
+
+
+def render_estimate(env: dict) -> str:
+    lines = [f"# batch — cost envelope ({env['n_calls']} calls, nothing spawned)", "",
+             f"_~{env['est_input_tokens_total']} input tokens; est credits "
+             f"{env['est_credits_min']}–{env['est_credits_max']} ({env['note']})_\n"]
+    for r in env["tasks"]:
+        lines.append(f"- {r['lane']} — ~{r['est_input_tokens']} in-tok")
+    return "\n".join(lines)
+
+
 async def batch_run(tasks: list[dict], *, run_lane, resolve_lane, default_lane, telemetry,
-                    run_id: str = "", max_concurrency: int = 0, progress=None
+                    run_id: str = "", max_concurrency: int = 0, max_calls: int = 0,
+                    max_credits: float = 0.0, progress=None
                     ) -> tuple[str, list[dict]]:
     """Fan out `tasks` (each {task, lane?, model?, effort?, cwd?}) concurrently, journalling each.
-    Returns (run_id, results) where results align with tasks: {task, lane, ok, output, cached}.
-    A finished (ok) task is replayed from the journal on a resume; failed/missing tasks re-run."""
+    Returns (run_id, results) where results align with tasks: {task, lane, ok, output, cached, +
+    provenance}. A finished (ok) task is replayed from the journal on a resume; failed/missing
+    tasks re-run. max_calls/max_credits cap the invocation: over-budget tasks are SKIPPED (never
+    spawned, not journalled) so a resume with a higher cap runs them."""
     run_id = run_id or _new_run_id()
     cached = telemetry.batch_get(run_id)
+    ledger = _BudgetLedger(max_calls, max_credits)
     sem = asyncio.Semaphore(max_concurrency if max_concurrency > 0 else config.max_parallel())
     total = len(tasks)
     done = 0
@@ -83,6 +164,15 @@ async def batch_run(tasks: list[dict], *, run_lane, resolve_lane, default_lane, 
                        "ok": False, "output": f"[error] no such lane: {t.get('lane')}",
                        "cached": False, "model": t.get("model") or "", "kind": "failed",
                        "latency_ms": 0, "exit_code": None}
+            elif ledger.active() and not await ledger.try_reserve(
+                    _est_credits(lane, _task_input_tokens(t.get("task", "")) * (1 + EST_OUTPUT_MULT),
+                                 telemetry)):
+                # Over the invocation budget — skip WITHOUT spawning and WITHOUT journalling, so a
+                # resume with a higher cap will run it.
+                out = {"i": i, "task": t.get("task", ""), "lane": lane.key, "ok": False,
+                       "output": "[skipped: invocation budget reached]", "cached": False,
+                       "model": t.get("model") or "", "kind": "blocked", "latency_ms": 0,
+                       "exit_code": None}
             else:
                 async with sem:
                     r = await run_lane(lane, {"task": t.get("task", ""), "model": t.get("model"),

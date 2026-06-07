@@ -124,6 +124,53 @@ def test_batch_result_carries_provenance():
     assert r["latency_ms"] == 42 and r["exit_code"] == 0
 
 
+class _CreditTelemetry(FakeTelemetry):
+    """FakeTelemetry that can price tokens, for budget/envelope tests (0.01 credit/token)."""
+    def _est_credits(self, lane_key, tokens):
+        return tokens * 0.01
+
+
+def test_estimate_returns_cost_envelope():
+    tel = _CreditTelemetry()
+    lanes = {"a": _lane("a")}
+    env = orchestrate.estimate([{"lane": "a", "task": "x" * 40}], resolve_lane=lanes.get,
+                               default_lane=lanes["a"], telemetry=tel)
+    assert env["n_calls"] == 1 and env["est_input_tokens_total"] == 10
+    assert env["est_credits_min"] == round(10 * 0.01, 4)        # input only
+    assert env["est_credits_max"] == round(40 * 0.01, 4)        # input + ~3x output
+
+
+def test_batch_max_calls_caps_spawns():
+    tel = FakeTelemetry()
+    lanes = {"a": _lane("a")}
+    calls = []
+    rl = _ok_run_lane(calls)
+    tasks = [{"lane": "a", "task": f"t{i}"} for i in range(5)]
+    _rid, res = asyncio.run(orchestrate.batch_run(
+        tasks, run_lane=rl, resolve_lane=lanes.get, default_lane=lanes["a"], telemetry=tel,
+        max_calls=2))
+    assert len(calls) == 2                                       # only 2 spawned
+    assert sum(1 for r in res if r["kind"] == "blocked") == 3    # rest skipped, not run
+
+
+def test_batch_max_credits_skips_over_budget():
+    tel = _CreditTelemetry()
+    lanes = {"a": _lane("a")}
+    calls = []
+
+    async def rl(lane, args, *, tool="ask", terse=True):
+        calls.append(1)
+        return RunResult(True, "ok", "ok", 1)
+
+    # each task: 10 in-tok -> reserve 40*0.01 = 0.4 credits; budget 1.0 -> 2 fit, 3 skipped.
+    tasks = [{"lane": "a", "task": "x" * 40} for _ in range(5)]
+    _rid, res = asyncio.run(orchestrate.batch_run(
+        tasks, run_lane=rl, resolve_lane=lanes.get, default_lane=lanes["a"], telemetry=tel,
+        max_credits=1.0))
+    assert len(calls) == 2
+    assert sum(1 for r in res if r["kind"] == "blocked") == 3
+
+
 def test_unknown_lane_is_failed_not_crash():
     tel = FakeTelemetry()
     _rid, res = asyncio.run(orchestrate.batch_run(
