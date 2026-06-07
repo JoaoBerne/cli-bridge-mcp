@@ -47,6 +47,7 @@ Claude → cli-bridge → [ Gemini ] [ GPT ] [ Mistral ] [ Qwen ] … in paralle
 _Execução real (velocidade 2,5×): um bypass de autenticação commitado — `security-review` distribui
 papéis OWASP entre modelos gratuitos em paralelo; dois modelos o marcam como **blocker** de forma
 independente, e `usage` mostra os comprovantes._
+_Gerado com [vhs](https://github.com/charmbracelet/vhs) — [ver fonte](../demo/)._
 
 </div>
 
@@ -193,11 +194,25 @@ da verificação.
 
 ### 2. Registre-o no seu host
 
+É um servidor MCP stdio simples (`uvx cli-bridge-mcp`) — funciona em todo cliente MCP, e esconde
+automaticamente a lane do host que está chamando (sem perguntar a si mesmo).
+
 **Claude Code** — um comando:
 
 ```bash
 claude mcp add cli-bridge -- uvx cli-bridge-mcp
 ```
+
+[![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_cli--bridge-0098FF?logo=githubcopilot&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=cli-bridge&config=%7B%22name%22%3A%22cli-bridge%22%2C%22command%22%3A%22uvx%22%2C%22args%22%3A%5B%22cli-bridge-mcp%22%5D%7D)
+[![Install in Cursor](https://img.shields.io/badge/Cursor-Install_cli--bridge-111111?logo=cursor&logoColor=white)](https://cursor.com/en/install-mcp?name=cli-bridge&config=eyJjb21tYW5kIjoidXZ4IiwiYXJncyI6WyJjbGktYnJpZGdlLW1jcCJdfQ==)
+
+<details>
+<summary><b>Claude Desktop</b> (<code>claude_desktop_config.json</code>)</summary>
+
+```json
+{ "mcpServers": { "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } } }
+```
+</details>
 
 <details>
 <summary><b>Codex</b> (<code>~/.codex/config.toml</code>)</summary>
@@ -210,10 +225,51 @@ args = ["cli-bridge-mcp"]
 </details>
 
 <details>
-<summary><b>opencode</b> / <b>Gemini CLI</b> / outros clientes MCP</summary>
+<summary><b>Cursor</b> (<code>~/.cursor/mcp.json</code>)</summary>
 
-Aponte a configuração MCP do seu cliente para o comando `uvx cli-bridge-mcp` via stdio. Igual em
-todo lugar.
+```json
+{ "mcpServers": { "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } } }
+```
+</details>
+
+<details>
+<summary><b>VS Code</b> (<code>.vscode/mcp.json</code> ou configurações do usuário)</summary>
+
+```json
+{ "servers": { "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } } }
+```
+</details>
+
+<details>
+<summary><b>Gemini CLI</b> (<code>~/.gemini/settings.json</code>)</summary>
+
+```json
+{ "mcpServers": { "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } } }
+```
+</details>
+
+<details>
+<summary><b>opencode</b> (<code>opencode.json</code>)</summary>
+
+```json
+{ "mcp": { "cli-bridge": { "type": "local", "command": ["uvx", "cli-bridge-mcp"] } } }
+```
+</details>
+
+<details>
+<summary><b>Windsurf</b> (<code>~/.codeium/windsurf/mcp_config.json</code>)</summary>
+
+```json
+{ "mcpServers": { "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } } }
+```
+</details>
+
+<details>
+<summary><b>Warp</b> (Settings → AI → MCP servers)</summary>
+
+```json
+{ "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } }
+```
 </details>
 
 ### 3. Use-o
@@ -345,6 +401,7 @@ Tudo é variável de ambiente — sem edições de código. Ajuste às **suas** 
 | `CLI_BRIDGE_REVIEW_TIMEOUT_S` | Timeout por revisor para `review_diff` / `security_review` (padrão 180; estes são deliberadamente mais pesados que `ask_all`). |
 | `CLI_BRIDGE_OVERFLOW_TTL_H` | Horas antes de um arquivo de overflow transbordado ser podado (padrão 24). |
 | `CLI_BRIDGE_TELEMETRY` | `off` para desabilitar o log de execução local / rastreamento de cooldown (padrão ligado, apenas local à máquina). |
+| `CLI_BRIDGE_TRACE_FOOTER` | `off` esconde o rodapé JSON `## Trace` nos relatórios de fluxo — mais agradável para humanos lendo-os num terminal; hosts MCP normalmente o querem (padrão ligado). |
 | `CLI_BRIDGE_STATE_DB` | Caminho para o DB de estado sqlite local (padrão `~/.local/share/cli-bridge/state.sqlite`). |
 | `CLI_BRIDGE_STORE_TRANSCRIPTS` | `true` para manter uma prévia mais longa da tarefa na telemetria (padrão: apenas hash + prévia de 60 chars). |
 | `CLI_BRIDGE_LOG` / `_LOG_FILE` | `debug`/`info` para logar o que rodou onde (padrão: silencioso). |

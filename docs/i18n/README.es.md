@@ -46,6 +46,7 @@ Claude → cli-bridge → [ Gemini ] [ GPT ] [ Mistral ] [ Qwen ] … in paralle
 _Ejecución real (a 2.5× de velocidad): un bypass de autenticación commiteado — `security-review`
 reparte roles de OWASP entre modelos gratuitos en paralelo; dos modelos lo marcan como **blocker**
 de forma independiente, y `usage` muestra los comprobantes._
+_Generado con [vhs](https://github.com/charmbracelet/vhs) — [ver código fuente](../demo/)._
 
 </div>
 
@@ -191,11 +192,25 @@ cierto al momento de la verificación.
 
 ### 2. Regístralo con tu host
 
+Es un servidor MCP de stdio sin más (`uvx cli-bridge-mcp`) — funciona en todos los clientes MCP, y
+oculta automáticamente el lane del host que esté llamando (para no preguntarte a ti mismo).
+
 **Claude Code** — un solo comando:
 
 ```bash
 claude mcp add cli-bridge -- uvx cli-bridge-mcp
 ```
+
+[![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_cli--bridge-0098FF?logo=githubcopilot&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=cli-bridge&config=%7B%22name%22%3A%22cli-bridge%22%2C%22command%22%3A%22uvx%22%2C%22args%22%3A%5B%22cli-bridge-mcp%22%5D%7D)
+[![Install in Cursor](https://img.shields.io/badge/Cursor-Install_cli--bridge-111111?logo=cursor&logoColor=white)](https://cursor.com/en/install-mcp?name=cli-bridge&config=eyJjb21tYW5kIjoidXZ4IiwiYXJncyI6WyJjbGktYnJpZGdlLW1jcCJdfQ==)
+
+<details>
+<summary><b>Claude Desktop</b> (<code>claude_desktop_config.json</code>)</summary>
+
+```json
+{ "mcpServers": { "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } } }
+```
+</details>
 
 <details>
 <summary><b>Codex</b> (<code>~/.codex/config.toml</code>)</summary>
@@ -208,10 +223,51 @@ args = ["cli-bridge-mcp"]
 </details>
 
 <details>
-<summary><b>opencode</b> / <b>Gemini CLI</b> / otros clientes MCP</summary>
+<summary><b>Cursor</b> (<code>~/.cursor/mcp.json</code>)</summary>
 
-Apunta la configuración MCP de tu cliente al comando `uvx cli-bridge-mcp` sobre stdio. Igual en todas
-partes.
+```json
+{ "mcpServers": { "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } } }
+```
+</details>
+
+<details>
+<summary><b>VS Code</b> (<code>.vscode/mcp.json</code> o ajustes de usuario)</summary>
+
+```json
+{ "servers": { "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } } }
+```
+</details>
+
+<details>
+<summary><b>Gemini CLI</b> (<code>~/.gemini/settings.json</code>)</summary>
+
+```json
+{ "mcpServers": { "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } } }
+```
+</details>
+
+<details>
+<summary><b>opencode</b> (<code>opencode.json</code>)</summary>
+
+```json
+{ "mcp": { "cli-bridge": { "type": "local", "command": ["uvx", "cli-bridge-mcp"] } } }
+```
+</details>
+
+<details>
+<summary><b>Windsurf</b> (<code>~/.codeium/windsurf/mcp_config.json</code>)</summary>
+
+```json
+{ "mcpServers": { "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } } }
+```
+</details>
+
+<details>
+<summary><b>Warp</b> (Settings → AI → MCP servers)</summary>
+
+```json
+{ "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } }
+```
 </details>
 
 ### 3. Úsalo
@@ -343,6 +399,7 @@ Todo son variables de entorno — sin editar código. Ajústalo a **tus** suscri
 | `CLI_BRIDGE_REVIEW_TIMEOUT_S` | Timeout por revisor para `review_diff` / `security_review` (por defecto 180; son deliberadamente más pesados que `ask_all`). |
 | `CLI_BRIDGE_OVERFLOW_TTL_H` | Horas antes de que un archivo de desbordamiento volcado se pode (por defecto 24). |
 | `CLI_BRIDGE_TELEMETRY` | `off` para desactivar el registro local de ejecuciones / seguimiento de enfriamiento (por defecto activado, solo local a la máquina). |
+| `CLI_BRIDGE_TRACE_FOOTER` | `off` oculta el pie de página JSON `## Trace` en los informes de flujo de trabajo — más agradable para humanos que los leen en una terminal; los hosts de MCP normalmente lo quieren (por defecto activado). |
 | `CLI_BRIDGE_STATE_DB` | Ruta a la base de datos sqlite de estado local (por defecto `~/.local/share/cli-bridge/state.sqlite`). |
 | `CLI_BRIDGE_STORE_TRANSCRIPTS` | `true` para conservar una vista previa más larga de la tarea en la telemetría (por defecto: solo hash + vista previa de 60 caracteres). |
 | `CLI_BRIDGE_LOG` / `_LOG_FILE` | `debug`/`info` para registrar qué se ejecutó y dónde (por defecto: silencioso). |

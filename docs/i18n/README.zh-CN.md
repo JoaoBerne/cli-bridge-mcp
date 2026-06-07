@@ -44,6 +44,7 @@ Claude → cli-bridge → [ Gemini ] [ GPT ] [ Mistral ] [ Qwen ] … in paralle
 
 _真实运行（2.5 倍速）：一处已提交的鉴权绕过 —— `security-review` 把 OWASP 各角色并行分发到多个免费
 模型上；两个模型各自独立把它标为 **blocker**，而 `usage` 把账单凭证摆出来。_
+_由 [vhs](https://github.com/charmbracelet/vhs) 生成 —— [查看源码](../demo/)。_
 
 </div>
 
@@ -179,11 +180,25 @@ export CLI_BRIDGE_LANES_FILE=/path/to/examples/free-apis.json
 
 ### 2. 在你的宿主里注册它
 
+它是一个纯粹的 stdio MCP 服务器（`uvx cli-bridge-mcp`）—— 在每一个 MCP 客户端里都能用，而且它会
+自动隐藏调用方那个宿主的通道（你不会自己问自己）。
+
 **Claude Code** —— 一条命令：
 
 ```bash
 claude mcp add cli-bridge -- uvx cli-bridge-mcp
 ```
+
+[![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_cli--bridge-0098FF?logo=githubcopilot&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=cli-bridge&config=%7B%22name%22%3A%22cli-bridge%22%2C%22command%22%3A%22uvx%22%2C%22args%22%3A%5B%22cli-bridge-mcp%22%5D%7D)
+[![Install in Cursor](https://img.shields.io/badge/Cursor-Install_cli--bridge-111111?logo=cursor&logoColor=white)](https://cursor.com/en/install-mcp?name=cli-bridge&config=eyJjb21tYW5kIjoidXZ4IiwiYXJncyI6WyJjbGktYnJpZGdlLW1jcCJdfQ==)
+
+<details>
+<summary><b>Claude Desktop</b>（<code>claude_desktop_config.json</code>）</summary>
+
+```json
+{ "mcpServers": { "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } } }
+```
+</details>
 
 <details>
 <summary><b>Codex</b>（<code>~/.codex/config.toml</code>）</summary>
@@ -196,9 +211,51 @@ args = ["cli-bridge-mcp"]
 </details>
 
 <details>
-<summary><b>opencode</b> / <b>Gemini CLI</b> / 其他 MCP 客户端</summary>
+<summary><b>Cursor</b>（<code>~/.cursor/mcp.json</code>）</summary>
 
-把你客户端的 MCP 配置指向 `uvx cli-bridge-mcp` 命令，走 stdio。各处都一样。
+```json
+{ "mcpServers": { "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } } }
+```
+</details>
+
+<details>
+<summary><b>VS Code</b>（<code>.vscode/mcp.json</code> 或用户设置）</summary>
+
+```json
+{ "servers": { "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } } }
+```
+</details>
+
+<details>
+<summary><b>Gemini CLI</b>（<code>~/.gemini/settings.json</code>）</summary>
+
+```json
+{ "mcpServers": { "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } } }
+```
+</details>
+
+<details>
+<summary><b>opencode</b>（<code>opencode.json</code>）</summary>
+
+```json
+{ "mcp": { "cli-bridge": { "type": "local", "command": ["uvx", "cli-bridge-mcp"] } } }
+```
+</details>
+
+<details>
+<summary><b>Windsurf</b>（<code>~/.codeium/windsurf/mcp_config.json</code>）</summary>
+
+```json
+{ "mcpServers": { "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } } }
+```
+</details>
+
+<details>
+<summary><b>Warp</b>（Settings → AI → MCP servers）</summary>
+
+```json
+{ "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } }
+```
 </details>
 
 ### 3. 使用它
@@ -326,6 +383,7 @@ workspace-write`，mistral → `--agent accept-edits`，gemini → `--yolo`（�
 | `CLI_BRIDGE_REVIEW_TIMEOUT_S` | `review_diff` / `security_review` 每个评审者的超时（默认 180；这些本就刻意比 `ask_all` 更重）。 |
 | `CLI_BRIDGE_OVERFLOW_TTL_H` | 一个已溢出的文件被裁剪前的小时数（默认 24）。 |
 | `CLI_BRIDGE_TELEMETRY` | `off` 关闭本地运行日志 / 冷却跟踪（默认开启，仅机器本地）。 |
+| `CLI_BRIDGE_TRACE_FOOTER` | `off` 在工作流报告中隐藏 `## Trace` JSON 页脚 —— 对在终端里阅读的人更友好；MCP 宿主通常想要它（默认开启）。 |
 | `CLI_BRIDGE_STATE_DB` | 本地 sqlite 状态 DB 的路径（默认 `~/.local/share/cli-bridge/state.sqlite`）。 |
 | `CLI_BRIDGE_STORE_TRANSCRIPTS` | `true` 在遥测里保留更长的任务预览（默认：仅 hash + 60 字符预览）。 |
 | `CLI_BRIDGE_LOG` / `_LOG_FILE` | `debug`/`info` 记录在哪里运行了什么（默认：静默）。 |

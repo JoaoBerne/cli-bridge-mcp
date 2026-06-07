@@ -45,6 +45,7 @@ Claude → cli-bridge → [ Gemini ] [ GPT ] [ Mistral ] [ Qwen ] … in paralle
 
 _実際の実行（2.5倍速）: コミットされた認証バイパス — `security-review` が OWASP の役割を無料モデル群へ
 並列にファンアウトし、2つのモデルが独立に **blocker** と判定、そして `usage` が証拠を示します。_
+_[vhs](https://github.com/charmbracelet/vhs) で生成 — [ソースを見る](../demo/)。_
 
 </div>
 
@@ -121,7 +122,7 @@ _実際の実行（2.5倍速）: コミットされた認証バイパス — `se
 | プラン別コストティア＋厳格な日次上限＋クールダウン | ✅ | ➖ | ❌ |
 | 自動フォールバック（cascade） | ✅ | 一部 | ❌ |
 | **あなたの結果から学習する**ルーティング | ✅ | ❌ | ❌ |
-| 任意の CLI / 自前 API を追加、フォール不要 | ✅ | ➖ | ❌ |
+| 任意の CLI / 自前 API を追加、フォーク不要 | ✅ | ➖ | ❌ |
 | 呼び出し元ホストを自己的に隠す | ✅ | 該当なし | ➖ |
 | 再起動を生き延びる円卓メモリ | ✅ | ➖（インメモリ） | ➖ |
 | 安全なエージェント書き込み（worktree → diff） | ✅ | ➖ | ❌ |
@@ -183,11 +184,25 @@ export CLI_BRIDGE_LANES_FILE=/path/to/examples/free-apis.json
 
 ### 2. ホストに登録する
 
+これはただの stdio MCP サーバー（`uvx cli-bridge-mcp`）です — あらゆる MCP クライアントで動き、
+呼び出し元ホストのレーンを自動的に隠します（自分自身に尋ねないように）。
+
 **Claude Code** — コマンド1つ:
 
 ```bash
 claude mcp add cli-bridge -- uvx cli-bridge-mcp
 ```
+
+[![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_cli--bridge-0098FF?logo=githubcopilot&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=cli-bridge&config=%7B%22name%22%3A%22cli-bridge%22%2C%22command%22%3A%22uvx%22%2C%22args%22%3A%5B%22cli-bridge-mcp%22%5D%7D)
+[![Install in Cursor](https://img.shields.io/badge/Cursor-Install_cli--bridge-111111?logo=cursor&logoColor=white)](https://cursor.com/en/install-mcp?name=cli-bridge&config=eyJjb21tYW5kIjoidXZ4IiwiYXJncyI6WyJjbGktYnJpZGdlLW1jcCJdfQ==)
+
+<details>
+<summary><b>Claude Desktop</b> (<code>claude_desktop_config.json</code>)</summary>
+
+```json
+{ "mcpServers": { "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } } }
+```
+</details>
 
 <details>
 <summary><b>Codex</b> (<code>~/.codex/config.toml</code>)</summary>
@@ -200,9 +215,51 @@ args = ["cli-bridge-mcp"]
 </details>
 
 <details>
-<summary><b>opencode</b> / <b>Gemini CLI</b> / その他の MCP クライアント</summary>
+<summary><b>Cursor</b> (<code>~/.cursor/mcp.json</code>)</summary>
 
-クライアントの MCP 設定を、stdio 経由のコマンド `uvx cli-bridge-mcp` に向けてください。どこでも同じです。
+```json
+{ "mcpServers": { "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } } }
+```
+</details>
+
+<details>
+<summary><b>VS Code</b> (<code>.vscode/mcp.json</code> またはユーザー設定)</summary>
+
+```json
+{ "servers": { "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } } }
+```
+</details>
+
+<details>
+<summary><b>Gemini CLI</b> (<code>~/.gemini/settings.json</code>)</summary>
+
+```json
+{ "mcpServers": { "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } } }
+```
+</details>
+
+<details>
+<summary><b>opencode</b> (<code>opencode.json</code>)</summary>
+
+```json
+{ "mcp": { "cli-bridge": { "type": "local", "command": ["uvx", "cli-bridge-mcp"] } } }
+```
+</details>
+
+<details>
+<summary><b>Windsurf</b> (<code>~/.codeium/windsurf/mcp_config.json</code>)</summary>
+
+```json
+{ "mcpServers": { "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } } }
+```
+</details>
+
+<details>
+<summary><b>Warp</b> (Settings → AI → MCP servers)</summary>
+
+```json
+{ "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } }
+```
 </details>
 
 ### 3. 使う
@@ -332,6 +389,7 @@ opencode の場合、空の `model` は `opencode models` に現在の `opencode
 | `CLI_BRIDGE_REVIEW_TIMEOUT_S` | `review_diff` / `security_review` のレビュアー別タイムアウト（既定180；これらは `ask_all` より意図的に重い）。 |
 | `CLI_BRIDGE_OVERFLOW_TTL_H` | 退避したオーバーフローファイルが刈り取られるまでの時間（既定24）。 |
 | `CLI_BRIDGE_TELEMETRY` | `off` でローカルの実行ログ / クールダウン追跡を無効化（既定オン、マシンローカルのみ）。 |
+| `CLI_BRIDGE_TRACE_FOOTER` | `off` でワークフローレポートの `## Trace` JSON フッターを隠します — ターミナルで読む人間には見やすくなります；MCP ホストは通常それを求めます（既定オン）。 |
 | `CLI_BRIDGE_STATE_DB` | ローカルの sqlite 状態 DB へのパス（既定 `~/.local/share/cli-bridge/state.sqlite`）。 |
 | `CLI_BRIDGE_STORE_TRANSCRIPTS` | `true` で、テレメトリにより長いタスクプレビューを保持します（既定: ハッシュ＋60文字のプレビューのみ）。 |
 | `CLI_BRIDGE_LOG` / `_LOG_FILE` | `debug`/`info` で、何がどこで実行されたかをログします（既定: 無音）。 |
