@@ -308,7 +308,10 @@ Los hosts que admiten prompts de MCP también exponen `review_diff`, `security_r
 | `test_plan` | Deriva un **plan de pruebas** priorizado (comportamientos, casos límite, casos concretos) a partir de un diff de git o de una descripción. |
 | `commit_msg` | Genera un mensaje de **Conventional Commit** a partir de tu diff en stage (recurre al árbol de trabajo). Solo lectura — emite texto, nunca commitea. `lane`, `cwd` opcionales. |
 | `pr_describe` | Genera un **título + descripción de PR** (Summary / Changes / Testing) a partir del diff de la rama + el log de commits frente a una base (por defecto origin/main → main). Solo lectura. `base`, `lane`, `cwd` opcionales. |
-| `ask_build_isolated` | **Modo de escritura seguro**: ejecuta un lane capaz de construir en un worktree de git descartable en HEAD y obtén el **diff** para revisar — tu repo real nunca se modifica. |
+| `ask_build` | **Encarga un build real.** `mode=isolated` (por defecto) edita un worktree descartable y devuelve un **diff** — repo intacto. `mode=direct` construye directamente en un directorio destino, protegido por git + un **contrato de zona** (el delegado solo escribe dentro de `zone`; las escrituras fuera de zona se detectan y revierten; el deshacer es por zona, nunca un reset global) — así el host puede construir otras partes del **mismo repo en paralelo**. `async=true` lo hace **dirigible**. `dry_run` previsualiza el brief. (`ask_build_isolated` es un alias heredado.) |
+| `job_tail` / `build_steer` | **Sigue y dirige un build como un humano.** `job_tail(job_id, offset)` transmite su registro de progreso (por offset de bytes). `build_steer(job_id, instruction, interrupt)` encola una corrección para el siguiente turno, o `interrupt=true` corta el turno actual (los archivos ya escritos se conservan). Una **Definition of Done** ejecutable opcional (`dod_cmd`, una lista argv) se ejecuta tras cada turno — éxito = listo, fallo = un turno más con el error reinyectado. |
+| `batch_run` | **Fan-out duradero**: ejecuta muchas peticiones independientes en paralelo en **una sola llamada** en vez de N (ahorra contexto del host + cuota). Cada resultado se registra, así `resume_id` reproduce las tareas ya terminadas y solo ejecuta el resto — **sobrevive a un reinicio del servidor**. Disponible en `async`. |
+| `workflow` | **Workflows multimodelo listos** sobre el sustrato de batch. **`refine_plan`** — deja que el consejo DEMUELA tu plan desde ángulos distintos (pasa `plan_file`; cada lane lo lee, nunca se recopia). `council_review` (N lanes responden una pregunta + juez opcional), `map_review` (revisar varios archivos en paralelo), `research_verify` (responder y luego contrastar de forma adversarial). Todos reanudables + en `async`. |
 | `list_models` | Lista los modelos disponibles de un lane (parámetro `lane`) donde la CLI los expone; de lo contrario muestra el modelo por defecto resuelto + cómo elegir uno. (`list_<lane>_models` también existe para lanes con un comando de listado nativo.) |
 | `conversations_list` / `conversation_show` | Lista los **hilos de mesa redonda** recientes (recupera un id tras un reinicio de contexto) / muestra la transcripción completa de un hilo, atribuida por lane. |
 | `doctor` | Verificación de salud: CLIs instaladas, host detectado, postura de costo/cuota, enfriamientos, valores por defecto. `deep: true` sondea en vivo la autenticación de cada lane gratuito **y verifica los flags de cada lane contra su `--help`** — advierte si una CLI renombró/eliminó un flag del que cli-bridge depende (drift) antes de que el lane falle en silencio. |
@@ -331,6 +334,59 @@ host aplica cualquier edición. Pasa `agent: "build"` para dejar que **edite arc
 → `--sandbox workspace-write`, mistral → `--agent accept-edits`, gemini → `--yolo` (o `agy`
 `--dangerously-skip-permissions`), opencode → `--agent build`. Los lanes capaces de construir se
 anotan como no-solo-lectura, y una ejecución `build` nunca se sirve desde caché.
+
+### Delega un build real — supervisado, en tu repo
+
+`ask_build` convierte a un delegado en un compañero que produce un resultado **completo y real**, no
+solo un diff para copiar. Dos modos:
+
+- **`mode=isolated`** (por defecto, el más seguro) — el delegado edita un worktree git descartable en
+  HEAD; tú obtienes el diff y lo aplicas. Nada se mueve en tu repo.
+- **`mode=direct`** — el delegado escribe **archivos reales** en `target_dir`, para que tú (el host)
+  puedas construir otras partes del **mismo repo en paralelo** (p. ej. *"yo hago el backend, codex
+  hace `frontend/`"*). La seguridad es por git + un **contrato de zona**, no por aislamiento:
+  - el brief le dice al delegado que solo puede escribir **dentro de `zone`** (una ruta bajo
+    `target_dir`);
+  - todo deshacer es **por zona** (`git checkout -- <zone>` + `git clean -fd <zone>`, nunca un
+    `git reset --hard` global), así tu trabajo sin commitear fuera de la zona nunca se toca;
+  - un **bloqueo por zona** deja que zonas disjuntas construyan a la vez pero bloquea dos builds en la
+    misma zona;
+  - tras cada turno un **`git status` global** detecta cualquier escritura fuera de la zona (escape
+    vía `../`, ruta absoluta, symlink) y **revierte el build** — el scoping de git protege las
+    operaciones de git, no puede aislar el subproceso, así que esta comprobación es obligatoria. Un
+    `target_dir` ausente/vacío se crea y se inicializa con `git init`.
+
+**Míralo y dirígelo.** Ejecuta con `async=true` para obtener un `job_id`, luego:
+
+- `job_tail(job_id, offset)` transmite el progreso del build para que publiques resúmenes por paso;
+- `build_steer(job_id, "usa Tailwind, no CSS inline")` encola una corrección para el siguiente turno;
+  `build_steer(job_id, interrupt=true)` corta el turno actual (los archivos escritos se conservan);
+- pasa `dod_cmd` (una **lista argv**, p. ej. `["npm","run","build"]`, nunca una cadena de shell) para
+  una Definition of Done **probada de verdad** tras cada turno — éxito = listo, fallo = un turno más
+  con el error reinyectado, acotado por `max_fail_retries` (por defecto 3) y `max_turns` (12).
+
+La continuidad es el sistema de archivos (el delegado relee sus propios archivos cada turno); la
+transcripción en bruto vive en la sesión del propio CLI delegado, mientras cli-bridge guarda el
+registro por pasos para `job_tail`.
+
+### Pon a prueba tu plan antes de construir (`workflow refine_plan`)
+
+cli-bridge es fuerte *demoliendo un plan* antes de que escribas código. `workflow
+preset=refine_plan` envía tu plan a varias lanes, cada una criticándolo desde un **ángulo distinto**
+(fallos técnicos y modos de fallo / huecos / sobreingeniería / secuenciación), luego agrupa los
+hallazgos para que los fusiones — o pasa `judge_lane` para una sola lista de parches deduplicada y
+ordenada por severidad.
+
+```jsonc
+// una llamada → N CLIs destrozan el plan, cada uno desde un ángulo distinto
+{ "preset": "refine_plan", "plan_file": "docs/plan.md", "judge_lane": "gpt" }
+```
+
+Pasa **`plan_file`** (una ruta), no el texto: cada lane lee el archivo desde su propio directorio de
+trabajo, así el plan **nunca se recopia en N prompts** — el valor por defecto frugal en tokens para
+toda revisión de artefactos (`map_review`, `review_diff`, `debate context_files` funcionan igual).
+Como todo `workflow`/`batch_run`, es **reanudable** (`resume_id` reproduce las tareas terminadas tras
+un reinicio) y puede ejecutarse en `async`.
 
 **Elige un modelo por llamada** con `model` (p. ej. `model: "claude-opus-4-6"`). Desde dentro de un
 host incluso puedes consultar un **modelo hermano de tu propia familia** — `ask_<your-host>` aparece
@@ -506,7 +562,12 @@ lo demás es idéntico.
   autorizado y puede cambiar. Usa tus propias cuentas dentro de sus términos; trata "a prueba de
   baneos" como "sin extracción de tokens/claves", no como una garantía general.
 - **Los trabajos asíncronos son en proceso.** Un reinicio del servidor marca los trabajos en
-  ejecución como `interrupted` — sin reanudación entre reinicios en v1.
+  ejecución como `interrupted`. `batch_run` y `workflow` son la excepción — registran cada tarea, así
+  un `resume_id` reproduce las terminadas y solo ejecuta el resto tras un reinicio.
+- **Trampas de PATH por wrapper de shell.** Si tu shell envuelve las CLI delegadas en una función o
+  alias (p. ej. una guarda tipo `_opsec` en `.zshrc`), ejecutar cli-bridge *desde ese shell* puede
+  fallar — pero cli-bridge lanza el **binario directamente** (sin shell), así que no le afecta; solo
+  importa un wrapper que oculte el binario en el `PATH`. `doctor` muestra la ruta resuelta por lane.
 - **La protección de inyección es heurística.** Captura patrones de alta señal, no todo; en modo
   `warn` el texto aún llega al host (trata la salida del delegado como datos).
 - **Las cifras de tokens/créditos son estimaciones** (chars/4 + tu `CREDITS_PER_1K`), nunca exactas.

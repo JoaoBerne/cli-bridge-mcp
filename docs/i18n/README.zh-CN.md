@@ -296,7 +296,10 @@ args = ["cli-bridge-mcp"]
 | `test_plan` | 从一个 git diff 或一段描述中推导出一份按优先级排序的 **测试计划**（行为、边界情况、具体用例）。 |
 | `commit_msg` | 从你已暂存的 diff（回退到工作区）生成一条 **Conventional Commit** 消息。只读 —— 只产出文本，绝不提交。可选 `lane`、`cwd`。 |
 | `pr_describe` | 从分支相对某个基（默认 origin/main → main）的 diff + 提交日志，生成一份 **PR 标题 + 描述**（Summary / Changes / Testing）。只读。可选 `base`、`lane`、`cwd`。 |
-| `ask_build_isolated` | **安全写入模式**：在一个位于 HEAD 的一次性 git worktree 里运行一个具备 build 能力的通道，拿到 **diff** 供审阅 —— 你的真实仓库从不被修改。 |
+| `ask_build` | **委托一次真实构建。** `mode=isolated`（默认）在一次性 worktree 里编辑并返回 **diff** —— 仓库不动。`mode=direct` 直接在目标目录里构建，由 git + **区域契约**护航（被委托方只能写入 `zone`；越界写入会被检测并回滚；撤销按区域作用，绝不全局 reset）—— 于是宿主可以**在同一仓库内并行**构建其他部分。`async=true` 让它**可操控**。`dry_run` 预览 brief。（`ask_build_isolated` 是遗留别名。） |
+| `job_tail` / `build_steer` | **像人一样跟随并操控一次构建。** `job_tail(job_id, offset)` 流式输出其进度日志（按字节偏移）。`build_steer(job_id, instruction, interrupt)` 为下一轮排入一条修正，或 `interrupt=true` 打断当前轮（已写入的文件保留）。可选的可执行 **Definition of Done**（`dod_cmd`，一个 argv 列表）在每轮后运行 —— 通过 = 完成，失败 = 把错误回灌再来一轮。 |
+| `batch_run` | **持久化扇出**：在**一次调用**里并行跑许多独立请求，而非 N 次（节省宿主上下文 + 配额）。每个结果都被记账，因此 `resume_id` 会重放已完成的任务、只跑剩下的 —— **能挺过服务器重启**。支持 `async`。 |
+| `workflow` | 基于批处理底座的**开箱即用多模型工作流**。**`refine_plan`** —— 让评审团从不同角度 **拆解** 你的计划（传 `plan_file`；每个通道自己读取，绝不重复抄写）。`council_review`（N 个通道回答一个问题 + 可选裁判）、`map_review`（并行审阅多个文件）、`research_verify`（先回答再对抗式交叉核验）。全部可恢复 + 可 `async`。 |
 | `list_models` | 在 CLI 暴露了模型列表的情况下，列出某个通道可用的模型（`lane` 参数）；否则显示解析出的默认模型 + 如何选择一个。（对于自带原生 list 命令的通道，也存在 `list_<lane>_models`。） |
 | `conversations_list` / `conversation_show` | 列出最近的 **圆桌线程**（上下文重置后恢复一个 id）/ 显示某个线程的完整记录，按通道归属标注。 |
 | `doctor` | 健康检查：已安装的 CLI、检测到的宿主、成本/额度立场、冷却状态、默认值。`deep: true` 会实时探测每个免费通道的鉴权，**并对照各 CLI 的 `--help` 检查每个通道的参数** —— 如果某个 CLI 重命名/移除了 cli-bridge 依赖的参数（漂移），会在通道悄然失败之前发出警告。 |
@@ -318,6 +321,49 @@ implement this function"*）：claude → `--permission-mode acceptEdits`，gpt 
 workspace-write`，mistral → `--agent accept-edits`，gemini → `--yolo`（或 `agy`
 `--dangerously-skip-permissions`），opencode → `--agent build`。具备 build 能力的通道会被标注为
 非只读，而一次 `build` 运行绝不会从缓存中返回。
+
+### 委托一次真实构建 —— 在你的仓库里、有监督地进行
+
+`ask_build` 把被委托方变成一个交付**完整、真实**结果的队友，而不只是一份供你复制的 diff。两种模式：
+
+- **`mode=isolated`**（默认，最安全）—— 被委托方在位于 HEAD 的一次性 git worktree 里编辑；你拿到 diff
+  自己应用。你的仓库纹丝不动。
+- **`mode=direct`** —— 被委托方把**真实文件**写入 `target_dir`，于是你（宿主）可以**在同一仓库内并行**
+  构建其他部分（例如 *“我做后端，codex 做 `frontend/`”*）。安全靠的是 git + **区域契约**，而非隔离：
+  - brief 告诉被委托方只能写入 **`zone` 之内**（`target_dir` 下的一个路径）；
+  - 一切撤销都**按区域作用**（`git checkout -- <zone>` + `git clean -fd <zone>`，绝不全局
+    `git reset --hard`），所以你在区域外未提交的工作绝不会被动到；
+  - **按区域加锁**让互不相交的区域可同时构建，但拒绝对同一区域的两次构建；
+  - 每轮之后一次**全局 `git status`** 会检测任何写到区域外的内容（经由 `../`、绝对路径、符号链接的逃逸）
+    并**回滚该次构建** —— git 作用域只保护 git 操作，无法把子进程沙箱化，所以这项检查是强制的。缺失/空的
+    `target_dir` 会被创建并 `git init`。
+
+**跟随并操控它。** 用 `async=true` 启动以拿到 `job_id`，然后：
+
+- `job_tail(job_id, offset)` 流式输出构建进度，便于你发布逐步小结；
+- `build_steer(job_id, "用 Tailwind，别用内联 CSS")` 为下一轮排入一条修正；
+  `build_steer(job_id, interrupt=true)` 打断当前轮（已写入的文件保留）；
+- 传入 `dod_cmd`（一个 **argv 列表**，例如 `["npm","run","build"]`，绝不是 shell 字符串）即可在每轮后
+  对 Definition of Done 进行**真实测试** —— 通过 = 完成，失败 = 把错误回灌再来一轮，受 `max_fail_retries`
+  （默认 3）与 `max_turns`（12）限制。
+
+连续性靠的是文件系统（被委托方每轮重新读取自己的文件）；原始对话留在被委托 CLI 自己的会话里，而 cli-bridge
+为 `job_tail` 保留逐步日志。
+
+### 在动手构建前给你的计划做压力测试（`workflow refine_plan`）
+
+cli-bridge 很擅长在你写代码之前*拆解一个计划*。`workflow preset=refine_plan` 把你的计划扇出给多个通道，
+每个从一个**不同角度**批判它（技术缺陷与失败模式 / 缺口 / 过度工程 / 排序），然后把发现分组供你合并 ——
+或传 `judge_lane` 得到一份去重并按严重度排序的补丁清单。
+
+```jsonc
+// 一次调用 → N 个 CLI 从不同角度拆解计划
+{ "preset": "refine_plan", "plan_file": "docs/plan.md", "judge_lane": "gpt" }
+```
+
+传 **`plan_file`**（一个路径），而非正文：每个通道从自己的工作目录读取该文件，所以计划**绝不会被抄进 N 份
+prompt** —— 这是所有产物审阅（`map_review`、`review_diff`、`debate context_files` 同理）默认的省 token 做法。
+和所有 `workflow`/`batch_run` 一样，它**可恢复**（`resume_id` 在重启后重放已完成的任务）且可 `async` 运行。
 
 **逐次调用挑选模型**，用 `model`（例如 `model: "claude-opus-4-6"`）。从一个宿主内部，你甚至可以
 咨询 **你自己家族里的兄弟模型** —— `ask_<your-host>` 会作为一个单独的工具出现，要求必须给出明确的
@@ -487,8 +533,12 @@ cli-bridge 是走 stdio 的纯 MCP，所以任何具备 MCP 能力的宿主都�
 - **防封号取决于各提供方的 ToS。** cli-bridge 运行的只是你手动也会运行的官方 CLI ——
   但非交互式/脚本化的用法并不 *保证* 被许可，而且这可能改变。请在各自条款范围内使用
   你自己的账号；把「防封号」理解为「不提取 token/key」，而非一揽子保证。
-- **异步作业是进程内的。** 一次服务器重启会把运行中的作业标为 `interrupted` —— v1
-  没有跨重启的恢复。
+- **异步作业是进程内的。** 一次服务器重启会把运行中的作业标为 `interrupted`。`batch_run` 和
+  `workflow` 是例外 —— 它们为每个任务记账，因此 `resume_id` 会重放已完成的、重启后只跑剩下的。
+- **shell 包装器的 PATH 陷阱。** 如果你的 shell 把被委托的 CLI 包进函数或别名里（例如 `.zshrc` 里的
+  `_opsec` 守卫），*从那个 shell* 启动 cli-bridge 可能会坏 —— 但 cli-bridge 直接启动**二进制本身**
+  （不经过 shell），因此不受影响；只有在 `PATH` 上遮蔽了该二进制的包装器才有影响。`doctor` 会显示每个
+  通道解析出的路径。
 - **注入护栏是启发式的。** 它能抓到高信号的模式，但抓不全；在
   `warn` 模式下文本仍会到达宿主（把被委托方的输出当作数据看待）。
 - **token/积分数字都是估算**（字符数/4 + 你的 `CREDITS_PER_1K`），绝非精确。

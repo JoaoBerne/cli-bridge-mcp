@@ -297,7 +297,10 @@ Les hôtes qui prennent en charge les prompts MCP exposent aussi `review_diff`, 
 | `test_plan` | Dérive un **plan de test** priorisé (comportements, cas limites, cas concrets) à partir d'un diff git ou d'une description. |
 | `commit_msg` | Génère un message **Conventional Commit** à partir de votre diff indexé (se rabat sur la working tree). Lecture seule — produit du texte, ne commite jamais. `lane`, `cwd` optionnels. |
 | `pr_describe` | Génère un **titre + description de PR** (Summary / Changes / Testing) à partir du diff de la branche + du log de commits face à une base (défaut origin/main → main). Lecture seule. `base`, `lane`, `cwd` optionnels. |
-| `ask_build_isolated` | **Mode écriture sûr** : exécute une lane capable de build dans une worktree git jetable au niveau de HEAD et renvoie le **diff** à relire — votre vrai dépôt n'est jamais modifié. |
+| `ask_build` | **Commander un vrai build.** `mode=isolated` (défaut) édite une worktree jetable et renvoie un **diff** — dépôt intact. `mode=direct` build directement dans un dossier cible, gardé par git + un **contrat de zone** (le délégué n'écrit que dans `zone` ; les écritures hors-zone sont détectées et annulées ; l'annulation est scopée à la zone, jamais un reset global) — l'hôte peut donc builder d'autres parties du **même dépôt en parallèle**. `async=true` en fait un build **pilotable**. `dry_run` montre le brief. (`ask_build_isolated` = alias hérité.) |
+| `job_tail` / `build_steer` | **Suivre et piloter un build comme un humain.** `job_tail(job_id, offset)` streame son journal de progression (par offset d'octets). `build_steer(job_id, instruction, interrupt)` met une correction en file pour le prochain tour, ou `interrupt=true` coupe le tour en cours (les fichiers déjà écrits sont conservés). Une **Definition of Done** exécutable optionnelle (`dod_cmd`, une liste argv) est lancée après chaque tour — succès = fini, échec = un tour de plus avec l'erreur renvoyée. |
+| `batch_run` | **Fan-out durable** : lance plusieurs requêtes indépendantes en parallèle en **un seul appel** au lieu de N (économise le contexte de l'hôte + le quota). Chaque résultat est journalisé, donc `resume_id` rejoue les tâches déjà finies et ne relance que le reste — **survit à un redémarrage du serveur**. Disponible en `async`. |
+| `workflow` | **Workflows multi-modèles prêts à l'emploi** sur le substrat de batch. **`refine_plan`** — laissez le conseil DÉMOLIR votre plan sous des angles distincts (passez `plan_file` ; chaque lane le lit, jamais recopié). `council_review` (N lanes répondent à une question + juge optionnel), `map_review` (relire plusieurs fichiers en parallèle), `research_verify` (répondre puis recouper de façon adversariale). Tous reprenables + en `async`. |
 | `list_models` | Liste les modèles disponibles d'une lane (param `lane`) là où la CLI les expose ; sinon affiche le modèle par défaut résolu + comment en choisir un. (`list_<lane>_models` existe aussi pour les lanes ayant une commande de liste native.) |
 | `conversations_list` / `conversation_show` | Liste les **fils de table ronde** récents (récupérer un id après une réinitialisation de contexte) / affiche la transcription complète d'un fil, attribuée par lane. |
 | `doctor` | Bilan de santé : CLI installées, hôte détecté, posture coût/quota, cooldowns, valeurs par défaut. `deep: true` sonde en direct l'auth de chaque lane gratuite **et vérifie les flags de chaque lane face à son `--help`** — avertit si une CLI a renommé/supprimé un flag dont cli-bridge dépend (dérive) avant que la lane n'échoue silencieusement. |
@@ -319,6 +322,60 @@ cette fonction »*) : claude → `--permission-mode acceptEdits`, gpt → `--san
 workspace-write`, mistral → `--agent accept-edits`, gemini → `--yolo` (ou `agy`
 `--dangerously-skip-permissions`), opencode → `--agent build`. Les lanes capables de build sont annotées
 non-lecture-seule, et une exécution `build` n'est jamais servie depuis le cache.
+
+### Déléguer un vrai build — supervisé, dans votre dépôt
+
+`ask_build` transforme un délégué en coéquipier qui produit un résultat **complet et réel**, pas
+juste un diff à recopier. Deux modes :
+
+- **`mode=isolated`** (défaut, le plus sûr) — le délégué édite une worktree git jetable au niveau
+  de HEAD ; vous obtenez le diff et l'appliquez vous-même. Rien ne bouge dans votre dépôt.
+- **`mode=direct`** — le délégué écrit de **vrais fichiers** dans `target_dir`, pour que vous
+  (l'hôte) puissiez builder d'autres parties du **même dépôt en parallèle** (par ex. *« je fais le
+  backend, codex fait `frontend/` »*). La sûreté repose sur git + un **contrat de zone**, pas sur
+  l'isolation :
+  - le brief dit au délégué qu'il ne peut écrire **que dans `zone`** (un chemin sous `target_dir`) ;
+  - toute annulation est **scopée à la zone** (`git checkout -- <zone>` + `git clean -fd <zone>`,
+    jamais un `git reset --hard` global), donc votre travail non commité hors de la zone n'est
+    jamais touché ;
+  - un **verrou par zone** laisse des zones disjointes builder en même temps mais bloque deux builds
+    sur la même zone ;
+  - après chaque tour, un **`git status` global** détecte tout ce qui a été écrit hors de la zone
+    (échappée par `../`, chemin absolu, lien symbolique) et **annule le build** — le scoping git
+    protège les opérations git, il ne peut pas sandboxer le sous-processus, donc ce contrôle est
+    obligatoire. Un `target_dir` absent/vide est créé et `git init`-ialisé.
+
+**Suivez-le et pilotez-le.** Lancez avec `async=true` pour obtenir un `job_id`, puis :
+
+- `job_tail(job_id, offset)` streame la progression du build pour des résumés d'étape ;
+- `build_steer(job_id, "utilise Tailwind, pas du CSS inline")` met une correction en file pour le
+  prochain tour ; `build_steer(job_id, interrupt=true)` coupe le tour en cours (fichiers conservés) ;
+- passez `dod_cmd` (une **liste argv**, par ex. `["npm","run","build"]`, jamais une chaîne shell)
+  pour une Definition of Done **testée pour de vrai** après chaque tour — succès = fini, échec = un
+  tour de plus avec l'erreur renvoyée, borné par `max_fail_retries` (défaut 3) et `max_turns` (12).
+
+La continuité, c'est le système de fichiers (le délégué relit ses propres fichiers à chaque tour) ;
+la transcription brute vit dans la session du CLI délégué, cli-bridge garde le journal d'étapes
+pour `job_tail`.
+
+### Mettez votre plan à l'épreuve avant de builder (`workflow refine_plan`)
+
+cli-bridge excelle à *démolir un plan* avant que vous n'écriviez du code. `workflow
+preset=refine_plan` envoie votre plan à plusieurs lanes, chacune le critiquant sous un **angle
+distinct** (failles techniques & modes de panne / trous / sur-ingénierie / séquencement), puis
+regroupe les trouvailles pour que vous les fusionniez — ou passez `judge_lane` pour une seule liste
+de correctifs dédupliquée et triée par sévérité.
+
+```jsonc
+// un seul appel → N CLI démolissent le plan, chacun sous un angle différent
+{ "preset": "refine_plan", "plan_file": "docs/plan.md", "judge_lane": "gpt" }
+```
+
+Passez **`plan_file`** (un chemin), pas le texte : chaque lane lit le fichier depuis son propre
+répertoire de travail, donc le plan n'est **jamais recopié dans N prompts** — le défaut frugal en
+tokens pour toute revue d'artefact (`map_review`, `review_diff`, `debate context_files` fonctionnent
+pareil). Comme tout `workflow`/`batch_run`, c'est **reprenable** (`resume_id` rejoue les tâches
+finies après un redémarrage) et lançable en `async`.
 
 **Choisissez un modèle par appel** avec `model` (par ex. `model: "claude-opus-4-6"`). Depuis l'intérieur d'un hôte, vous pouvez
 même consulter un **modèle frère de votre propre famille** — `ask_<your-host>` apparaît comme un outil séparé qui exige un
@@ -489,8 +546,13 @@ Pointez Cursor / VS Code (Cline, Continue) / Zed vers la **même commande** (`uv
   à la main — mais l'usage non interactif/scripté n'est pas *garanti* autorisé et peut changer. Utilisez
   vos propres comptes dans le respect de leurs conditions ; considérez « ban-safe » comme « pas d'extraction de token/clé », pas comme une
   garantie globale.
-- **Les jobs async sont in-process.** Un redémarrage du serveur marque les jobs en cours comme `interrupted` — pas de
-  reprise inter-redémarrage en v1.
+- **Les jobs async sont in-process.** Un redémarrage du serveur marque les jobs en cours comme `interrupted`.
+  `batch_run` et `workflow` font exception — ils journalisent chaque tâche, donc un `resume_id` rejoue les
+  tâches finies et ne relance que le reste après un redémarrage.
+- **Pièges PATH de wrapper shell.** Si votre shell enveloppe les CLI déléguées dans une fonction ou un alias
+  (par ex. une garde `_opsec` dans `.zshrc`), lancer cli-bridge *depuis ce shell* peut casser — mais
+  cli-bridge lance le **binaire directement** (sans shell), donc il n'est pas affecté ; seul un wrapper qui
+  masque le binaire sur le `PATH` compte. `doctor` montre le chemin résolu par lane.
 - **Le garde-fou anti-injection est heuristique.** Il attrape les motifs à fort signal, pas tout ; en
   mode `warn` le texte atteint quand même l'hôte (traitez la sortie du délégué comme des données).
 - **Les chiffres de tokens/crédits sont des estimations** (chars/4 + votre `CREDITS_PER_1K`), jamais exacts.
