@@ -18,8 +18,19 @@ from __future__ import annotations
 
 import os
 import re
+import unicodedata
 
 _LEVELS = ("off", "warn", "strict")
+
+# Anti-bypass: NFKC folds compatibility variants (e.g. full-width "ｉｇｎｏｒｅ"
+# -> "ignore") and the zero-width strip removes chars injected to break tokens ("ig​nore"). We
+# MATCH on this normalized view but RETURN the original text — detection only, never mutate output.
+# ZWSP, ZWNJ, ZWJ, word-joiner, BOM/ZWNBSP.
+_ZERO_WIDTH = re.compile("[​‌‍⁠﻿]")
+
+
+def _normalize(text: str) -> str:
+    return _ZERO_WIDTH.sub("", unicodedata.normalize("NFKC", text or ""))
 
 # (signal-name, pattern). Names repeat on purpose: several patterns map to one signal so the
 # banner stays readable. High-signal only — we accept the odd false positive in warn mode (a
@@ -59,10 +70,12 @@ def level() -> str:
 
 
 def scan(text: str) -> list[str]:
-    """Distinct signal names that fired, in pattern order. Empty list == clean."""
+    """Distinct signal names that fired, in pattern order. Empty list == clean. Matches on the
+    NFKC-normalized, zero-width-stripped view so full-width / token-splitting bypasses still trip."""
+    norm = _normalize(text)
     hits: list[str] = []
     for name, rx in _SIGNALS:
-        if name not in hits and rx.search(text or ""):
+        if name not in hits and rx.search(norm):
             hits.append(name)
     return hits
 

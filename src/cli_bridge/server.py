@@ -1386,6 +1386,12 @@ async def _run_lane(lane: LaneSpec, args: dict, *, tool: str = "ask",
     if not task:
         return runner.RunResult(False, "task is required", "failed")
     model = lane.model_for(_str(args, "model"))
+    # M11-7: a non-paid lane resolving to a paid opencode-go/* model (usually a per-call override)
+    # spends real credits — the doctor cost-mismatch only catches the DEFAULT model, so warn here
+    # too. Best-effort log (no behaviour change): visible with CLI_BRIDGE_LOG=warning.
+    if not lane.is_paid and lanes_mod.is_paid_opencode_model(model):
+        runner.log.warning("%s is a free lane but model %r spends credits (opencode-go/*)",
+                           lane.key, model)
     if config.mock():                          # dry-run: canned answer, no spawn
         return runner.RunResult(True, _mock_answer(lane, model, task), "ok", latency_ms=0)
     # Hard budget cap: refuse a PAID lane once today's estimated spend hits the ceiling.
