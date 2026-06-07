@@ -40,6 +40,11 @@ if not log.handlers:
 # is clipped. NOT a "make it short" truncation — the ceiling sits far above any answer.
 MAX_OUTPUT_CHARS = 200_000
 
+# Stall guard for the streaming path: if a delegate emits NO line for this long, it's wedged
+# (a CLI that hangs after a clean banner, a stuck network call) — kill it instead of waiting
+# out the full timeout_s. Only applies when streaming (the buffered path relies on timeout_s).
+DEFAULT_NO_OUTPUT_TIMEOUT_S = 120
+
 # Best-effort secret scrubbing for anything we echo back (errors, output).
 _REDACTIONS = (
     (re.compile(r"(Authorization:\s*Bearer\s+)\S+", re.I), r"\1[redacted]"),
@@ -113,7 +118,7 @@ def _clip(text: str) -> str:
 class RunResult:
     ok: bool
     output: str
-    kind: str = "ok"          # ok | timeout | not_found | quota | auth | failed | spawn | empty | policy
+    kind: str = "ok"          # ok|timeout|not_found|quota|auth|failed|spawn|empty|policy|stalled
     exit_code: int | None = None
     latency_ms: int = 0       # wall time of the spawn, filled in by the caller (server._run_lane)
 
@@ -130,6 +135,8 @@ class RunResult:
             "empty": " - this CLI exited cleanly but returned nothing; another lane may answer",
             "policy": " - this CLI refused on usage-policy grounds; revise the request or skip "
                       "this lane",
+            "stalled": " - this CLI produced no output for a long stretch and was killed; "
+                       "retry or try another lane",
         }.get(self.kind, "")
         return f"[{self.kind}] {self.output}{hint}".rstrip()
 
@@ -187,11 +194,139 @@ def _finish(returncode, out, err, argv) -> RunResult:
                      _failure_kind(out, err), returncode)
 
 
+async def _terminate(proc) -> None:
+    """Kill the spawned process and its whole group, escalating SIGTERM -> SIGKILL. Shared by
+    the buffered and streaming paths, and by host-cancel / timeout / stall cleanup."""
+    try:
+        _kill_tree(proc.pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            return
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=3)
+    except (asyncio.TimeoutError, ProcessLookupError):
+        try:
+            _kill_tree(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+
+
+async def _arun_streamed(proc, argv: list[str], timeout_s: int, on_line, log_path: str | None,
+                         no_output_timeout: float) -> RunResult:
+    """Streaming variant: read stdout AND stderr concurrently so neither pipe can deadlock the
+    other (qwen #4: a 64 KB stderr burst while stdout idles must not wedge), emit each line to
+    `on_line(stream, text)` and/or append it to `log_path`, and classify the final result through
+    the SAME `_finish` as the buffered path. Two guards run on top:
+      • outer timeout (`timeout_s`) — `wait_for` ONLY here, over the whole gather, never over a
+        bare readline (a reader cancelled mid-read would corrupt the captured output);
+      • stall guard — if no line arrives for `no_output_timeout`s, it KILLS the process, which
+        EOFs the pipes and lets the readers finish naturally; we then report kind=`stalled`.
+    """
+    out_lines: list[str] = []
+    err_lines: list[str] = []
+    last_activity = time.monotonic()
+    stalled = False
+
+    log_fh = None
+    if log_path:
+        try:
+            log_fh = open(log_path, "w", encoding="utf-8", errors="replace")
+        except OSError as e:                       # best-effort sink: never fail the spawn over it
+            log.warning("log_path %s could not open: %s", log_path, e)
+
+    async def _reader(stream, sink: list[str], name: str) -> None:
+        nonlocal last_activity
+        while True:
+            raw = await stream.readline()
+            if not raw:                            # EOF
+                break
+            last_activity = time.monotonic()
+            text = redact(raw.decode("utf-8", "replace"))   # redact before it leaves the process
+            sink.append(text)
+            if log_fh:
+                log_fh.write(text)
+                log_fh.flush()
+            if on_line is not None:
+                try:
+                    on_line(name, text)
+                except Exception:                  # a bad callback must never break the pump
+                    log.exception("on_line callback raised")
+
+    async def _stall_guard() -> None:
+        nonlocal stalled
+        while True:
+            remaining = no_output_timeout - (time.monotonic() - last_activity)
+            if remaining <= 0:
+                stalled = True
+                await _terminate(proc)             # kill -> pipes EOF -> readers finish
+                return
+            await asyncio.sleep(remaining)         # wakes exactly at the deadline; resets on output
+
+    core = asyncio.gather(
+        _reader(proc.stdout, out_lines, "stdout"),
+        _reader(proc.stderr, err_lines, "stderr"),
+        proc.wait(),
+    )
+    guard = (asyncio.ensure_future(_stall_guard())
+             if no_output_timeout and no_output_timeout > 0 else None)
+
+    try:
+        await asyncio.wait_for(core, timeout=timeout_s)
+    except asyncio.TimeoutError:
+        if guard:
+            guard.cancel()
+        await _terminate(proc)
+        if log_fh:
+            log_fh.close()
+        log.error("%s timed out after %ss (process group killed)", argv[0], timeout_s)
+        return RunResult(False, f"`{argv[0]}` timed out after {timeout_s}s", "timeout")
+    except asyncio.CancelledError:
+        if guard:
+            guard.cancel()
+        await _terminate(proc)
+        if log_fh:
+            log_fh.close()
+        log.info("%s cancelled by host (process group killed)", argv[0])
+        raise
+
+    if guard is not None:
+        guard.cancel()
+        try:
+            await guard
+        except asyncio.CancelledError:
+            pass
+    if log_fh:
+        log_fh.close()
+
+    if stalled:
+        partial = ("".join(out_lines) or "".join(err_lines)).strip()
+        log.error("%s stalled (no output for %ss; process group killed)",
+                  argv[0], no_output_timeout)
+        return RunResult(
+            False,
+            _clip(f"`{argv[0]}` produced no output for {no_output_timeout:g}s (stalled, killed)"
+                  + (f"\n{partial}" if partial else "")),
+            "stalled")
+
+    res = _finish(proc.returncode, "".join(out_lines), "".join(err_lines), argv)
+    log.info("%s exit=%s kind=%s out=%dch (streamed)",
+             argv[0], proc.returncode, res.kind, len(res.output))
+    return res
+
+
 async def arun(argv: list[str], timeout_s: int, cwd: str | None = None,
-               env: dict | None = None) -> RunResult:
+               env: dict | None = None, on_line=None, log_path: str | None = None,
+               no_output_timeout: float = DEFAULT_NO_OUTPUT_TIMEOUT_S) -> RunResult:
     """The one spawn path (server and CLI both come through here). If the MCP host CANCELS
     the call (disconnect, client timeout), the CancelledError propagates here and we kill the
     whole process group — so the CLI can't keep burning quota/credits after the host gave up.
+
+    Pass `on_line(stream, text)` and/or `log_path` to OBSERVE the delegate live (each stdout/
+    stderr line as it arrives). That switches to the streaming path (`_arun_streamed`), which
+    also enforces a no-output stall guard (`no_output_timeout`). With neither set, behaviour is
+    the original buffered `communicate()` — byte-for-byte unchanged, no regression.
     """
     if not argv:
         return RunResult(False, "empty command", "spawn")
@@ -209,30 +344,17 @@ async def arun(argv: list[str], timeout_s: int, cwd: str | None = None,
         log.error("%s could not start: %s", argv[0], e)
         return RunResult(False, f"`{argv[0]}` could not start: {e}", "spawn")
 
-    async def _terminate():
-        try:
-            _kill_tree(proc.pid, signal.SIGTERM)
-        except (ProcessLookupError, PermissionError, OSError):
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                return
-        try:
-            await asyncio.wait_for(proc.wait(), timeout=3)
-        except (asyncio.TimeoutError, ProcessLookupError):
-            try:
-                _kill_tree(proc.pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError, OSError):
-                pass
+    if on_line is not None or log_path is not None:
+        return await _arun_streamed(proc, argv, timeout_s, on_line, log_path, no_output_timeout)
 
     try:
         out_b, err_b = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
     except asyncio.TimeoutError:
-        await _terminate()
+        await _terminate(proc)
         log.error("%s timed out after %ss (process group killed)", argv[0], timeout_s)
         return RunResult(False, f"`{argv[0]}` timed out after {timeout_s}s", "timeout")
     except asyncio.CancelledError:
-        await _terminate()              # host gave up — don't leave the CLI running
+        await _terminate(proc)          # host gave up — don't leave the CLI running
         log.info("%s cancelled by host (process group killed)", argv[0])
         raise
     res = _finish(proc.returncode,

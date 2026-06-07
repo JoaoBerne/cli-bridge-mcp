@@ -130,3 +130,82 @@ def test_redaction():
 def test_render_error_prefix():
     r = runner.RunResult(False, "boom", "failed")
     assert r.render().startswith("[failed]")
+
+
+# ── streaming path (Phase 1) ────────────────────────────────────────────────────────────────
+# Passing on_line/log_path switches arun to _arun_streamed: two concurrent readers + proc.wait
+# under the outer timeout, plus a no-output stall guard. The final result must classify exactly
+# like the buffered path (same _finish), so these mirror the buffered tests where it matters.
+
+
+def _run_stream(argv, timeout_s, on_line=None, log_path=None, no_output_timeout=120):
+    async def go():
+        return await runner.arun(argv, timeout_s, on_line=on_line, log_path=log_path,
+                                 no_output_timeout=no_output_timeout)
+    return asyncio.run(go())
+
+
+def test_streaming_lines_arrive_in_order():
+    seen = []
+    r = _run_stream(["sh", "-c", "echo one; echo two; echo three"], 30,
+                    on_line=lambda stream, text: seen.append((stream, text.rstrip("\n"))))
+    assert r.ok and r.output == "one\ntwo\nthree"          # final output == buffered output
+    assert [t for _, t in seen] == ["one", "two", "three"]  # delivered incrementally, in order
+    assert all(s == "stdout" for s, _ in seen)
+
+
+def test_streaming_classifies_like_buffered():
+    # quota / empty / policy must classify the same whether streamed or buffered.
+    assert _run_stream(["sh", "-c", "echo RESOURCE_EXHAUSTED 1>&2; exit 1"], 30,
+                       on_line=lambda *a: None).kind == "quota"
+    r_empty = _run_stream(["sh", "-c", "exit 0"], 30, on_line=lambda *a: None)
+    assert not r_empty.ok and r_empty.kind == "empty"
+    r_pol = _run_stream(["sh", "-c", f"echo {repr(_AUP)}"], 30, on_line=lambda *a: None)
+    assert not r_pol.ok and r_pol.kind == "policy"
+
+
+def test_streaming_log_path_captures_both_streams(tmp_path):
+    p = tmp_path / "run.log"
+    r = _run_stream(["sh", "-c", "echo a; echo b 1>&2; echo c"], 30, log_path=str(p))
+    assert r.ok and r.output == "a\nc"                    # exit 0 → stdout only in the result
+    content = p.read_text()
+    assert "a\n" in content and "b\n" in content and "c\n" in content  # log sink keeps stderr too
+
+
+def test_streaming_redacts_before_log_and_callback(tmp_path):
+    p = tmp_path / "r.log"
+    seen = []
+    r = _run_stream(["sh", "-c", "echo 'api_key=supersecretvalue123'"], 30, log_path=str(p),
+                    on_line=lambda s, t: seen.append(t))
+    assert "supersecretvalue123" not in r.output and "[redacted]" in r.output
+    assert "supersecretvalue123" not in p.read_text()      # secret never reaches the log file
+    assert all("supersecretvalue123" not in t for t in seen)  # nor the live callback
+
+
+def test_streaming_stderr_burst_does_not_deadlock():
+    # 64 KB onto stderr while stdout stays idle until the very end. With a single buffered pipe
+    # this is the classic deadlock; two concurrent readers must drain it (qwen #4).
+    r = _run_stream(["sh", "-c", "yes E | head -c 65536 1>&2; echo DONE"], 30,
+                    on_line=lambda *a: None)
+    assert r.ok and r.output == "DONE"
+
+
+def test_streaming_timeout_kills_group():
+    marker = "/tmp/cli_bridge_stream_marker"
+    if os.path.exists(marker):
+        os.remove(marker)
+    r = _run_stream(["sh", "-c", f"(sleep 4; touch {marker}) & sleep 30"], 2,
+                    on_line=lambda *a: None)
+    assert not r.ok and r.kind == "timeout"
+    time.sleep(6)
+    assert not os.path.exists(marker), "grandchild survived the group kill (streaming)"
+    if os.path.exists(marker):
+        os.remove(marker)
+
+
+def test_streaming_stall_guard_kills_silent_cli():
+    # Emits one line then goes silent far longer than no_output_timeout → killed as 'stalled',
+    # well before the (much larger) outer timeout fires. Partial output is preserved.
+    r = _run_stream(["sh", "-c", "echo hi; sleep 30"], 30,
+                    on_line=lambda *a: None, no_output_timeout=1)
+    assert not r.ok and r.kind == "stalled" and "hi" in r.output
