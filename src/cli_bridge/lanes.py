@@ -142,6 +142,46 @@ class LaneSpec:
         return self.default_model
 
 
+# ─────────────────────────── vendor family (cross-vendor jury) ───────────────────────────
+# A model can't trustworthily review its OWN family's output (correlated blind spots). Derive the
+# family from client_ids/key so new lanes need no manual upkeep; override with
+# CLI_BRIDGE_FAMILY_OVERRIDES="lanekey:family,lanekey2:family2".
+_FAMILY_BY_TOKEN = {
+    "claude": "anthropic", "anthropic": "anthropic",
+    "codex": "openai", "openai": "openai", "gpt": "openai",
+    "gemini": "google", "antigravity": "google", "google": "google",
+    "vibe": "mistral", "mistral": "mistral",
+    "opencode": "opencode",
+    "qwen": "qwen",
+    "copilot": "github", "github-copilot": "github",
+    "grok": "xai", "xai": "xai",
+}
+
+
+def _family_overrides() -> dict[str, str]:
+    out: dict[str, str] = {}
+    for part in os.environ.get("CLI_BRIDGE_FAMILY_OVERRIDES", "").split(","):
+        if ":" in part:
+            k, v = part.split(":", 1)
+            if k.strip() and v.strip():
+                out[k.strip().lower()] = v.strip().lower()
+    return out
+
+
+def family_of(lane: LaneSpec) -> str:
+    """Vendor family (anthropic/openai/google/…). Env override wins; else matched from
+    client_ids/key tokens; else the lane key (an unknown lane is its OWN family = isolated, the
+    conservative default for the author!=reviewer rule)."""
+    ov = _family_overrides()
+    if lane.key.lower() in ov:
+        return ov[lane.key.lower()]
+    for tok in {lane.key.lower()} | {c.lower() for c in lane.client_ids}:
+        for needle, fam in _FAMILY_BY_TOKEN.items():
+            if needle in tok:
+                return fam
+    return lane.key.lower()
+
+
 # ─────────────────────────────── built-in lane builders ───────────────────────────────
 
 def _is_build(agent) -> bool:

@@ -356,6 +356,64 @@ def test_fanout_compare_lists_each_option():
     assert "Option 1" in report and "Option 2" in report
 
 
+# ── jury (P3: cross-vendor verification, author≠reviewer family) ──────────────────────────────
+
+def _jury_rl(votes_in_order):
+    """Fake: author returns an answer; each verifier (prompt contains 'juror') returns the next vote."""
+    seq = list(votes_in_order)
+    st = {"i": 0}
+    seen = []
+
+    async def rl(lane, args, *, tool="ask", terse=True):
+        if "juror" in args["task"]:
+            seen.append(lane.key)
+            v = seq[min(st["i"], len(seq) - 1)]
+            st["i"] += 1
+            return RunResult(True, f"review\nVERDICT: {v}", "ok", 1)
+        return RunResult(True, "the answer", "ok", 1)
+    return rl, seen
+
+
+def test_jury_approves_on_majority_pass():
+    tel = FakeTelemetry()
+    lanes = {k: _lane(k) for k in ("gpt", "gemini", "claude")}   # openai / google / anthropic
+    rl, _seen = _jury_rl(["PASS", "PASS"])
+    report = asyncio.run(orchestrate.jury(
+        run_lane=rl, resolve_lane=lanes.get, default_lanes=list(lanes.values()),
+        telemetry=tel, task="2+2?", author_lane="gpt"))
+    assert "APPROVED" in report and "DEGRADED" not in report
+
+
+def test_jury_rejects_fail_closed_on_split():
+    tel = FakeTelemetry()
+    lanes = {k: _lane(k) for k in ("gpt", "gemini", "claude")}
+    rl, _seen = _jury_rl(["PASS", "FAIL"])                       # 1/2 pass, threshold 2 -> REJECTED
+    report = asyncio.run(orchestrate.jury(
+        run_lane=rl, resolve_lane=lanes.get, default_lanes=list(lanes.values()),
+        telemetry=tel, task="q", author_lane="gpt"))
+    assert "REJECTED" in report
+
+
+def test_jury_excludes_author_family():
+    tel = FakeTelemetry()
+    lanes = {k: _lane(k) for k in ("gpt", "codex", "gemini")}    # gpt+codex both openai
+    rl, seen = _jury_rl(["PASS", "PASS", "PASS"])
+    asyncio.run(orchestrate.jury(
+        run_lane=rl, resolve_lane=lanes.get, default_lanes=list(lanes.values()),
+        telemetry=tel, task="q", author_lane="gpt"))
+    assert "codex" not in seen and "gemini" in seen             # same-family codex excluded
+
+
+def test_jury_mono_family_degrades():
+    tel = FakeTelemetry()
+    lanes = {k: _lane(k) for k in ("gpt", "codex")}             # both openai -> no cross-family
+    rl, _seen = _jury_rl(["PASS"])
+    report = asyncio.run(orchestrate.jury(
+        run_lane=rl, resolve_lane=lanes.get, default_lanes=list(lanes.values()),
+        telemetry=tel, task="q", author_lane="gpt"))
+    assert "DEGRADED" in report                                  # degraded, never an undefined verdict
+
+
 def test_fanout_compare_judge_recommends_one():
     tel = FakeTelemetry()
     lanes = {"a": _lane("a"), "b": _lane("b"), "j": _lane("j")}

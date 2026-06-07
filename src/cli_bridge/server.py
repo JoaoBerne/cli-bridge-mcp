@@ -430,7 +430,8 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                 "properties": {
                     "preset": {"type": "string",
                                "enum": ["refine_plan", "council_review", "map_review",
-                                        "research_verify", "verify_repair", "fanout_compare"],
+                                        "research_verify", "verify_repair", "fanout_compare",
+                                        "jury"],
                                "description": "Which workflow to run."},
                     "plan_file": {"type": "string",
                                   "description": "refine_plan: path to the plan (PREFERRED — read "
@@ -457,6 +458,20 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                     "max_rounds": {"type": "integer",
                                    "description": "verify_repair: build->verify->repair rounds "
                                    f"(default 3, max {orchestrate.VERIFY_MAX_ROUNDS})."},
+                    "cross_family": {"type": "boolean",
+                                     "description": "verify_repair: pick the verifier from a "
+                                     "DIFFERENT vendor family (default false)."},
+                    "author_lane": {"type": "string",
+                                    "description": "jury: lane that produces the answer (default: "
+                                    "first council lane)."},
+                    "verifier_lanes": {"type": "array", "items": {"type": "string"},
+                                       "description": "jury: explicit verifier lanes (default: "
+                                       "auto-picked from DIFFERENT vendor families than the author)."},
+                    "verifiers": {"type": "integer",
+                                  "description": "jury: how many verifiers (default min(3, pool))."},
+                    "threshold": {"type": "integer",
+                                  "description": "jury: PASS votes needed to APPROVE (default "
+                                  "majority); short of it = REJECTED, fail-closed."},
                     "cwd": {"type": "string",
                             "description": "verify_repair / fanout_compare: dir the lanes run in."},
                     "judge_lane": {"type": "string",
@@ -2074,12 +2089,19 @@ async def _run_workflow_preset(args: dict, lanes: list[LaneSpec]) -> list[TextCo
                 run_lane=_run_lane, resolve_lane=_resolve, default_lanes=default_lanes,
                 task=_str(args, "task"), builder_lane=_str(args, "builder_lane"),
                 verifier_lane=_str(args, "verifier_lane"), max_rounds=max_rounds,
-                cwd=_str(args, "cwd"))
+                cwd=_str(args, "cwd"), cross_family=bool(args.get("cross_family")))
     elif preset == "fanout_compare":
         def make():
             return orchestrate.fanout_compare(**common, task=_str(args, "task"),
                                               lanes=args.get("lanes"), judge_lane=judge,
                                               cwd=_str(args, "cwd"))
+    elif preset == "jury":
+        def make():
+            return orchestrate.jury(
+                **common, task=_str(args, "task"), author_lane=_str(args, "author_lane"),
+                verifier_lanes=args.get("verifier_lanes"),
+                verifiers=int(args.get("verifiers") or 0),
+                threshold=int(args.get("threshold") or 0), cwd=_str(args, "cwd"))
     else:
         return [TextContent(type="text", text=f"[error] unknown preset: {preset or '(none)'}")]
 

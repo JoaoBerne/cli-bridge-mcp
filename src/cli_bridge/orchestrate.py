@@ -25,7 +25,7 @@ import os
 import re
 import uuid
 
-from . import config
+from . import config, lanes
 
 MAX_BATCH_TASKS = 64           # anti-runaway: the existing cost model governs spend; this caps count
 VERIFY_MAX_ROUNDS = 6          # hard cap on the build->verify->repair loop (cost guard)
@@ -388,15 +388,22 @@ def _other_lane(default_lanes, not_key: str):
 
 async def verify_repair(*, run_lane, resolve_lane, default_lanes, task: str, builder_lane: str = "",
                         verifier_lane: str = "", max_rounds: int = 3, cwd: str = "",
-                        progress=None) -> str:
+                        cross_family: bool = False, progress=None) -> str:
     """A (builder) produces -> B (a DIFFERENT model, verifier) reviews -> if VERDICT: ISSUES the
     issues go back to A -> loop until VERDICT: APPROVED or max_rounds. Cross-model is the point:
     B's failure modes are uncorrelated with A's, so it catches what A's own self-review can't. A
-    light convention (the verifier ends with VERDICT: APPROVED|ISSUES), no schema."""
+    light convention (the verifier ends with VERDICT: APPROVED|ISSUES), no schema. cross_family=True
+    picks a verifier from a DIFFERENT vendor family (default False = first other lane, back-compat)."""
     builder = resolve_lane(builder_lane) if builder_lane else (default_lanes[0] if default_lanes else None)
     if builder is None:
         return "[error] no builder lane available for verify_repair."
-    verifier = (resolve_lane(verifier_lane) if verifier_lane else _other_lane(default_lanes, builder.key))
+    if verifier_lane:
+        verifier = resolve_lane(verifier_lane)
+    elif cross_family:
+        verifier = next(iter(_cross_family_verifiers(default_lanes, builder, 1)), None) \
+            or _other_lane(default_lanes, builder.key)
+    else:
+        verifier = _other_lane(default_lanes, builder.key)
     if verifier is None:
         return ("[error] no verifier lane available — verify_repair needs a SECOND lane (a "
                 "different model). Install/login another CLI or pass verifier_lane.")
@@ -486,3 +493,85 @@ async def fanout_compare(*, run_lane, resolve_lane, default_lanes, telemetry, ta
                                 "note key differences and trade-offs, and recommend ONE to adopt "
                                 "(or a specific merge), with reasons.")
     return _compare(results, task)
+
+
+# ── jury: cross-vendor verification with author≠reviewer-FAMILY (the product) ───────────────────
+
+def _vote(text: str) -> str:
+    """pass | fail | abstain — last VERDICT line wins; absent => abstain (never counts as a pass:
+    fail-closed, so a malformed/empty review can't approve)."""
+    hits = re.findall(r"VERDICT:\s*(PASS|FAIL|ABSTAIN)", text or "", re.IGNORECASE)
+    return hits[-1].lower() if hits else "abstain"
+
+
+def _cross_family_verifiers(default_lanes, author, n: int):
+    fam = lanes.family_of(author)
+    pool = [ln for ln in default_lanes if lanes.family_of(ln) != fam]
+    return pool[:n] if n > 0 else pool
+
+
+def _jury_vote_prompt(task: str, answer: str) -> str:
+    return ("You are a juror reviewing ANOTHER model's answer — you did NOT write it. Judge it "
+            f"rigorously for correctness and completeness.\n\nTASK:\n{task}\n\nANSWER TO JUDGE:\n"
+            f"{answer}\n\nList any concrete problems, then end with EXACTLY one line: "
+            "`VERDICT: PASS` (correct + complete), `VERDICT: FAIL` (wrong or incomplete), or "
+            "`VERDICT: ABSTAIN` (cannot tell). Default to ABSTAIN if unsure.")
+
+
+def _render_jury(author, answer, votes, verdict, passes, fails, k, n, agreement, degraded) -> str:
+    head = [f"# jury — {verdict}  ({passes}/{n} PASS, threshold {k}; agreement {agreement})",
+            f"_author: {author.display} · verifiers: "
+            f"{', '.join(v['lane'] + '(' + v['family'] + ')' for v in votes)}_"]
+    if degraded:
+        head.append("> ⚠️ DEGRADED: no cross-family verifier available (mono-family pool) — voted by "
+                    "same-family lanes, so blind spots may be correlated. Add a different-vendor CLI.")
+    lines = head + ["", "## Answer (author)", "", answer or "_(empty)_", "", "## Verdicts", ""]
+    for v in votes:
+        mark = {"pass": "✅ PASS", "fail": "❌ FAIL", "abstain": "➖ ABSTAIN"}[v["vote"]]
+        lines.append(f"### {mark} — {v['lane']} ({v['family']})\n\n{v['review'] or '_(no review)_'}\n")
+    return "\n".join(lines)
+
+
+async def jury(*, run_lane, resolve_lane, default_lanes, telemetry, task: str, author_lane: str = "",
+               verifier_lanes=None, verifiers: int = 0, threshold: int = 0, cwd: str = "",
+               run_id: str = "", progress=None) -> str:
+    """Author produces -> N verifiers from DIFFERENT vendor families vote PASS/FAIL/ABSTAIN ->
+    k-of-N (fail-closed). Cross-vendor is the point: a model can't review its own family's blind
+    spots. Mono-family pool degrades (same-family vote + a warning), never an undefined verdict."""
+    author = resolve_lane(author_lane) if author_lane else (default_lanes[0] if default_lanes else None)
+    if author is None:
+        return "[error] no author lane available for jury."
+    degraded = False
+    if verifier_lanes:
+        panel = [ln for ln in (resolve_lane(k) for k in verifier_lanes)
+                 if ln is not None and ln.key != author.key]
+    else:
+        want = verifiers if verifiers > 0 else min(3, max(0, len(default_lanes) - 1))
+        panel = _cross_family_verifiers(default_lanes, author, want)
+        if not panel:                              # mono-family pool: degrade, never undefined
+            panel = [ln for ln in default_lanes if ln.key != author.key][:max(1, want)]
+            degraded = True
+    if not panel:
+        return ("[error] jury needs at least one verifier lane distinct from the author — install/"
+                "login a second CLI or pass verifier_lanes.")
+    sub = {"cwd": cwd} if cwd else {}
+    ar = await run_lane(author, {**sub, "task": task}, tool="jury")
+    if not ar.ok:
+        return f"# jury — author {author.display} FAILED ({ar.kind})\n\n{ar.render()}"
+    answer = ar.output.strip()
+    vtasks = [{"lane": v.key, "cwd": cwd, "task": _jury_vote_prompt(task, answer)} for v in panel]
+    _rid, results = await batch_run(vtasks, run_lane=run_lane, resolve_lane=resolve_lane,
+                                    default_lane=panel[0], telemetry=telemetry, run_id=run_id,
+                                    progress=progress)
+    votes = []
+    for v, r in zip(panel, results, strict=False):
+        votes.append({"lane": v.key, "family": lanes.family_of(v),
+                      "vote": _vote(r["output"]) if r["ok"] else "abstain",
+                      "review": r["output"].strip()})
+    n = len(votes)
+    k = threshold if threshold > 0 else (n // 2 + 1)
+    passes = sum(1 for x in votes if x["vote"] == "pass")
+    fails = sum(1 for x in votes if x["vote"] == "fail")
+    verdict = "APPROVED" if passes >= k else "REJECTED"        # fail-closed: short of k => rejected
+    agreement = round(passes / n, 2) if n else 0.0
+    return _render_jury(author, answer, votes, verdict, passes, fails, k, n, agreement, degraded)

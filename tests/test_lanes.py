@@ -8,6 +8,19 @@ def _lane(key):
     return next(ln for ln in lanes.BUILTIN_LANES if ln.key == key)
 
 
+def test_family_of_derives_from_client_ids_and_key():
+    fam = {ln.key: lanes.family_of(ln) for ln in lanes.BUILTIN_LANES}
+    assert fam["claude"] == "anthropic" and fam["gpt"] == "openai"
+    assert fam["gemini"] == "google" and fam["mistral"] == "mistral"
+    assert fam["opencode"] == "opencode"
+
+
+def test_family_of_env_override(monkeypatch):
+    monkeypatch.setenv("CLI_BRIDGE_FAMILY_OVERRIDES", "gpt:acme")
+    assert lanes.family_of(_lane("gpt")) == "acme"
+    assert lanes.family_of(_lane("gemini")) == "google"          # others unaffected
+
+
 def test_gpt_effort_and_model():
     argv = _lane("gpt").build_ask("do it", "gpt-5.5", "high", "")
     assert "exec" in argv
