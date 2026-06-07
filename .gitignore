@@ -8,6 +8,13 @@ dist/
 .venv/
 venv/
 
+# Secrets / local state (never commit)
+.env
+.env.*
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
 # Test / tooling
 .pytest_cache/
 .coverage
