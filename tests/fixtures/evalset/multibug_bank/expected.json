@@ -1,0 +1,35 @@
+{
+  "id": "multibug_bank",
+  "bugs": [
+    {
+      "id": "mbb_logic",
+      "category": "logic_inversion",
+      "file": "bank.py",
+      "line": 3,
+      "line_tolerance": 3,
+      "severity": "high",
+      "must_match_any": [
+        ["inverted", "wrong comparison", "should be >=", "backwards", "condition is reversed", "<= amount", "logic"]
+      ]
+    },
+    {
+      "id": "mbb_leak",
+      "category": "resource_leak",
+      "file": "bank.py",
+      "line": 8,
+      "line_tolerance": 4,
+      "severity": "medium",
+      "must_match_any": [
+        ["leak", "not closed", "close()", "unclosed", "conn.close", "resource", "context manager"]
+      ]
+    }
+  ],
+  "decoys": [
+    {
+      "file": "bank.py",
+      "line": 6,
+      "line_tolerance": 2,
+      "reason": "round() added to fee — harmless precision change, not a behaviour bug"
+    }
+  ]
+}

@@ -50,9 +50,14 @@ cli-bridge eval --live \              # measure real models (spends quota)
 ```
 
 The live run prints recall / precision / false-alarms-on-clean-lines / severity accuracy as
-**mean ± sd** over `--repeats`, plus a **per-bug win/loss table** (where each arm won and lost). If
-the mean±sd bands overlap, it reports *"no measurable difference"* rather than crowning a winner
-from noise. Small N — treat as **directional, not a leaderboard**.
+**mean ± sd** over `--repeats`, plus a **per-bug win/loss table** (where each arm won and lost). The
+recall verdict comes from a **permutation test** over per-fixture recall (deterministic, seeded): if
+`p ≥ 0.05` it reports *"no measurable difference"* rather than crowning a winner from noise. Small N
+— treat as **directional, not a leaderboard**.
+
+The shipped offline corpus is **22 fixtures / 22 reasoning bugs** (incl. multi-bug diffs and decoys
+*inside* buggy fixtures that test precision under realistic noise — eval v3). The dated live result
+below was measured on the smaller 2026-06-05 corpus; re-running `--live` now uses the full corpus.
 
 ### Measured — 2026-06-05 (12 fixtures, 10 reasoning bugs, repeats=3)
 

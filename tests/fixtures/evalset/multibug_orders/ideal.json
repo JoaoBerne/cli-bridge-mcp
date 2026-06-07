@@ -1,0 +1,18 @@
+[
+  {
+    "severity": "high",
+    "title": "Unsafe dict access can raise KeyError",
+    "file": "orders.py",
+    "line": 2,
+    "evidence": "order[\"customer\"] raises a KeyError when the 'customer' key is missing; the safe .get() was removed.",
+    "recommendation": "restore order.get('customer'), or guard the key before subscripting."
+  },
+  {
+    "severity": "high",
+    "title": "Off-by-one: items[i + 1] reads past the end",
+    "file": "orders.py",
+    "line": 5,
+    "evidence": "looping for i in range(len(items)) while indexing items[i + 1] reads one past the end on the last iteration -> IndexError.",
+    "recommendation": "index items[i] (drop the + 1)."
+  }
+]

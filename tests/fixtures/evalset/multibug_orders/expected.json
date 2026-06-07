@@ -1,0 +1,35 @@
+{
+  "id": "multibug_orders",
+  "bugs": [
+    {
+      "id": "mbo_keyerror",
+      "category": "null_deref",
+      "file": "orders.py",
+      "line": 2,
+      "line_tolerance": 3,
+      "severity": "high",
+      "must_match_any": [
+        ["keyerror", "key error", "missing key", "missing", "raises"]
+      ]
+    },
+    {
+      "id": "mbo_offbyone",
+      "category": "off_by_one",
+      "file": "orders.py",
+      "line": 5,
+      "line_tolerance": 3,
+      "severity": "high",
+      "must_match_any": [
+        ["off-by-one", "off by one", "out of range", "indexerror", "past the end", "i + 1", "one past"]
+      ]
+    }
+  ],
+  "decoys": [
+    {
+      "file": "orders.py",
+      "line": 7,
+      "line_tolerance": 2,
+      "reason": "added .strip() to name — harmless normalization, not a behaviour bug"
+    }
+  ]
+}

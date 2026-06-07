@@ -32,6 +32,23 @@ def test_corpus_loads_and_has_expected_shape():
     assert summ["bugs"] >= 10
     assert summ["clean_fixtures"] >= 2          # decoy fixtures that punish over-detection
     assert len(summ["by_category"]) >= 6        # diverse reasoning-bug categories
+    # v3 corpus: at least one MULTI-bug fixture (>1 bug) and decoys living INSIDE buggy fixtures
+    assert any(len(f.bugs) > 1 for f in fx), "no multi-bug fixture — scorer's 1:1 matching untested"
+    assert any(f.bugs and f.decoys for f in fx), "no decoy inside a buggy fixture"
+
+
+def test_permutation_test_is_deterministic_and_separates_signal():
+    # No difference -> high p (identical samples can never beat their own |Δ|=0).
+    a = [0.4, 0.5, 0.6, 0.5, 0.45, 0.55]
+    assert ev._permutation_test(a, list(a), n=2000, seed=0) == 1.0
+    # Clear separation -> low p, and DETERMINISTIC (same seed -> same value).
+    lo = [0.0, 0.1, 0.05, 0.15, 0.1, 0.0]
+    hi = [0.9, 1.0, 0.95, 0.85, 1.0, 0.9]
+    p1 = ev._permutation_test(lo, hi, n=2000, seed=0)
+    p2 = ev._permutation_test(lo, hi, n=2000, seed=0)
+    assert p1 == p2 and p1 < 0.05
+    # Empty input is a non-result, not a crash.
+    assert ev._permutation_test([], [1.0], n=100, seed=0) == 1.0
 
 
 @pytest.mark.parametrize("fx", _fixtures(), ids=lambda f: f.id)

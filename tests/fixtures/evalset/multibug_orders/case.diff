@@ -1,0 +1,15 @@
+diff --git a/orders.py b/orders.py
+--- a/orders.py
++++ b/orders.py
+@@ -1,9 +1,10 @@
+ def summarize(order, items):
+-    customer = order.get("customer")
++    customer = order["customer"]
+     subtotal = 0
+     for i in range(len(items)):
+-        subtotal += items[i]["price"]
++        subtotal += items[i + 1]["price"]
+     label = customer
+-    name = label
++    name = label.strip()
+     return name, subtotal

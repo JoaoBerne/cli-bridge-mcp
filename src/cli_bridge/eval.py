@@ -30,6 +30,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import pathlib
+import random
 import re
 import statistics
 from dataclasses import dataclass, field
@@ -329,13 +330,36 @@ def _mean_sd(vals: list[float]) -> tuple[float, float]:
     return statistics.fmean(vals), (statistics.stdev(vals) if len(vals) > 1 else 0.0)
 
 
-def _ci_overlap(a: tuple[float, float], b: tuple[float, float]) -> bool:
-    """Crude 1-sigma overlap test: if the mean±sd bands touch, call it 'no measurable difference'
-    rather than declaring a winner from noise."""
-    (ma, sa), (mb, sb) = a, b
-    lo_a, hi_a = ma - sa, ma + sa
-    lo_b, hi_b = mb - sb, mb + sb
-    return not (hi_a < lo_b or hi_b < lo_a)
+def _arm_fixture_recalls(runs: list[ArmRun]) -> list[float]:
+    """Per-fixture recall (tp/n_bugs), averaged across repeats, for the bug-bearing fixtures only.
+    These are the independent observations the permutation test resamples — one per fixture, NOT
+    per repeat (with repeats=3 a per-repeat test could never reach p<0.05; per-fixture gives N≈20)."""
+    acc: dict[str, list[float]] = {}
+    for run in runs:
+        for fid, sc in run.per_fixture.items():
+            if sc.n_bugs:
+                acc.setdefault(fid, []).append(sc.tp / sc.n_bugs)
+    return [statistics.fmean(v) for v in acc.values() if v]
+
+
+def _permutation_test(a: list[float], b: list[float], *, n: int = 10000, seed: int = 0) -> float:
+    """Two-sided label-permutation test on the difference of means. Replaces the 1-sigma overlap
+    heuristic with an honest, DETERMINISTIC p-value: pool a+b, randomly relabel n times (stdlib
+    random seeded — never the global RNG), and measure how often the shuffled |Δmean| reaches the
+    observed one. p = (#hits + 1)/(n + 1) (add-one estimator, never returns 0). p < 0.05 => the
+    arm label carries signal; p >= 0.05 => no measurable difference at this corpus size."""
+    if not a or not b:
+        return 1.0
+    obs = abs(statistics.fmean(a) - statistics.fmean(b))
+    pool = list(a) + list(b)
+    na = len(a)
+    rng = random.Random(seed)
+    hits = 0
+    for _ in range(n):
+        rng.shuffle(pool)
+        if abs(statistics.fmean(pool[:na]) - statistics.fmean(pool[na:])) >= obs - 1e-12:
+            hits += 1
+    return (hits + 1) / (n + 1)
 
 
 def corpus_summary(fixtures: list[Fixture]) -> dict:
@@ -365,17 +389,20 @@ def render_markdown(res: EvalResult) -> str:
     n_fix = len(res.fixtures)
     c_failed = sum(r.failed_fixtures for r in res.council)
     s_failed = sum(r.failed_fixtures for r in res.single)
-    overlap = _ci_overlap(c_rec, s_rec)
+    p = _permutation_test(_arm_fixture_recalls(res.council), _arm_fixture_recalls(res.single),
+                          n=10000, seed=0)
     delta = c_rec[0] - s_rec[0]
-    if overlap:
-        verdict = ("**No measurable difference** in recall (mean±sd bands overlap) — at this corpus "
-                   "size the council neither beats nor loses to single-model self-consistency.")
+    if p >= 0.05:
+        verdict = (f"**No measurable difference** in recall (permutation test p={p:.2f} ≥ 0.05) — "
+                   "at this corpus size the council neither beats nor loses to single-model "
+                   "self-consistency.")
     elif delta > 0:
-        verdict = (f"Council recall is higher by {delta:+.0%} (bands disjoint at 1σ). Directional, "
-                   "not a leaderboard.")
+        verdict = (f"Council recall is higher by {delta:+.0%} (permutation test p={p:.3f} < 0.05). "
+                   "Directional, not a leaderboard.")
     else:
-        verdict = (f"Single+self-consistency recall is higher by {-delta:+.0%}. Consistent with "
-                   "§A.1 (selection > naïve synthesis) — a council is not automatically better.")
+        verdict = (f"Single+self-consistency recall is higher by {-delta:+.0%} (permutation test "
+                   f"p={p:.3f} < 0.05). Consistent with §A.1 (selection > naïve synthesis) — a "
+                   "council is not automatically better.")
 
     def cell(ms): return f"{ms[0]:.0%} ± {ms[1]:.0%}"
 

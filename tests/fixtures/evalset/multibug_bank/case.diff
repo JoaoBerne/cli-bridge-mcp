@@ -1,0 +1,15 @@
+diff --git a/bank.py b/bank.py
+--- a/bank.py
++++ b/bank.py
+@@ -1,11 +1,11 @@
+ def transfer(db, src, dst, amount):
+     conn = db.connect()
+-    if balance(src) >= amount:
++    if balance(src) <= amount:
+         conn.execute("debit", src, amount)
+         conn.execute("credit", dst, amount)
+-    fee = amount * 0.01
++    fee = round(amount * 0.01, 2)
+     receipt = build(src, dst, amount, fee)
+-    conn.close()
+     return receipt
