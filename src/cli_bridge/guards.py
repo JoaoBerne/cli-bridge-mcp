@@ -40,7 +40,13 @@ _SIGNALS: list[tuple[str, re.Pattern]] = [
     ("tool-coercion",
      re.compile(r"call\s+(?:the\s+)?(?:tool|function)\s+\w+[^.\n]{0,60}"
                 r"(?:secret|key|token|password|credential)", re.I)),
-    ("hidden-html-comment", re.compile(r"<!--.*?-->", re.S)),
+    # An HTML comment is only suspicious when it HIDES a directive or secret-talk — diffs and
+    # markdown legitimately contain benign comments, and flagging them all desensitizes the guard
+    # (and strict mode would withhold perfectly good answers).
+    ("hidden-html-comment",
+     re.compile(r"<!--(?:(?!-->).){0,400}?(?:ignore|disregard|instructions?|system\s+prompt|"
+                r"secrets?|api[\s_-]?keys?|tokens?|passwords?|credentials?|exfiltrate|curl)"
+                r"(?:(?!-->).)*?-->", re.I | re.S)),
     ("disguised-shell",
      re.compile(r"(?:curl|wget)\s+\S+[^\n]{0,80}\|\s*(?:sudo\s+)?(?:ba)?sh\b", re.I)),
     ("disguised-shell", re.compile(r"\brm\s+-rf\s+[\"']?[/~]", re.I)),

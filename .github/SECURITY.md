@@ -50,6 +50,13 @@ cli-bridge handles two kinds of untrusted data:
 - **It can't vet the models themselves.** A compromised or malicious model could emit harmful
   content; that's why output is annotated and, for writes, isolated.
 - **`cwd`/path arguments are not jailed.** A delegate sees whatever directory you point it at.
+- **Delegates inherit your full environment.** Each spawned CLI gets the host process's complete
+  `os.environ` — deliberately, because official CLIs need their own `PATH`, auth caches and
+  config to work. The flip side: every secret in that environment (cloud creds, unrelated API
+  keys) is readable by any delegate process, exactly as if you ran that CLI by hand. cli-bridge
+  redacts known secret shapes from *output*, but it cannot stop a malicious CLI from reading the
+  env it was born with. If that matters, launch your MCP host from a scoped environment (e.g.
+  `env -i PATH=… HOME=…` or a shell profile without the sensitive exports).
 - **BYO-API (curl) lanes: keep the key OUT of argv.** A lane that substitutes a `${ENV}` key into
   a `curl` command line puts that key in this machine's process list for the duration of the call
   (it is never logged — traces redact it, and it never leaves your machine otherwise). The shipped

@@ -75,5 +75,8 @@ split, debate VOTE footer + convergence early-stop, files_required grounding gat
 spawn pacing (per-lane MIN_INTERVAL_S), trace-footer toggle, i18n READMEs (docs/i18n/), Pages
 landing (site/).
 Next candidates: forced-pacing workflow engine, vibe lane hardening (detect plan-mode replies and
-classify as failed instead of wrapping them as findings), release docs, history scrub, PyPI
-publish.
+classify as failed instead of wrapping them as findings), extract the ask_all/cascade/best fan-out
+from server.py into a council module (the workflows.py pattern: injected run_lane/progress), mypy
+gate in CI (~50 errors today, mostly MCP-SDK stub mismatches), eval v3 (permutation test instead
+of the 1-sigma overlap heuristic; multi-bug/multi-language fixtures; decoys inside buggy
+fixtures), opt-in real-CLI contract job in CI, release docs, history scrub, PyPI publish.

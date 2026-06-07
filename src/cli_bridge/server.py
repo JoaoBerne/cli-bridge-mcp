@@ -1518,10 +1518,10 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
                           "conversation='new', then reuse the returned id (on any lane).",
                           label="conversations_list", guard=False)]
         lines = ["# Round-table conversations", ""]
-        for r in rows:
-            lanes_txt = ", ".join(r["lanes"]) or "—"
-            lines.append(f"- **{r['conversation_id']}** · {r['turns']} turns · {lanes_txt} · "
-                         f"{_rel_time(r['last_at'])}\n      {r['preview']}")
+        for row in rows:
+            lanes_txt = ", ".join(row["lanes"]) or "—"
+            lines.append(f"- **{row['conversation_id']}** · {row['turns']} turns · {lanes_txt} · "
+                         f"{_rel_time(row['last_at'])}\n      {row['preview']}")
         return [_emit("\n".join(lines), label="conversations_list", guard=False)]
 
     if name == "conversation_show":

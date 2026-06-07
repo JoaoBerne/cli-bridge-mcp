@@ -6,6 +6,26 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed (council audit — 6-dimension adversarial self-review)
+- **Guard: `hidden-html-comment` no longer fires on every HTML comment.** Diffs and markdown
+  legitimately contain benign comments (`<!-- TODO -->`), so flagging them all desensitized
+  `warn` mode and made `strict` withhold good answers. The signal now requires the comment to
+  hide a directive or secret-talk (ignore/disregard/instructions/api key/token/…). Tests cover
+  both directions.
+- **Removed the dead synchronous spawn path** (`runner.run()` + its `_kill_group` helper):
+  nothing in production called it — server and CLI both go through `arun`, the only path with
+  host-cancellation kill. Its result-mapping duplicated `_finish` and could drift. Runner tests
+  now exercise `arun` through a tiny sync wrapper.
+- **CI matrix widened**: Python 3.13 added on Linux; macOS and Windows now test both ends of the
+  supported range (3.10 + 3.13) instead of a single 3.12 job each.
+- **`SECURITY.md` discloses environment inheritance**: every delegate CLI inherits the host's
+  full environment (deliberate — official CLIs need their own auth/PATH), so secrets in that env
+  are visible to delegates exactly as when running the CLI by hand; documented with a scoped-env
+  mitigation.
+- mypy-flagged loop-variable reuse in `conversations_list` renamed (`r` → `row`).
+- `site/`: `og:image`/`twitter:image` now point at a PNG social card (`assets/social-card.png`)
+  — social platforms don't render SVG previews.
+
 ### Added (i18n + landing)
 - **README in 6 more languages** (`docs/i18n/`): Français, 简体中文, Español, Português (BR),
   日本語, Deutsch — full translations with a language switcher under the banner. English stays

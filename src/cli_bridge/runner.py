@@ -160,42 +160,6 @@ async def pace(key: str, min_interval_s: float) -> float:
         return wait
 
 
-def run(argv: list[str], timeout_s: int, cwd: str | None = None,
-        env: dict | None = None) -> RunResult:
-    if not argv:
-        return RunResult(False, "empty command", "spawn")
-    try:
-        proc = subprocess.Popen(
-            argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, errors="replace", stdin=subprocess.DEVNULL,
-            cwd=cwd or None, env=env, **_spawn_kwargs(),
-        )
-    except FileNotFoundError:
-        return RunResult(False, f"`{argv[0]}` not found on PATH", "not_found")
-    except (PermissionError, OSError) as e:
-        return RunResult(False, f"`{argv[0]}` could not start: {e}", "spawn")
-
-    try:
-        out, err = proc.communicate(timeout=timeout_s)
-    except subprocess.TimeoutExpired:
-        _kill_group(proc)
-        try:
-            proc.communicate(timeout=5)  # reap, free pipes — bounded so a zombie can't hang us
-        except subprocess.TimeoutExpired:
-            pass
-        return RunResult(False, f"`{argv[0]}` timed out after {timeout_s}s", "timeout")
-
-    out = redact((out or "").strip())
-    err = redact((err or "").strip())
-
-    if proc.returncode == 0:
-        return _ok_or_empty(out, err, argv)
-
-    detail = err or out or "(no output)"
-    return RunResult(False, _clip(f"{argv[0]} exit {proc.returncode}: {detail}"),
-                     _failure_kind(out, err), proc.returncode)
-
-
 def _ok_or_empty(out: str, err: str, argv: list[str]) -> RunResult:
     """Map an exit-0 run to a result. stdout is the answer; stderr is usually banner/progress
     noise, but a few CLIs put a short answer there, so fall back to it. An exit-0 with NO output
@@ -213,22 +177,6 @@ def _ok_or_empty(out: str, err: str, argv: list[str]) -> RunResult:
     return RunResult(True, _clip(text), "ok", 0)
 
 
-def _kill_group(proc: subprocess.Popen) -> None:
-    """Kill the whole process tree so the CLI's children don't survive as orphans."""
-    try:
-        _kill_tree(proc.pid, signal.SIGTERM)
-    except (ProcessLookupError, PermissionError, OSError):
-        proc.kill()
-        return
-    try:
-        proc.wait(timeout=3)
-    except subprocess.TimeoutExpired:
-        try:
-            _kill_tree(proc.pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError, OSError):
-            proc.kill()
-
-
 def _finish(returncode, out, err, argv) -> RunResult:
     out = redact((out or "").strip())
     err = redact((err or "").strip())
@@ -241,13 +189,12 @@ def _finish(returncode, out, err, argv) -> RunResult:
 
 async def arun(argv: list[str], timeout_s: int, cwd: str | None = None,
                env: dict | None = None) -> RunResult:
-    """Async runner used by the server. Unlike the threaded `run`, if the MCP host CANCELS
+    """The one spawn path (server and CLI both come through here). If the MCP host CANCELS
     the call (disconnect, client timeout), the CancelledError propagates here and we kill the
     whole process group — so the CLI can't keep burning quota/credits after the host gave up.
     """
     if not argv:
         return RunResult(False, "empty command", "spawn")
-    import asyncio  # local import keeps `run` usable without an event loop
     log.info("spawn %s (timeout=%ss, cwd=%s)", argv[0], timeout_s, cwd or ".")
     try:
         proc = await asyncio.create_subprocess_exec(
