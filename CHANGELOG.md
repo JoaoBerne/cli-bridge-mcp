@@ -6,6 +6,40 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added (supervised delegation: real builds, live steering, durable workflows)
+- **`ask_build` — commission a real build.** `mode=isolated` (default) keeps the existing
+  throwaway-worktree diff (`ask_build_isolated` is now a legacy alias). `mode=direct` builds
+  straight into a target dir, guarded by git + a **zone contract**: the delegate may write only
+  inside `zone`; all undo is zone-scoped (`git checkout`/`clean -- <zone>`, never a global
+  `reset --hard`); a per-zone atomic lock allows disjoint zones to build in parallel but blocks
+  two builds on the same zone; after each turn a global `git status -uall` vs a pre-build snapshot
+  catches any write OUTSIDE the zone (escape via `../`, absolute path, symlink) and reverts the
+  build. Greenfield dirs are created and `git init`-ed. So the host can build one part while a
+  delegate builds another in the SAME repo, safely.
+- **Steerable multi-turn builds** (`async=true`): `job_tail(job_id, offset)` streams the build's
+  progress log (byte-offset, line-bounded); `build_steer(job_id, instruction, interrupt)` queues a
+  correction for the next turn or cuts the current turn (files kept); an optional executable
+  Definition of Done (`dod_cmd`, an argv list — never a shell string) is run after each turn
+  (pass = done, fail = one more turn with the error fed back), bounded by `max_fail_retries` (3)
+  and `max_turns` (12). A turn that changes 0 files in the zone is warned (plan-leak signal).
+  `job_status` folds in live build progress; `dry_run` previews the brief.
+- **`batch_run` — durable journaled fan-out.** Run many independent asks in one call instead of N;
+  each result is journalled (SQLite, WAL), so `resume_id` replays the finished tasks and runs only
+  the rest **across a server restart**. The host composes the logic; no JSON DSL.
+- **`workflow` presets** over that substrate: **`refine_plan`** (the council demolishes your plan
+  from distinct angles — pass `plan_file`, read by each lane, never recopied), `council_review`,
+  `map_review`, `research_verify`. All resumable + async-able.
+- **Opt-in streaming runner** (`arun(on_line=…, log_path=…)`): concurrent stdout/stderr readers
+  (no deadlock), a no-output stall guard, per-line redaction — the substrate for live observation.
+  The buffered path is unchanged when unused.
+
+### Fixed
+- **Guard anti-bypass**: `guards.scan` now matches on an NFKC-normalized, zero-width-stripped view,
+  so injection hidden behind full-width homoglyphs or token-splitting zero-width chars still trips.
+  Detection only — the returned text is unchanged.
+- **Runtime paid-model warning** (`_run_lane`): a free lane resolving to a paid `opencode-go/*`
+  model (a per-call override the doctor mismatch can't see) now logs a credit-spend warning.
+
 ### Fixed (council audit — 6-dimension adversarial self-review)
 - **Guard: `hidden-html-comment` no longer fires on every HTML comment.** Diffs and markdown
   legitimately contain benign comments (`<!-- TODO -->`), so flagging them all desensitized

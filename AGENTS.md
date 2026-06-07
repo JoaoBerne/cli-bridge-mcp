@@ -73,10 +73,15 @@ modular tool loading (DISABLED_TOOLS/ENABLED_TOOLS), quality eval (`cli-bridge e
 single-model + self-consistency, deterministic scorer + calibration gate), architect/editor build
 split, debate VOTE footer + convergence early-stop, files_required grounding gate, anti-burst
 spawn pacing (per-lane MIN_INTERVAL_S), trace-footer toggle, i18n READMEs (docs/i18n/), Pages
-landing (site/).
-Next candidates: forced-pacing workflow engine, vibe lane hardening (detect plan-mode replies and
-classify as failed instead of wrapping them as findings), extract the ask_all/cascade/best fan-out
+landing (site/), opt-in streaming runner (arun on_line/log_path + stall guard), direct builds
+(ask_build mode=isolated|direct — zone contract + per-zone lock + post-turn zone-violation check +
+greenfield init), steerable multi-turn builds (buildloop: job_tail/build_steer/interrupt, executable
+DoD gate, plan-leak warning), durable journaled fan-out (batch_run + resume_id across restart) with
+workflow presets (council_review/map_review/research_verify/refine_plan), guard NFKC/zero-width
+normalization, runtime paid-model warning.
+Next candidates: forced-pacing workflow engine, extract the ask_all/cascade/best fan-out
 from server.py into a council module (the workflows.py pattern: injected run_lane/progress), mypy
 gate in CI (~50 errors today, mostly MCP-SDK stub mismatches), eval v3 (permutation test instead
 of the 1-sigma overlap heuristic; multi-bug/multi-language fixtures; decoys inside buggy
-fixtures), opt-in real-CLI contract job in CI, release docs, history scrub, PyPI publish.
+fixtures), native build resume (--session-id) + intra-turn streaming tail, chars/token calibration
+per lane, opt-in real-CLI contract job in CI, release docs, history scrub, PyPI publish.

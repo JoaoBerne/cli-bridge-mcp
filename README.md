@@ -296,7 +296,10 @@ Hosts that support MCP prompts also surface `review_diff`, `security_review`, `d
 | `test_plan` | Derive a prioritized **test plan** (behaviors, edge cases, concrete cases) from a git diff or a description. |
 | `commit_msg` | Generate a **Conventional Commit** message from your staged diff (falls back to the working tree). Read-only — emits text, never commits. Optional `lane`, `cwd`. |
 | `pr_describe` | Generate a **PR title + description** (Summary / Changes / Testing) from the branch's diff + commit log vs a base (default origin/main → main). Read-only. Optional `base`, `lane`, `cwd`. |
-| `ask_build_isolated` | **Safe write mode**: run a build-capable lane in a throwaway git worktree at HEAD and get the **diff** to review — your real repo is never modified. |
+| `ask_build` | **Commission a real build.** `mode=isolated` (default) edits a throwaway worktree and returns a **diff** — repo untouched. `mode=direct` builds straight into a target dir, guarded by git + a **zone contract** (delegate writes only inside `zone`; out-of-zone writes are detected and reverted; undo is zone-scoped, never a global reset) so the host can build other parts of the **same repo in parallel**. `async=true` makes it a **steerable** job. `dry_run` previews the brief. (`ask_build_isolated` is a legacy alias.) |
+| `job_tail` / `build_steer` | **Follow & steer a running build like a human.** `job_tail(job_id, offset)` streams its progress log (byte-offset). `build_steer(job_id, instruction, interrupt)` queues a correction for the next turn, or `interrupt=true` cuts the current turn (files written so far are kept). An optional executable **Definition of Done** (`dod_cmd`, an argv list) is run after each turn — pass = done, fail = one more turn with the error fed back. |
+| `batch_run` | **Durable fan-out**: run many independent asks in parallel in **one call** instead of N (saves host context + quota). Each result is journalled, so `resume_id` replays the tasks that already finished and runs only the rest — **survives a server restart**. `async`-able. |
+| `workflow` | **Ready-made multi-model workflows** over the batch substrate. **`refine_plan`** — let the council DEMOLISH your plan from distinct angles (pass `plan_file`; each lane reads it, never recopied). `council_review` (N lanes answer one question + optional judge), `map_review` (review many files in parallel), `research_verify` (answer then adversarially cross-check). All resumable + async-able. |
 | `list_models` | List a lane's available models (`lane` param) where the CLI exposes them; otherwise shows the resolved default model + how to choose one. (`list_<lane>_models` also exists for lanes with a native list command.) |
 | `conversations_list` / `conversation_show` | List recent **round-table threads** (recover an id after a context reset) / show one thread's full transcript, attributed by lane. |
 | `doctor` | Health check: installed CLIs, detected host, cost/quota stance, cooldowns, defaults. `deep: true` live-probes each free lane's auth **and checks every lane's flags against its `--help`** — warns if a CLI renamed/removed a flag cli-bridge relies on (drift) before the lane fails silently. |
@@ -318,6 +321,55 @@ implement this function"*): claude → `--permission-mode acceptEdits`, gpt → 
 workspace-write`, mistral → `--agent accept-edits`, gemini → `--yolo` (or `agy`
 `--dangerously-skip-permissions`), opencode → `--agent build`. Build-capable lanes are annotated
 non-read-only, and a `build` run is never served from cache.
+
+### Delegate a real build — supervised, in your repo
+
+`ask_build` turns a delegate into a teammate that builds a **complete, real** result, not just a
+diff to copy. Two modes:
+
+- **`mode=isolated`** (default, safest) — the delegate edits a throwaway git worktree at HEAD; you
+  get the diff and apply it yourself. Nothing in your repo moves.
+- **`mode=direct`** — the delegate writes **real files** into `target_dir`, so you (the host) can
+  build other parts of the **same repo in parallel** (e.g. *"I do the backend, codex does
+  `frontend/`"*). Safety is by git + a **zone contract**, not isolation:
+  - the brief tells the delegate it may write **only inside `zone`** (a path under `target_dir`);
+  - every undo is **zone-scoped** (`git checkout -- <zone>` + `git clean -fd <zone>`, never a global
+    `git reset --hard`), so your uncommitted work outside the zone is never touched;
+  - a **per-zone lock** lets disjoint zones build at once but blocks two builds on the same zone;
+  - after each turn a **global `git status` check** catches anything written outside the zone (an
+    escape via `../`, an absolute path, a symlink) and **reverts the build** — git scoping guards git
+    ops, it can't sandbox the subprocess, so this check is mandatory. A missing/empty `target_dir`
+    is created and `git init`-ed, so the safety net always exists.
+
+**Watch it and steer it.** Run with `async=true` to get a `job_id`, then:
+
+- `job_tail(job_id, offset)` streams the build's progress so you can post step summaries;
+- `build_steer(job_id, "use Tailwind, not inline CSS")` queues a correction for the next turn;
+  `build_steer(job_id, interrupt=true)` cuts the current turn short (files written so far are kept);
+- pass `dod_cmd` (an **argv list**, e.g. `["npm","run","build"]`, never a shell string) for a
+  Definition of Done that's **tested for real** after each turn — pass = done, fail = one more turn
+  with the error fed back, bounded by `max_fail_retries` (default 3) and `max_turns` (default 12).
+
+Continuity is the filesystem (the delegate re-reads its own files each turn); the raw transcript
+lives in the delegate CLI's own session, while cli-bridge keeps the step-level log for `job_tail`.
+
+### Pressure-test your plan before you build (`workflow refine_plan`)
+
+cli-bridge is strong at *demolishing a plan* before you commit code. `workflow preset=refine_plan`
+fans your plan out to several lanes, each critiquing it from a **distinct angle** (technical flaws &
+failure modes / gaps / over-engineering / sequencing), then groups the findings for you to merge —
+or pass `judge_lane` for one deduped, severity-ranked patch list.
+
+```jsonc
+// one call → N CLIs tear the plan apart, each from a different angle
+{ "preset": "refine_plan", "plan_file": "docs/plan.md", "judge_lane": "gpt" }
+```
+
+Pass **`plan_file`** (a path), not the text: each lane reads the file from its own working
+directory, so the plan is **never recopied into N prompts** — the token-frugal default for every
+artifact review (`map_review`, `review_diff`, `debate context_files` work the same way). Like every
+`workflow`/`batch_run`, it's **resumable** (`resume_id` replays finished tasks after a restart) and
+can run `async`.
 
 **Pick a model per call** with `model` (e.g. `model: "claude-opus-4-6"`). From inside a host you
 can even consult a **sibling model of your own family** — `ask_<your-host>` appears as a separate
@@ -488,8 +540,13 @@ Point Cursor / VS Code (Cline, Continue) / Zed at the **same command** (`uvx cli
   by hand — but non-interactive/scripted use isn't *guaranteed* sanctioned and can change. Use
   your own accounts within their terms; treat "ban-safe" as "no token/key extraction", not a
   blanket guarantee.
-- **Async jobs are in-process.** A server restart marks running jobs `interrupted` — no
-  cross-restart resume in v1.
+- **Async jobs are in-process.** A server restart marks running jobs `interrupted`. `batch_run`
+  and `workflow` are the exception — they journal each task, so a `resume_id` replays the finished
+  ones and runs only the rest across a restart.
+- **Shell-wrapper PATH traps.** If your shell wraps the delegate CLIs in a function or alias (e.g.
+  a `_opsec`-style guard in `.zshrc`), running cli-bridge *from that shell* can break — but
+  cli-bridge spawns each CLI's **binary directly** (no shell), so it's unaffected; only a wrapper
+  that shadows the binary on `PATH` matters. `doctor` shows the resolved path per lane.
 - **The injection guard is heuristic.** It catches high-signal patterns, not everything; in
   `warn` mode the text still reaches the host (treat delegate output as data).
 - **Token/credit figures are estimates** (chars/4 + your `CREDITS_PER_1K`), never exact.
