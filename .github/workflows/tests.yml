@@ -19,6 +19,22 @@ jobs:
       - name: Lint
         run: ruff check src/ tests/
 
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        # mypy pinned so the gate can't pass on one version and break on another; install the
+        # package so mypy resolves mcp's own types.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . mypy==2.1.0
+      - name: Type check
+        run: mypy src/cli_bridge
+
   test:
     runs-on: ${{ matrix.os }}
     strategy:

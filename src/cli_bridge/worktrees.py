@@ -120,6 +120,7 @@ async def ask_build_isolated(lane: LaneSpec, args: dict, run_lane,
         _git(["-C", wt, "add", "-A"])
         _drc, diff, _derr = _git(["-C", wt, "diff", "--cached"])
     finally:
+        kept: str | None
         if _keep():
             kept = wt
         else:

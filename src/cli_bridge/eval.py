@@ -276,7 +276,7 @@ async def run_arm(targets: list[LaneSpec], diff: str, run_lane, *,
     reviewer errored / rate-limited to empty) — DISTINCT from 'ran fine, found nothing'. This is
     what lets the eval flag a 0%-recall arm that is really a throttled lane, not a quality result
     (the single arm fires K calls at ONE lane per fixture, so on free tiers it gets throttled)."""
-    args = {"diff": diff, "output_format": "json"}
+    args: dict = {"diff": diff, "output_format": "json"}
     if timeout_s:
         args["timeout_s"] = timeout_s
     out = await workflows.review_diff(targets, args, run_lane)

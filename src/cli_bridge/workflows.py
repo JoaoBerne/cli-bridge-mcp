@@ -21,6 +21,7 @@ import json
 import os
 import re
 import subprocess
+from typing import Any
 
 from . import config, findings, runner
 from .lanes import LaneSpec
@@ -670,7 +671,8 @@ async def debate(targets: list[LaneSpec], args: dict, run_lane, progress=None) -
         return ("[error] no lanes available to debate. Install/login a CLI, or set "
                 "include_paid=true / CLI_BRIDGE_PROFILE=max to allow limited/paid lanes.")
     try:
-        rounds = max(0, min(int(args.get("rounds")), DEBATE_MAX_ROUNDS))
+        # untyped JSON-RPC value; the except IS the validation (None/non-numeric -> default).
+        rounds = max(0, min(int(args.get("rounds")), DEBATE_MAX_ROUNDS))  # type: ignore[arg-type]
     except (TypeError, ValueError):
         rounds = DEBATE_DEFAULT_ROUNDS
     timeout = _timeout(args.get("timeout_s"))
@@ -764,7 +766,7 @@ async def debate(targets: list[LaneSpec], args: dict, run_lane, progress=None) -
     clean_positions = [(d, _strip_vote(t)) for d, t in final_positions]
     transcript = _debate_transcript(clean_positions)
     tally = _vote_tally(positions)
-    meta = {
+    meta: dict[str, Any] = {
         "question": question[:200],
         "debaters": [d for d, _ in final_positions],
         "rounds": rounds_run,

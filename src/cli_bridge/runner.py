@@ -87,7 +87,9 @@ _IS_WINDOWS = os.name == "nt"
 
 def _spawn_kwargs() -> dict:
     if _IS_WINDOWS:
-        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+        # getattr keeps mypy happy on POSIX (the attr is Windows-only); the _IS_WINDOWS guard
+        # already prevents the 0 fallback from ever being used off Windows.
+        return {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
     return {"start_new_session": True}
 
 

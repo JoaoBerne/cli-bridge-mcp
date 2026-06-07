@@ -115,7 +115,7 @@ def order_for_mode(lanes: list[LaneSpec], cooldown_of: Callable[[str], int],
     pool = [ln for ln in lanes
             if (allow_paid or not ln.is_paid) and (allow_limited or not ln.is_limited)]
     return sorted(pool, key=lambda ln: _mode_key(ln, cooldown_of(ln.key), perf_of(ln.key),
-                                                  qual_of(ln.key), pol["sort"]))
+                                                  qual_of(ln.key), str(pol["sort"])))
 
 
 def explain_mode(lanes: list[LaneSpec], cooldown_of: Callable[[str], int],

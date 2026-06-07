@@ -291,3 +291,14 @@ def test_enabled_tools_is_a_lean_allowlist(monkeypatch):
     assert "ask_best" in names and "ask_all" in names
     assert "doctor" in names                        # essential still present
     assert "debate" not in names and "consensus" not in names   # everything else hidden
+
+
+def test_ann_helper_is_accepted_by_tool_and_coerced():
+    # _ann wraps annotation hints so mypy accepts them; at runtime the SDK must still build a real
+    # ToolAnnotations from them (pydantic coercion). Guards the typed-helper escape hatch.
+    from mcp.types import Tool
+    t = Tool(name="x", description="d", inputSchema={"type": "object"},
+             annotations=server._ann(readOnlyHint=True, destructiveHint=False))
+    assert t.annotations is not None
+    assert t.annotations.readOnlyHint is True
+    assert t.annotations.destructiveHint is False

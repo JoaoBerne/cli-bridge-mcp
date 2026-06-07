@@ -16,6 +16,7 @@ import json
 import os
 import re
 import time
+from typing import cast
 
 from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
@@ -27,6 +28,7 @@ from mcp.types import (
     Resource,
     TextContent,
     Tool,
+    ToolAnnotations,
 )
 
 from . import (
@@ -249,6 +251,14 @@ def _ask_schema(lane: LaneSpec) -> dict:
     return {"type": "object", "properties": props, "required": ["task"]}
 
 
+def _ann(**kw: bool) -> ToolAnnotations:
+    """The MCP SDK types Tool(annotations=) as ToolAnnotations|None but accepts a plain dict of
+    hints at runtime (pydantic coerces). This wraps the hint kwargs in that cast in ONE place, so
+    the ~40 Tool(...) sites stay readable AND mypy keeps flagging REAL arg-type errors elsewhere
+    (vs a blanket disable_error_code)."""
+    return cast(ToolAnnotations, kw)
+
+
 def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
     tools: list[Tool] = []
     for lane in lanes:
@@ -262,15 +272,15 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             name=f"ask_{lane.key}",
             description=f"Consult {lane.display}. {lane.note}{paid}{limited}{exp}",
             inputSchema=_ask_schema(lane),
-            annotations={"readOnlyHint": not can_write, "openWorldHint": True,
-                         "destructiveHint": can_write},
+            annotations=_ann(readOnlyHint=not can_write, openWorldHint=True,
+                             destructiveHint=can_write),
         ))
         if lane.models_args is not None:
             tools.append(Tool(
                 name=f"list_{lane.key}_models",
                 description=f"List models reachable through {lane.display}.",
                 inputSchema={"type": "object", "properties": {}},
-                annotations={"readOnlyHint": True, "destructiveHint": False},
+                annotations=_ann(readOnlyHint=True, destructiveHint=False),
             ))
     if lanes:
         tools.append(Tool(
@@ -301,7 +311,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                 },
                 "required": ["task"],
             },
-            annotations={"readOnlyHint": True, "openWorldHint": True, "destructiveHint": False},
+            annotations=_ann(readOnlyHint=True, openWorldHint=True, destructiveHint=False),
         ))
         tools.append(Tool(
             name="ask_all_async",
@@ -323,7 +333,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                 },
                 "required": ["task"],
             },
-            annotations={"readOnlyHint": True, "openWorldHint": True, "destructiveHint": False},
+            annotations=_ann(readOnlyHint=True, openWorldHint=True, destructiveHint=False),
         ))
         tools.append(Tool(
             name="job_status",
@@ -332,7 +342,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             inputSchema={"type": "object", "properties": {
                 "job_id": {"type": "string", "description": "The job id (e.g. job_ab12…)."}},
                 "required": ["job_id"]},
-            annotations={"readOnlyHint": True, "destructiveHint": False},
+            annotations=_ann(readOnlyHint=True, destructiveHint=False),
         ))
         tools.append(Tool(
             name="job_result",
@@ -341,7 +351,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             inputSchema={"type": "object", "properties": {
                 "job_id": {"type": "string", "description": "The job id."}},
                 "required": ["job_id"]},
-            annotations={"readOnlyHint": True, "destructiveHint": False},
+            annotations=_ann(readOnlyHint=True, destructiveHint=False),
         ))
         tools.append(Tool(
             name="job_cancel",
@@ -349,14 +359,14 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             inputSchema={"type": "object", "properties": {
                 "job_id": {"type": "string", "description": "The job id to cancel."}},
                 "required": ["job_id"]},
-            annotations={"readOnlyHint": False, "destructiveHint": False},
+            annotations=_ann(readOnlyHint=False, destructiveHint=False),
         ))
         tools.append(Tool(
             name="jobs_list",
             description="List recent async jobs (this session first, then persisted history) "
                         "with their status.",
             inputSchema={"type": "object", "properties": {}},
-            annotations={"readOnlyHint": True, "destructiveHint": False},
+            annotations=_ann(readOnlyHint=True, destructiveHint=False),
         ))
         tools.append(Tool(
             name="batch_run",
@@ -388,7 +398,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                 },
                 "required": ["tasks"],
             },
-            annotations={"readOnlyHint": False, "openWorldHint": True, "destructiveHint": False},
+            annotations=_ann(readOnlyHint=False, openWorldHint=True, destructiveHint=False),
         ))
         tools.append(Tool(
             name="workflow",
@@ -430,7 +440,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                 },
                 "required": ["preset"],
             },
-            annotations={"readOnlyHint": False, "openWorldHint": True, "destructiveHint": False},
+            annotations=_ann(readOnlyHint=False, openWorldHint=True, destructiveHint=False),
         ))
         tools.append(Tool(
             name="conversations_list",
@@ -438,7 +448,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                         "activity, preview). Use it to recover a conversation id and continue a "
                         "thread after a context reset.",
             inputSchema={"type": "object", "properties": {}},
-            annotations={"readOnlyHint": True, "destructiveHint": False},
+            annotations=_ann(readOnlyHint=True, destructiveHint=False),
         ))
         tools.append(Tool(
             name="conversation_show",
@@ -447,7 +457,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             inputSchema={"type": "object", "properties": {
                 "conversation": {"type": "string", "description": "The thread id."}},
                 "required": ["conversation"]},
-            annotations={"readOnlyHint": True, "destructiveHint": False},
+            annotations=_ann(readOnlyHint=True, destructiveHint=False),
         ))
         tools.append(Tool(
             name="list_models",
@@ -457,7 +467,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             inputSchema={"type": "object", "properties": {
                 "lane": {"type": "string", "description": "Lane key to inspect."}},
                 "required": ["lane"]},
-            annotations={"readOnlyHint": True, "destructiveHint": False},
+            annotations=_ann(readOnlyHint=True, destructiveHint=False),
         ))
     tools.append(Tool(
         name="doctor",
@@ -466,7 +476,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                     "tiny live call (checks auth/quota — uses a bit of free quota; skips paid lanes).",
         inputSchema={"type": "object", "properties": {
             "deep": {"type": "boolean", "description": "Live-probe each free lane's auth."}}},
-        annotations={"readOnlyHint": True, "destructiveHint": False},
+        annotations=_ann(readOnlyHint=True, destructiveHint=False),
     ))
     tools.append(Tool(
         name="setup",
@@ -474,7 +484,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                     "configuring how cli-bridge spends paid credits/quota. Call this on first use "
                     "if the profile isn't set, ASK the user, then tell them how to set it.",
         inputSchema={"type": "object", "properties": {}},
-        annotations={"readOnlyHint": True, "destructiveHint": False},
+        annotations=_ann(readOnlyHint=True, destructiveHint=False),
     ))
     tools.append(Tool(
         name="usage_report",
@@ -487,7 +497,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                       "description": "Limit to a recent window, e.g. '24h', '7d', '90m' (default: all)."},
             "format": {"type": "string", "enum": ["text", "json"],
                        "description": "text (default) or json."}}},
-        annotations={"readOnlyHint": True, "destructiveHint": False},
+        annotations=_ann(readOnlyHint=True, destructiveHint=False),
     ))
     tools.append(Tool(
         name="usage_budget",
@@ -495,14 +505,14 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                     "plus estimated tokens/credits spent today. Flags lanes over their limit. "
                     "Estimates only.",
         inputSchema={"type": "object", "properties": {}},
-        annotations={"readOnlyHint": True, "destructiveHint": False},
+        annotations=_ann(readOnlyHint=True, destructiveHint=False),
     ))
     tools.append(Tool(
         name="lane_stats",
         description="Per-lane health: total runs, failures, consecutive failures/timeouts, and "
                     "any active cooldown (a lane in cooldown is skipped by ask_all until it clears).",
         inputSchema={"type": "object", "properties": {}},
-        annotations={"readOnlyHint": True, "destructiveHint": False},
+        annotations=_ann(readOnlyHint=True, destructiveHint=False),
     ))
     tools.append(Tool(
         name="reset_lane_state",
@@ -511,7 +521,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
         inputSchema={"type": "object", "properties": {
             "lane": {"type": "string", "description": "Lane key to reset (e.g. gemini, gpt)."}},
             "required": ["lane"]},
-        annotations={"readOnlyHint": False, "destructiveHint": False},
+        annotations=_ann(readOnlyHint=False, destructiveHint=False),
     ))
     if lanes:
         tools.append(Tool(
@@ -533,7 +543,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                 },
                 "required": ["task"],
             },
-            annotations={"readOnlyHint": True, "openWorldHint": True, "destructiveHint": False},
+            annotations=_ann(readOnlyHint=True, openWorldHint=True, destructiveHint=False),
         ))
         tools.append(Tool(
             name="route_plan",
@@ -544,7 +554,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                 "include_paid": {"type": "boolean", "description": "Include limited/paid lanes."},
                 "mode": {"type": "string", "enum": list(router.MODES),
                          "description": "Preview ask_best's ordering for this mode."}}},
-            annotations={"readOnlyHint": True, "destructiveHint": False},
+            annotations=_ann(readOnlyHint=True, destructiveHint=False),
         ))
         tools.append(Tool(
             name="ask_best",
@@ -570,7 +580,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                 },
                 "required": ["task"],
             },
-            annotations={"readOnlyHint": True, "openWorldHint": True, "destructiveHint": False},
+            annotations=_ann(readOnlyHint=True, openWorldHint=True, destructiveHint=False),
         ))
         tools.append(Tool(
             name="rate_lane",
@@ -596,7 +606,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                 },
                 "required": ["lane", "score"],
             },
-            annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
+            annotations=_ann(readOnlyHint=False, destructiveHint=False, openWorldHint=False),
         ))
         tools.append(Tool(
             name="set_lane_cost",
@@ -624,7 +634,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                 },
                 "required": ["lane", "cost", "note"],
             },
-            annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
+            annotations=_ann(readOnlyHint=False, destructiveHint=False, openWorldHint=False),
         ))
         tools.append(Tool(
             name="review_diff",
@@ -658,7 +668,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                 },
                 "required": [],
             },
-            annotations={"readOnlyHint": True, "openWorldHint": True, "destructiveHint": False},
+            annotations=_ann(readOnlyHint=True, openWorldHint=True, destructiveHint=False),
         ))
         tools.append(Tool(
             name="security_review",
@@ -684,7 +694,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                 },
                 "required": [],
             },
-            annotations={"readOnlyHint": True, "openWorldHint": True, "destructiveHint": False},
+            annotations=_ann(readOnlyHint=True, openWorldHint=True, destructiveHint=False),
         ))
         build_lanes = [ln for ln in lanes if "agent" in ln.caps]
         if build_lanes:
@@ -759,8 +769,8 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                     },
                     "required": ["task", "lane"],
                 },
-                annotations={"readOnlyHint": False, "openWorldHint": True,
-                             "destructiveHint": True},   # direct mode writes the real repo
+                annotations=_ann(readOnlyHint=False, openWorldHint=True,
+                                 destructiveHint=True),   # direct mode writes the real repo
             ))
             tools.append(Tool(
                 name="ask_build_isolated",
@@ -793,8 +803,8 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                     },
                     "required": ["task", "lane"],
                 },
-                annotations={"readOnlyHint": False, "openWorldHint": True,
-                             "destructiveHint": False},   # edits are isolated + discarded
+                annotations=_ann(readOnlyHint=False, openWorldHint=True,
+                                 destructiveHint=False),   # edits are isolated + discarded
             ))
             tools.append(Tool(
                 name="job_tail",
@@ -813,7 +823,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                     },
                     "required": ["job_id"],
                 },
-                annotations={"readOnlyHint": True, "openWorldHint": False, "destructiveHint": False},
+                annotations=_ann(readOnlyHint=True, openWorldHint=False, destructiveHint=False),
             ))
             tools.append(Tool(
                 name="build_steer",
@@ -835,7 +845,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                     },
                     "required": ["job_id"],
                 },
-                annotations={"readOnlyHint": False, "openWorldHint": True, "destructiveHint": False},
+                annotations=_ann(readOnlyHint=False, openWorldHint=True, destructiveHint=False),
             ))
         tools.append(Tool(
             name="debate",
@@ -892,7 +902,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                 },
                 "required": ["task"],
             },
-            annotations={"readOnlyHint": True, "openWorldHint": True, "destructiveHint": False},
+            annotations=_ann(readOnlyHint=True, openWorldHint=True, destructiveHint=False),
         ))
         tools.append(Tool(
             name="consensus",
@@ -933,7 +943,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                 },
                 "required": ["task"],
             },
-            annotations={"readOnlyHint": True, "openWorldHint": True, "destructiveHint": False},
+            annotations=_ann(readOnlyHint=True, openWorldHint=True, destructiveHint=False),
         ))
         tools.append(Tool(
             name="challenge",
@@ -952,7 +962,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                 },
                 "required": ["task"],
             },
-            annotations={"readOnlyHint": True, "openWorldHint": True, "destructiveHint": False},
+            annotations=_ann(readOnlyHint=True, openWorldHint=True, destructiveHint=False),
         ))
         tools.append(Tool(
             name="premortem",
@@ -969,7 +979,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                 },
                 "required": ["task"],
             },
-            annotations={"readOnlyHint": True, "openWorldHint": True, "destructiveHint": False},
+            annotations=_ann(readOnlyHint=True, openWorldHint=True, destructiveHint=False),
         ))
         tools.append(Tool(
             name="test_plan",
@@ -990,7 +1000,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                 },
                 "required": [],
             },
-            annotations={"readOnlyHint": True, "openWorldHint": True, "destructiveHint": False},
+            annotations=_ann(readOnlyHint=True, openWorldHint=True, destructiveHint=False),
         ))
         tools.append(Tool(
             name="commit_msg",
@@ -1007,7 +1017,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                 },
                 "required": [],
             },
-            annotations={"readOnlyHint": True, "openWorldHint": True, "destructiveHint": False},
+            annotations=_ann(readOnlyHint=True, openWorldHint=True, destructiveHint=False),
         ))
         tools.append(Tool(
             name="pr_describe",
@@ -1026,7 +1036,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                 },
                 "required": [],
             },
-            annotations={"readOnlyHint": True, "openWorldHint": True, "destructiveHint": False},
+            annotations=_ann(readOnlyHint=True, openWorldHint=True, destructiveHint=False),
         ))
     return tools
 
@@ -1043,8 +1053,8 @@ def _self_ask_tool(lane: LaneSpec) -> Tool:
                      "Requires an explicit `model` (e.g. a sibling like claude-opus-4-6); empty "
                      f"model is rejected. {lane.note}"),
         inputSchema=schema,
-        annotations={"readOnlyHint": not can_write, "openWorldHint": True,
-                     "destructiveHint": can_write},
+        annotations=_ann(readOnlyHint=not can_write, openWorldHint=True,
+                         destructiveHint=can_write),
     )
 
 
@@ -1267,7 +1277,9 @@ _RESOURCES = {
 
 @server.list_resources()
 async def list_resources() -> list[Resource]:
-    return [Resource(uri=uri, name=name, description=desc, mimeType="application/json")
+    # uri is our own constant str; the SDK types it AnyUrl but pydantic coerces str at runtime.
+    return [Resource(uri=uri, name=name, description=desc,  # type: ignore[arg-type]
+                     mimeType="application/json")
             for uri, (name, desc) in _RESOURCES.items()]
 
 
@@ -1741,12 +1753,12 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
                       label=name)]
 
     if name == "job_tail":
-        out = buildloop.tail(_str(args, "job_id"), int(args.get("offset") or 0))
-        if out is None:
+        tailed = buildloop.tail(_str(args, "job_id"), int(args.get("offset") or 0))
+        if tailed is None:
             return [TextContent(type="text", text=(
                 "No live build for that job_id (it may have finished — use `job_result`, or it "
                 "was started in another server process)."))]
-        new_offset, chunk = out
+        new_offset, chunk = tailed
         body = chunk if chunk else "_(no new output yet)_"
         return [_emit(f"offset={new_offset}\n{body}", label="job_tail", guard=False)]
 
@@ -1887,7 +1899,8 @@ def _rate_lane(lanes: list[LaneSpec], args: dict) -> list[TextContent]:
         return [TextContent(type="text", text=(
             f"[error] unknown lane '{_str(args, 'lane')}'. See `doctor` for lane keys."))]
     try:
-        score = int(args.get("score"))
+        # args.get returns an untyped JSON-RPC value; the except IS the validation (None/str/etc).
+        score = int(args.get("score"))  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return [TextContent(type="text", text="[error] score must be an integer 1..5.")]
     if not 1 <= score <= 5:
@@ -2051,7 +2064,7 @@ async def _flag_drift_section(lanes: list[LaneSpec]) -> str:
     if not bad:
         return "\n\n## Flag check\n\n_All installed lanes' flags still present in their `--help`._"
     rows = [f"- ⚠️ **{ln.key}**: `{', '.join(miss)}` missing from `{ln.bin} "
-            f"{' '.join(ln.help_args)}` — invocation may be broken (upstream flag change?)."
+            f"{' '.join(ln.help_args or [])}` — invocation may be broken (upstream flag change?)."
             for ln, miss in bad]
     return ("\n\n## ⚠️ Flag drift — lane invocation may be broken\n\n" + "\n".join(rows)
             + "\n\n_The CLI changed the flags this lane relies on. Update the lane (or pin an old "
