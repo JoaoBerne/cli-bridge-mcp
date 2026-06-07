@@ -102,6 +102,17 @@ def _extract(text: str):
     return None
 
 
+def extract_json(text: str) -> tuple[object | None, str | None]:
+    """Public, NEVER-RAISES structured-output contract for the orchestration engine: pull the JSON
+    a delegate emitted (tolerant of fences + surrounding prose) and return (value, error). On
+    success error is None; on failure value is None and error explains. Lets a downstream step
+    gate on a typed object instead of parsing prose."""
+    val = _extract(text or "")
+    if val is None:
+        return None, "no JSON object/array found in output"
+    return val, None
+
+
 def _items(data) -> list | None:
     if isinstance(data, list):
         return data

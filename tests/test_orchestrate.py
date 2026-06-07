@@ -109,6 +109,21 @@ def test_batch_run_threads_per_task_timeout():
     assert seen == [300]                                  # the per-task timeout reached run_lane
 
 
+def test_batch_result_carries_provenance():
+    tel = FakeTelemetry()
+    lanes = {"a": _lane("a")}
+
+    async def rl(lane, args, *, tool="ask", terse=True):
+        return RunResult(True, "hi", "ok", exit_code=0, latency_ms=42, model="m1")
+
+    _rid, res = asyncio.run(orchestrate.batch_run(
+        [{"lane": "a", "task": "x"}], run_lane=rl, resolve_lane=lanes.get,
+        default_lane=lanes["a"], telemetry=tel))
+    r = res[0]
+    assert r["model"] == "m1" and r["kind"] == "ok"
+    assert r["latency_ms"] == 42 and r["exit_code"] == 0
+
+
 def test_unknown_lane_is_failed_not_crash():
     tel = FakeTelemetry()
     _rid, res = asyncio.run(orchestrate.batch_run(

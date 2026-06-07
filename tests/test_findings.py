@@ -4,6 +4,17 @@ import json
 from cli_bridge import findings
 from cli_bridge.findings import Finding
 
+
+def test_extract_json_tolerant_and_never_raises():
+    val, err = findings.extract_json('here you go:\n```json\n[{"a": 1}]\n```\nhope that helps')
+    assert err is None and val == [{"a": 1}]
+    val, err = findings.extract_json('prose {"k": "v"} more prose')
+    assert err is None and val == {"k": "v"}
+    val, err = findings.extract_json("no json at all")
+    assert val is None and "no JSON" in err
+    val, err = findings.extract_json("")          # never raises
+    assert val is None and err
+
 # ── severity normalization ──────────────────────────────────────────────────────────────
 
 def test_normalize_severity_aliases_and_default():

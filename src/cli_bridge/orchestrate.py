@@ -72,14 +72,17 @@ async def batch_run(tasks: list[dict], *, run_lane, resolve_lane, default_lane, 
         hit = cached.get(key)
         if hit and hit["status"] == "done":                  # resume: replay a finished task
             out = {"i": i, "task": t.get("task", ""), "lane": t.get("lane", ""),
-                   "ok": True, "output": hit["result"] or "", "cached": True}
+                   "ok": True, "output": hit["result"] or "", "cached": True,
+                   "model": t.get("model") or "", "kind": "ok", "latency_ms": 0,
+                   "exit_code": None}
         else:
             lane = resolve_lane(t["lane"]) if t.get("lane") else default_lane
             if lane is None:
                 telemetry.batch_put(run_id, key, "failed", error="no such lane")
                 out = {"i": i, "task": t.get("task", ""), "lane": t.get("lane", ""),
                        "ok": False, "output": f"[error] no such lane: {t.get('lane')}",
-                       "cached": False}
+                       "cached": False, "model": t.get("model") or "", "kind": "failed",
+                       "latency_ms": 0, "exit_code": None}
             else:
                 async with sem:
                     r = await run_lane(lane, {"task": t.get("task", ""), "model": t.get("model"),
@@ -88,8 +91,12 @@ async def batch_run(tasks: list[dict], *, run_lane, resolve_lane, default_lane, 
                 telemetry.batch_put(run_id, key, "done" if r.ok else "failed",
                                     result=r.output if r.ok else None,
                                     error=None if r.ok else r.render())
+                # Provenance (the council's day-1 requirement): carry model/kind/latency/exit so a
+                # downstream step can gate on them and the host can debug a run.
                 out = {"i": i, "task": t.get("task", ""), "lane": lane.key,
-                       "ok": r.ok, "output": r.render(), "cached": False}
+                       "ok": r.ok, "output": r.render(), "cached": False,
+                       "model": getattr(r, "model", "") or (t.get("model") or ""),
+                       "kind": r.kind, "latency_ms": r.latency_ms, "exit_code": r.exit_code}
         async with prog_lock:
             done += 1
             d = done

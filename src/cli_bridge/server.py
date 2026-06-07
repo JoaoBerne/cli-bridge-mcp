@@ -1506,6 +1506,7 @@ async def _run_lane(lane: LaneSpec, args: dict, *, tool: str = "ask",
     t0 = time.monotonic()
     res = await _spawn_with_retry(argv, timeout, expanded, spawn_env)
     res.latency_ms = int((time.monotonic() - t0) * 1000)
+    res.model = model                          # provenance: the resolved model that actually ran
     telemetry.record(rec, res.ok, res.kind, len(res.output), input_chars=len(prompt))
     _write_trace(lane, model, argv, expanded, timeout, res)
     if key and res.ok:                        # cache only successes; failures are transient
