@@ -24,6 +24,7 @@ import subprocess
 from typing import Any
 
 from . import config, findings, runner
+from .council import council_recap, one_phrase
 from .lanes import LaneSpec
 
 # (role, what this reviewer should look for). Order also sets round-robin priority when there
@@ -44,34 +45,6 @@ REVIEW_ROLES: list[tuple[str, str]] = [
 ]
 
 _GIT_DIFF_TIMEOUT_S = 30
-
-
-# ── council recap: surface what every delegate returned, never a blind spot (user req) ──
-
-def one_phrase(text: str, limit: int = 120) -> str:
-    """First meaningful line of an answer, flattened to a one-line gist for the recap."""
-    for line in (text or "").splitlines():
-        s = line.strip().lstrip("#-*>•· \t").strip()
-        if s:
-            return s if len(s) <= limit else s[: limit - 1].rstrip() + "…"
-    return "(empty)"
-
-
-def council_recap(rows: list[tuple[str, bool, int, str]], *, title: str = "Council") -> str:
-    """The at-a-glance digest the host sees FIRST: one line per delegate — answered?, latency
-    (when known), a one-line gist — so there's never a blind spot about what each model said.
-    The full answers follow below; this just guarantees every voice is surfaced.
-
-    rows: (display, ok, latency_ms, text). latency_ms<=0 is omitted (workflows don't thread it).
-    """
-    answered = sum(1 for _, ok, _, _ in rows if ok)
-    lines = [f"## {title} — {answered}/{len(rows)} answered", ""]
-    for display, ok, ms, text in rows:
-        mark = "✅" if ok else "❌"
-        ms_s = f" _{ms}ms_" if ms and ms > 0 else ""
-        gist = one_phrase(text) if ok else (text or "no answer")
-        lines.append(f"- {mark} **{display}**{ms_s} — {gist}")
-    return "\n".join(lines)
 
 
 def git_diff(cwd: str, base: str) -> tuple[str, str]:

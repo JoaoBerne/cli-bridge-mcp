@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 
-from . import config, router, runner, telemetry, workflows
+from . import config, router, runner, telemetry
 from .config import ASK_ALL_SYNTH_TIMEOUT_S
 from .lanes import LaneSpec
 
@@ -28,6 +28,36 @@ def _s(args: dict, key: str) -> str:
     the literal 'None'."""
     val = args.get(key)
     return str(val).strip() if val is not None else ""
+
+
+# ── council recap: surface what every delegate returned, never a blind spot (user req) ──
+# Lives here (the fan-out home) and is imported by workflows.py — so the dependency points
+# workflows -> council, not the reverse.
+
+def one_phrase(text: str, limit: int = 120) -> str:
+    """First meaningful line of an answer, flattened to a one-line gist for the recap."""
+    for line in (text or "").splitlines():
+        s = line.strip().lstrip("#-*>•· \t").strip()
+        if s:
+            return s if len(s) <= limit else s[: limit - 1].rstrip() + "…"
+    return "(empty)"
+
+
+def council_recap(rows: list[tuple[str, bool, int, str]], *, title: str = "Council") -> str:
+    """The at-a-glance digest the host sees FIRST: one line per delegate — answered?, latency
+    (when known), a one-line gist — so there's never a blind spot about what each model said.
+    The full answers follow below; this just guarantees every voice is surfaced.
+
+    rows: (display, ok, latency_ms, text). latency_ms<=0 is omitted (workflows don't thread it).
+    """
+    answered = sum(1 for _, ok, _, _ in rows if ok)
+    lines = [f"## {title} — {answered}/{len(rows)} answered", ""]
+    for display, ok, ms, text in rows:
+        mark = "✅" if ok else "❌"
+        ms_s = f" _{ms}ms_" if ms and ms > 0 else ""
+        gist = one_phrase(text) if ok else (text or "no answer")
+        lines.append(f"- {mark} **{display}**{ms_s} — {gist}")
+    return "\n".join(lines)
 
 
 # ── cascade (cheapest → strongest, stop at first success) ──────────────────────────────────
@@ -194,7 +224,7 @@ async def ask_all_body(lanes: list[LaneSpec], args: dict, *, run_lane, progress,
         }, indent=2)
 
     # Recap first so the host gets an at-a-glance digest of every lane before the full blocks.
-    recap = workflows.council_recap(rows, title="Council")
+    recap = council_recap(rows, title="Council")
     if bool(args.get("summary_only")):         # recap + synthesis only — skip the raw blocks (tokens-)
         body = recap + footer
     else:
