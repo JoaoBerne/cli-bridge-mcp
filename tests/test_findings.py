@@ -169,6 +169,21 @@ def test_render_no_findings():
     assert "0 findings" in out and "No issues raised" in out
 
 
+def test_render_show_trace_off():
+    fs = [Finding("blocker", "RCE", "x.py", 9, "evil", "sanitize", ["Gemini"])]
+    out = findings.render_markdown(fs, total_reviewers=1, heading="H", meta=_meta(),
+                                   show_trace=False)
+    assert "## Trace" not in out and "**RCE**" in out
+
+
+def test_show_trace_env(monkeypatch):
+    from cli_bridge import config
+    monkeypatch.delenv("CLI_BRIDGE_TRACE_FOOTER", raising=False)
+    assert config.show_trace() is True
+    monkeypatch.setenv("CLI_BRIDGE_TRACE_FOOTER", "off")
+    assert config.show_trace() is False
+
+
 def test_result_json_schema():
     fs = [Finding("high", "Bug", "f.py", 3, "ev", "fix", ["Gemini"])]
     res = findings.result_json(fs, total_reviewers=1, tool="review_diff",

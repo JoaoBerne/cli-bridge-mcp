@@ -124,6 +124,7 @@ CLI_BRIDGE_PROFILE={profile}
 CLI_BRIDGE_TERSE={terse}        # off|lite|full|ultra
 CLI_BRIDGE_GUARD={guard}        # off|warn|strict
 # CLI_BRIDGE_CACHE_TTL_S=0       # >0 enables the response cache
+# CLI_BRIDGE_TRACE_FOOTER=off    # hide the JSON trace footer in workflow reports
 """
 
 

@@ -279,6 +279,13 @@ def telemetry_enabled() -> bool:
     return os.environ.get("CLI_BRIDGE_TELEMETRY", "").strip().lower() not in {"0", "false", "off", "no"}
 
 
+def show_trace() -> bool:
+    """CLI_BRIDGE_TRACE_FOOTER=off hides the JSON trace footer in workflow reports
+    (terminal-friendly; distinct from CLI_BRIDGE_TRACE_DIR, which dumps raw traces)."""
+    return os.environ.get("CLI_BRIDGE_TRACE_FOOTER", "").strip().lower() \
+        not in {"0", "false", "off", "no"}
+
+
 # Cooldown policy (seconds) after repeated failures of a given kind.
 COOLDOWN_TIMEOUT_S = int_env("CLI_BRIDGE_COOLDOWN_TIMEOUT_S", 900, 0, 86_400)   # 15 min
 COOLDOWN_QUOTA_S = int_env("CLI_BRIDGE_COOLDOWN_QUOTA_S", 3600, 0, 86_400)      # 1 h

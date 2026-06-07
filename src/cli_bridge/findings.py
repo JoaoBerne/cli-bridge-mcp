@@ -246,7 +246,8 @@ def _counts(findings: list[Finding]) -> str:
 
 
 def render_markdown(findings: list[Finding], *, total_reviewers: int, heading: str,
-                    meta: dict, recap: str = "", residual_risk: str = "") -> str:
+                    meta: dict, recap: str = "", residual_risk: str = "",
+                    show_trace: bool = True) -> str:
     lines = [f"# {heading}", ""]
     flags = (["diff truncated"] if meta.get("truncated") else []) + ["read-only"]
     lines.append(f"_Base: `{meta.get('base', 'HEAD')}` · reviewers: "
@@ -273,7 +274,8 @@ def render_markdown(findings: list[Finding], *, total_reviewers: int, heading: s
             lines.append(f"  **Fix:** {f.recommendation}")
     if residual_risk:
         lines.append(f"\n## Residual risk\n\n{residual_risk}")
-    lines.append("\n## Trace\n```json\n" + json.dumps(meta, indent=2) + "\n```")
+    if show_trace:
+        lines.append("\n## Trace\n```json\n" + json.dumps(meta, indent=2) + "\n```")
     return "\n".join(lines)
 
 

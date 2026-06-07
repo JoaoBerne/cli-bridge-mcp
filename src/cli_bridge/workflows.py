@@ -329,7 +329,8 @@ async def _diff_review(targets, args, run_lane, *, roles_def, prompt_fn, heading
 
     recap = council_recap(recap_rows, title="Reviewers")
     return findings.render_markdown(merged, total_reviewers=total_reviewers, heading=heading,
-                                    meta=meta, recap=recap, residual_risk=residual_risk)
+                                    meta=meta, recap=recap, residual_risk=residual_risk,
+                                    show_trace=config.show_trace())
 
 
 async def review_diff(targets: list[LaneSpec], args: dict, run_lane) -> str:
@@ -849,7 +850,8 @@ async def debate(targets: list[LaneSpec], args: dict, run_lane, progress=None) -
         lines.append("\n## Full positions\n")
         for display, text in clean_positions:
             lines.append(f"<details><summary>{display}</summary>\n\n{text.strip()}\n\n</details>")
-    lines.append("\n## Trace\n```json\n" + json.dumps(meta, indent=2) + "\n```")
+    if config.show_trace():
+        lines.append("\n## Trace\n```json\n" + json.dumps(meta, indent=2) + "\n```")
     lines.append(f"\n_Tip: judge this session → `rate_lane(lane=\"{judge.key}\", mode=\"deep\", "
                  "score=1..5)` so ask_best learns which lanes earn a council seat._")
     return "\n".join(lines)

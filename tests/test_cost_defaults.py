@@ -72,7 +72,10 @@ def test_cost_config_is_set_via_per_lane(monkeypatch):
     assert server._cost_config_is_set() is True
 
 
-def test_ask_all_targets_skip_limited_and_paid():
+def test_ask_all_targets_skip_limited_and_paid(tmp_path, monkeypatch):
+    # isolate from the developer's real state DB: a lane in live cooldown (e.g. repeated
+    # auth failures earlier the same day) would otherwise vanish from include_paid=True
+    monkeypatch.setenv("CLI_BRIDGE_STATE_DB", str(tmp_path / "state.sqlite"))
     lns = lanes.BUILTIN_LANES
     free_only = server._ask_all_targets(lns, include_paid=False)
     keys = {l.key for l in free_only}
