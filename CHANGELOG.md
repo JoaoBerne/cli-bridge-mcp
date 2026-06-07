@@ -6,6 +6,32 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added (cross-CLI orchestration unblocks)
+- **Artifact return** (`ask_build mode=direct`): non-text files the build writes in the zone
+  (images, PDFs, binaries) are reported as **artifacts by path** (type + size) instead of a useless
+  "Binary files differ" diff, and excluded from the text diff. This is the capability-borrowing
+  handoff — a delegate can have another CLI *generate* a file and hand the host a usable path.
+- **`workflow preset=verify_repair`** — cross-model build → review → repair loop: a builder lane
+  produces, a **different** model reviews (ending `VERDICT: APPROVED|ISSUES`), issues feed back to
+  the builder until approved or `max_rounds` (default 3, cap 6). Verdict parsing is fail-closed
+  (no explicit APPROVED ⇒ ISSUES); requires a distinct verifier lane. Cross-model = uncorrelated
+  failure modes catch what self-review can't.
+- **`workflow preset=fanout_compare`** — fan the same task to N lanes and render the answers side
+  by side (Option 1..N) to pick/merge; optional `judge_lane` recommends one.
+
+### Changed (internal: council module, type gate, eval v3)
+- **Extracted `council.py`** — the `ask_all` / `ask_cascade` / `ask_best` / `synthesize` fan-out
+  logic moved out of `server.py` (now ~180 lines thinner) into a decoupled module, mirroring the
+  `workflows.py` injection pattern (host couplings `run_lane`/`emit`/`progress`/`host_sample` are
+  injected; the cost-policy helpers stay in `server.py`). Pure refactor — no behaviour change.
+- **mypy gate in CI** — fixed ~13 real type issues across the package; the SDK-stub `Tool(
+  annotations=…)` noise is contained by one typed helper `_ann()` (not a blanket error-disable, so
+  mypy still flags real arg-type bugs). New `typecheck` CI job, mypy pinned for a reproducible gate.
+- **eval v3** — the council-vs-single recall verdict now comes from a deterministic, seeded
+  **permutation test** over per-fixture recall (replaces the 1-sigma band-overlap heuristic). Corpus
+  hardened to **22 fixtures / 22 bugs**: added multi-bug diffs and decoys **inside** buggy fixtures
+  (the realistic precision test the old corpus lacked).
+
 ### Added (supervised delegation: real builds, live steering, durable workflows)
 - **`ask_build` — commission a real build.** `mode=isolated` (default) keeps the existing
   throwaway-worktree diff (`ask_build_isolated` is now a legacy alias). `mode=direct` builds

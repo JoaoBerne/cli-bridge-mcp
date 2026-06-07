@@ -29,12 +29,15 @@ host (Claude/Codex/…) ──MCP/stdio──▶ cli-bridge ──spawn subproce
 | `config.py` | All env parsing, timeouts, cost profile, onboarding text. **Single source of truth** for settings. | Need a new env var? It goes here. |
 | `telemetry.py` | Local sqlite: run log + per-lane health/cooldown + response cache + async-job rows + estimated token/credit accounting. | **Best-effort: must never raise into a delegation.** |
 | `router.py` | Pure functions that order lanes for `ask_cascade` (cheapest→strongest) and `ask_best` (per-mode: fast/cheap/deep/code/review/security), skipping cooled ones. | No side effects — pure, easy to test. |
+| `council.py` | The fan-out itself: `ask_all` / `ask_cascade` / `ask_best` / `synthesize`. Extracted from `server.py`; takes injected `run_lane` / `emit` / `progress` / `host_sample` (cost-policy helpers stay in `server.py`). | Same injection pattern as `workflows.py` — testable with fakes. |
 | `workflows.py` | The multi-model workflows: `review_diff`, `security_review`, `debate` + the `council_recap` digest + deterministic `prechecks` (secrets / dangerous shell). Orchestrates several lanes. | Takes an injected `run_lane`, so it's testable with fakes. |
+| `orchestrate.py` | Durable fan-out (`batch_run`, SQLite-journalled, `resume_id` across restart) + presets: `refine_plan`, `council_review`, `map_review`, `research_verify`, `verify_repair` (cross-model loop), `fanout_compare`. | Presets are hardcoded post-fan-out steps, not a DSL — the host composes logic. |
 | `findings.py` | Pure: parse each reviewer's JSON tolerantly, merge by file/line/title, derive confidence from agreement, render Markdown or a JSON result. | No I/O — deterministic merge replaces an LLM merge pass (can't fabricate findings). |
 | `jobs.py` | In-process async jobs (`ask_all_async`): wrap a coroutine in `asyncio.create_task`, return a job id, poll/fetch/cancel later. Live registry + best-effort sqlite row. | No cross-restart resume in v1 — stale `running` rows become `interrupted`. |
 | `preamble.py` | The terse response-style preamble prepended to delegate prompts. | Prose only — never applied to structured (JSON) workflows. |
 | `guards.py` | Scans UNTRUSTED delegate output for prompt-injection / tool-poisoning; `CLI_BRIDGE_GUARD=off\|warn\|strict`. | Runs in `_emit` after redaction; never on cli-bridge's own reports. |
-| `worktrees.py` | `ask_build_isolated`: run a build-capable agent in a throwaway git worktree, return its diff, discard. | Real repo never modified; nothing auto-applied. |
+| `worktrees.py` | `ask_build`: `mode=isolated` runs a build agent in a throwaway worktree → diff (repo untouched); `mode=direct` writes real files under a git **zone contract** (per-zone lock, post-turn out-of-zone-write detection + zone-scoped revert) and returns non-text files as **artifacts by path**. | Real repo only ever touched inside the zone; undo is never a global reset. |
+| `buildloop.py` | Steerable multi-turn builds: `job_tail` / `build_steer` / interrupt, an executable Definition-of-Done gate (`dod_cmd`), filesystem continuity (no transcript). | Bounded by `max_turns` / `max_fail_retries`; a 0-file turn warns (plan-leak). |
 | `detect.py` | Which CLIs are actually installed (PATH lookup). | — |
 | `cli.py` | Human/CI entry point (`cli-bridge …`) over the SAME internal functions the MCP tools use. | Thin wrappers — no logic of its own. |
 
@@ -116,5 +119,19 @@ host (Claude/Codex/…) ──MCP/stdio──▶ cli-bridge ──spawn subproce
   register a tool + dispatch in `server.py`.
 - **Every change ships a test.** Tests must not need a real CLI or network (fake lanes via
   `echo`, temp sqlite via `CLI_BRIDGE_STATE_DB`).
+
+## Positioning & horizon (honest framing)
+
+What cli-bridge **is, today**: the best dev tool for driving the several AI CLIs you already pay
+for, and orchestrating sub-agents across them — fan-out, cost-tiered cascade, cross-model review,
+guarded real builds, durable workflows. That is real and shipped.
+
+What it is **not** (yet, and maybe never): a universal "protocol between AIs." The longer-horizon
+idea — a neutral bus where agents from different vendors collaborate — is a *direction*, not a
+product claim. It rests entirely on the CLIs staying scriptable, which the vendors control and
+could change; "ban-safe" means "no token/key extraction", not a guarantee. So the big-architecture
+items (recursive spawn trees, a shared state bus, inter-agent mailboxes, a capability-passthrough
+hub, a typed wire-protocol) live on the roadmap, gated on real demand and on the substrate holding
+— never sold as if they ship. We build for the real thing now and are upfront about the rest.
 
 See `CHANGELOG.md` for the shipped history and `AGENTS.md` for contributor rules.

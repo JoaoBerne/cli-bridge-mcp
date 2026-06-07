@@ -19,14 +19,17 @@ src/cli_bridge/
   config.py     # env parsing, cost profile, timeouts, onboarding text
   telemetry.py  # sqlite3 run log + lane health/cooldown (best-effort, privacy-first)
   router.py     # deterministic cascade ordering (pure)
+  council.py    # ask_all/ask_cascade/ask_best/synthesize fan-out (injected run_lane — like workflows)
   jobs.py       # in-process async jobs (ask_all_async) + sqlite persistence
   workflows.py  # review_diff/security_review/debate + prechecks + council recap
+  orchestrate.py # batch_run durable fan-out + presets (refine_plan/verify_repair/fanout_compare/…)
   findings.py   # parse/merge/render structured review findings (pure)
   guards.py     # injection/tool-poisoning output guard (CLI_BRIDGE_GUARD)
-  worktrees.py  # ask_build_isolated: write mode in a throwaway git worktree
+  worktrees.py  # ask_build (isolated worktree diff | direct zone-guarded write + artifact return)
+  buildloop.py  # steerable multi-turn builds: job_tail/build_steer, executable DoD gate
   conversations.py # round-table threads: sqlite persistence + recipient-aware replay
   preamble.py   # terse response-style preamble prepended to delegate prompts
-  eval.py       # quality eval: council vs single + self-consistency, deterministic scorer
+  eval.py       # quality eval: council vs single + self-consistency, permutation test, scorer
   cli.py        # human/CI entry point (cli-bridge ...) over the same internals
   detect.py     # PATH detection
 tests/          # pytest; unit + cross-host integration (no real CLI needed)
@@ -78,10 +81,38 @@ landing (site/), opt-in streaming runner (arun on_line/log_path + stall guard), 
 greenfield init), steerable multi-turn builds (buildloop: job_tail/build_steer/interrupt, executable
 DoD gate, plan-leak warning), durable journaled fan-out (batch_run + resume_id across restart) with
 workflow presets (council_review/map_review/research_verify/refine_plan), guard NFKC/zero-width
-normalization, runtime paid-model warning.
-Next candidates: forced-pacing workflow engine, extract the ask_all/cascade/best fan-out
-from server.py into a council module (the workflows.py pattern: injected run_lane/progress), mypy
-gate in CI (~50 errors today, mostly MCP-SDK stub mismatches), eval v3 (permutation test instead
-of the 1-sigma overlap heuristic; multi-bug/multi-language fixtures; decoys inside buggy
-fixtures), native build resume (--session-id) + intra-turn streaming tail, chars/token calibration
-per lane, opt-in real-CLI contract job in CI, release docs, history scrub, PyPI publish.
+normalization, runtime paid-model warning, **council module extraction** (`council.py`, injected
+run_lane), **mypy gate in CI** (typed `_ann()` helper for the SDK-stub noise), **eval v3** (seeded
+permutation test replacing the 1-sigma heuristic + multi-bug fixtures + in-fixture decoys),
+**build artifact-return** (non-text files surfaced by path — capability-borrowing), **cross-model
+`verify_repair`** + **`fanout_compare`** workflow presets.
+
+### Considered & deferred (rationale — not just "not yet")
+- **forced-pacing engine** — contradicts the model (cli-bridge delegates investigation to the
+  council; it doesn't force the host to slow down), big effort, low value, and only helps if the
+  host respects the gate. Dropped.
+- **warm pool** — no lane offers a daemon/server mode (the lanes are spawn-per-call), so there's
+  nothing to keep warm. Infeasible cleanly.
+- **chars/token calibration per lane** — would need real provider token counts = ban-risk fishing,
+  against the no-extraction ethos. The chars/4 figure stays honestly labeled "estimated".
+- **native build resume (`--session-id`)** — no lane exposes a reliable session id; filesystem
+  continuity (the delegate re-reads its own files each turn) already covers it. Revisit if a CLI
+  ships a stable resume handle.
+- **Big orchestration architecture** (recursive spawn trees, shared state bus, inter-agent mailbox,
+  capability passthrough hub, a wire-protocol "bus between AIs") — real directions, but vaporware-
+  prone and vendor-hostile (we build on CLIs we don't control). Roadmap only; positioned honestly
+  as a direction, never sold as a shipped protocol. See `docs/ARCHITECTURE.md` for the framing.
+
+### Next candidates (small, high-value — informed by competitive + agent-research mining)
+- **`BRIDGE_DEPTH` re-entry guard** — set a depth env on every spawn; refuse a delegate that
+  re-enters the bridge (fork-bomb guard). Low practical risk today (print-mode spawns don't load
+  MCP) but the one correctness gap worth closing first.
+- **disagreement-as-uncertainty** — return a cheap agreement score on `ask_all` (low agreement =
+  "council unsure"); the free honest uncertainty meter a single model can't give.
+- **confidence-escalate cascade** — `ask_cascade` escalates on a low self-reported confidence
+  sentinel, not just on failure (the biggest cost lever in the routing literature).
+- **author≠reviewer firewall** — exclude the build author's model family from its review panel
+  (kills "Codex writes, Codex reviews" self-preference).
+- **architect/editor split** for `ask_build`; **planner → plan_build** feeding batch_run/buildloop;
+  a named **role registry** (`role=` on any lane); **vision** via `images=[paths]` on `ask_gemini`.
+- Release track: opt-in real-CLI contract job in CI, history secrets scan, PyPI publish (GO-gated).
