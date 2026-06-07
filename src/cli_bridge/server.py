@@ -407,14 +407,16 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                          "distinct angles (pass plan_file — each lane reads it, no recopy). "
                          "council_review: N lanes answer one question, optional judge synthesises. "
                          "map_review: review many files in parallel. research_verify: answer "
-                         "questions then adversarially cross-check them. All resumable (resume_id) "
-                         "and async-able."),
+                         "questions then adversarially cross-check them. verify_repair: one lane "
+                         "builds, a DIFFERENT model reviews, repair loop until approved (cross-model "
+                         "= uncorrelated blind spots). fanout_compare: same task to N lanes, answers "
+                         "side by side to pick/merge. All resumable (resume_id) and async-able."),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "preset": {"type": "string",
                                "enum": ["refine_plan", "council_review", "map_review",
-                                        "research_verify"],
+                                        "research_verify", "verify_repair", "fanout_compare"],
                                "description": "Which workflow to run."},
                     "plan_file": {"type": "string",
                                   "description": "refine_plan: path to the plan (PREFERRED — read "
@@ -423,6 +425,8 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                     "angles": {"type": "array", "items": {"type": "string"},
                                "description": "refine_plan: override the critique angles."},
                     "question": {"type": "string", "description": "council_review: the question."},
+                    "task": {"type": "string",
+                             "description": "verify_repair / fanout_compare: the task to run."},
                     "files": {"type": "array", "items": {"type": "string"},
                               "description": "map_review: file paths to review."},
                     "questions": {"type": "array", "items": {"type": "string"},
@@ -430,9 +434,21 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                     "lanes": {"type": "array", "items": {"type": "string"},
                               "description": "Lane keys to use (default: the free council)."},
                     "lane": {"type": "string", "description": "map_review: the single reviewer lane."},
+                    "builder_lane": {"type": "string",
+                                     "description": "verify_repair: lane that produces (default: "
+                                     "first council lane)."},
+                    "verifier_lane": {"type": "string",
+                                      "description": "verify_repair: a DIFFERENT lane that reviews "
+                                      "(default: first other council lane)."},
+                    "max_rounds": {"type": "integer",
+                                   "description": "verify_repair: build->verify->repair rounds "
+                                   f"(default 3, max {orchestrate.VERIFY_MAX_ROUNDS})."},
+                    "cwd": {"type": "string",
+                            "description": "verify_repair / fanout_compare: dir the lanes run in."},
                     "judge_lane": {"type": "string",
                                    "description": "Optional: one lane dedupes + ranks the pooled "
-                                   "findings into a single list (else grouped for you to merge)."},
+                                   "findings into a single list (else grouped for you to merge). "
+                                   "fanout_compare: recommends one option."},
                     "include_paid": {"type": "boolean",
                                      "description": "Allow limited/paid lanes in the default set."},
                     "resume_id": {"type": "string", "description": "Resume a previous run."},
@@ -1988,6 +2004,25 @@ async def _run_workflow_preset(args: dict, lanes: list[LaneSpec]) -> list[TextCo
         def make():
             return orchestrate.research_verify(**common, questions=args.get("questions") or [],
                                                lanes=args.get("lanes"))
+    elif preset == "verify_repair":
+        try:
+            max_rounds = int(args.get("max_rounds") or 3)
+        except (TypeError, ValueError):
+            max_rounds = 3
+
+        def make():
+            # verify_repair is a sequential dependent loop (not a fan-out), so it does NOT use the
+            # batch journal — pass only what it needs, not the durable **common.
+            return orchestrate.verify_repair(
+                run_lane=_run_lane, resolve_lane=_resolve, default_lanes=default_lanes,
+                task=_str(args, "task"), builder_lane=_str(args, "builder_lane"),
+                verifier_lane=_str(args, "verifier_lane"), max_rounds=max_rounds,
+                cwd=_str(args, "cwd"))
+    elif preset == "fanout_compare":
+        def make():
+            return orchestrate.fanout_compare(**common, task=_str(args, "task"),
+                                              lanes=args.get("lanes"), judge_lane=judge,
+                                              cwd=_str(args, "cwd"))
     else:
         return [TextContent(type="text", text=f"[error] unknown preset: {preset or '(none)'}")]
 

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import mimetypes
 import os
 import shutil
 import subprocess
@@ -272,12 +273,16 @@ def _porcelain(root: str) -> dict[str, str]:
     return paths
 
 
-def _zone_diff(root: str, zone_rel: str) -> str:
+def _zone_diff(root: str, zone_rel: str, exclude: list[str] | None = None) -> str:
     """Diff of new + modified files in the zone, WITHOUT permanently staging: intent-to-add
-    untracked so they show as new, diff, then unstage so the host's index is left untouched."""
+    untracked so they show as new, diff, then unstage so the host's index is left untouched.
+    `exclude` (repo-root-relative paths) is dropped from the diff — used to omit binary artifacts,
+    which are reported by path instead of as a useless 'Binary files differ' line."""
     spec = zone_rel or "."
     _git(["-C", root, "add", "-N", "--", spec])
-    _drc, diff, _derr = _git(["-C", root, "diff", "--", spec])
+    args = ["-C", root, "diff", "--", spec]
+    args += [f":(exclude){ex}" for ex in (exclude or [])]
+    _drc, diff, _derr = _git(args)
     _git(["-C", root, "reset", "-q", "--", spec])
     return diff
 
@@ -301,6 +306,61 @@ def _zone_violations(before: dict[str, str], after: dict[str, str], zone_rel: st
         if not _in_zone(path, zone_rel):
             out.append(path)
     return sorted(out)
+
+
+def _is_binary(path: str) -> bool:
+    """A non-text file? NUL byte or undecodable head = binary. Cheap heuristic over the first 8 KB
+    — enough to tell a generated PNG/PDF from source code without reading the whole file."""
+    try:
+        with open(path, "rb") as fh:
+            chunk = fh.read(8192)
+    except OSError:
+        return False
+    if b"\x00" in chunk:
+        return True
+    try:
+        chunk.decode("utf-8")
+        return False
+    except UnicodeDecodeError:
+        return True
+
+
+def _artifact_type(path: str) -> str:
+    mt, _ = mimetypes.guess_type(path)
+    if mt:
+        return mt
+    ext = os.path.splitext(path)[1].lstrip(".").lower()
+    return ext or "binary"
+
+
+def _human_size(n: int) -> str:
+    size = float(n)
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            return f"{int(size)} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{n} B"
+
+
+def _zone_artifacts(root: str, zone_rel: str, before: dict[str, str],
+                    after: dict[str, str]) -> list[dict]:
+    """Non-text files the build created/changed IN the zone — surfaced by PATH (type, size) instead
+    of dumped as a useless 'Binary files differ' diff. This is what makes capability-borrowing work:
+    a delegate can have another CLI generate an image/pdf into the zone and the host gets a usable
+    file path back, never a binary blob inline."""
+    arts: list[dict] = []
+    for path, status in after.items():
+        if before.get(path) == status or not _in_zone(path, zone_rel):
+            continue
+        ap = os.path.join(root, _relposix(path).replace("/", os.sep))
+        if not os.path.isfile(ap) or not _is_binary(ap):
+            continue
+        try:
+            size = os.path.getsize(ap)
+        except OSError:
+            size = 0
+        arts.append({"path": path, "abspath": ap, "type": _artifact_type(ap), "size": size})
+    return sorted(arts, key=lambda a: a["path"])
 
 
 async def ask_build_direct(lane: LaneSpec, args: dict, run_lane,
@@ -373,15 +433,16 @@ async def ask_build_direct(lane: LaneSpec, args: dict, run_lane,
                 _revert_zone(root, zone_rel)
                 return _report_violation(lane, res, root, zone_label, violations)
 
-            diff = _zone_diff(root, zone_rel)
+            artifacts = _zone_artifacts(root, zone_rel, before, after)
+            diff = _zone_diff(root, zone_rel, exclude=[a["path"] for a in artifacts])
     except _BuildLocked as e:
         return f"[error] {e}"
 
-    return _report_direct(lane, res, diff, root, zone_label, scaffold_note)
+    return _report_direct(lane, res, diff, root, zone_label, scaffold_note, artifacts)
 
 
 def _report_direct(lane: LaneSpec, res, diff: str, root: str, zone_label: str,
-                   scaffold_note: str) -> str:
+                   scaffold_note: str, artifacts: list[dict] | None = None) -> str:
     head = f"_Agent: {lane.display} (build) · repo: `{root}` · zone: `{zone_label}`"
     if scaffold_note:
         head += f" · {scaffold_note}"
@@ -392,7 +453,13 @@ def _report_direct(lane: LaneSpec, res, diff: str, root: str, zone_label: str,
     if diff.strip():
         lines.append("```diff\n" + diff.rstrip() + "\n```")
     else:
-        lines.append("_The agent made no file changes in the zone._")
+        lines.append("_The agent made no text-file changes in the zone._")
+    if artifacts:
+        # Non-text files (images, pdfs, binaries) — surface the PATH, never a binary diff. This is
+        # the capability-borrowing handoff: open/use the artifact by path.
+        lines.append("\n## Artifacts (non-text files — open by path, not shown as a diff)\n")
+        for a in artifacts:
+            lines.append(f"- `{a['abspath']}` — {a['type']}, {_human_size(a['size'])}")
     lines += ["\n## Revert (zone-scoped — leaves work outside the zone untouched)",
               f"```\ngit -C {root} checkout -- {zone_label}\ngit -C {root} clean -fd {zone_label}\n```"]
     return "\n".join(lines)

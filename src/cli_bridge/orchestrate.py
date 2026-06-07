@@ -22,11 +22,13 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import uuid
 
 from . import config
 
 MAX_BATCH_TASKS = 64           # anti-runaway: the existing cost model governs spend; this caps count
+VERIFY_MAX_ROUNDS = 6          # hard cap on the build->verify->repair loop (cost guard)
 
 # Distinct angles refine_plan distributes across lanes (more lanes than angles -> redundancy =
 # cross-check; fewer -> one lane covers several). Each is a sharp, single-lens critique.
@@ -270,3 +272,119 @@ async def refine_plan(*, run_lane, resolve_lane, default_lanes, telemetry, plan_
                                 "Dedupe these plan critiques (semantic, not string), sort by "
                                 "severity, and output one actionable patch list for the plan.")
     return _group(results, "Plan pressure-test (refine_plan)")
+
+
+# ── verify-repair: cross-model build -> review -> repair loop ───────────────────────────────────
+
+def _verdict(text: str) -> str:
+    """Read the verifier's verdict. Last `VERDICT: APPROVED|ISSUES` wins; absent => ISSUES
+    (fail-closed — never approve on a malformed/empty review, the adversarial-verify default)."""
+    hits = re.findall(r"VERDICT:\s*(APPROVED|ISSUES)", text or "", re.IGNORECASE)
+    return hits[-1].upper() if hits else "ISSUES"
+
+
+def _other_lane(default_lanes, not_key: str):
+    """First default lane whose key differs from `not_key` — the cross-model verifier."""
+    return next((ln for ln in default_lanes if ln.key != not_key), None)
+
+
+async def verify_repair(*, run_lane, resolve_lane, default_lanes, task: str, builder_lane: str = "",
+                        verifier_lane: str = "", max_rounds: int = 3, cwd: str = "",
+                        progress=None) -> str:
+    """A (builder) produces -> B (a DIFFERENT model, verifier) reviews -> if VERDICT: ISSUES the
+    issues go back to A -> loop until VERDICT: APPROVED or max_rounds. Cross-model is the point:
+    B's failure modes are uncorrelated with A's, so it catches what A's own self-review can't. A
+    light convention (the verifier ends with VERDICT: APPROVED|ISSUES), no schema."""
+    builder = resolve_lane(builder_lane) if builder_lane else (default_lanes[0] if default_lanes else None)
+    if builder is None:
+        return "[error] no builder lane available for verify_repair."
+    verifier = (resolve_lane(verifier_lane) if verifier_lane else _other_lane(default_lanes, builder.key))
+    if verifier is None:
+        return ("[error] no verifier lane available — verify_repair needs a SECOND lane (a "
+                "different model). Install/login another CLI or pass verifier_lane.")
+    rounds = max(1, min(int(max_rounds or 1), VERIFY_MAX_ROUNDS))
+    same = verifier.key == builder.key
+    sub = {"cwd": cwd} if cwd else {}
+
+    lines = [f"# verify_repair — builder: {builder.display} · verifier: {verifier.display}"]
+    if same:
+        lines.append("> ⚠️ verifier is the SAME lane as builder — no cross-model benefit. "
+                     "Pass a distinct verifier_lane for uncorrelated review.\n")
+    approved = False
+    last = ""
+    prev_output = ""
+    for rnd in range(1, rounds + 1):
+        if rnd == 1:
+            btask = (f"{task}\n\nDo the work and output the complete result (code/diff/answer). "
+                     "No preamble.")
+        else:
+            btask = (f"{task}\n\nYour previous attempt:\n{prev_output}\n\nA reviewer (a different "
+                     f"model) found these issues:\n{last}\n\nRevise to fully address every issue. "
+                     "Output the corrected, complete result. No preamble.")
+        br = await run_lane(builder, {**sub, "task": btask}, tool="verify_repair")
+        if not br.ok:
+            lines.append(f"\n## Round {rnd} — builder {builder.display} FAILED ({br.kind})\n")
+            return "\n".join(lines) + "\n\n---\n**Final: ⚠️ aborted — builder failed.**"
+        prev_output = br.output.strip()
+
+        vtask = (f"You are a STRICT reviewer, a DIFFERENT model than the author. The task:\n{task}"
+                 f"\n\nThe author's result:\n{prev_output}\n\nReview it rigorously for correctness, "
+                 "completeness, bugs, and missed requirements. List concrete issues. Then end with "
+                 "exactly one final line: `VERDICT: APPROVED` if it fully and correctly satisfies "
+                 "the task, otherwise `VERDICT: ISSUES`. Default to ISSUES if unsure.")
+        vr = await run_lane(verifier, {**sub, "task": vtask}, tool="verify_repair")
+        if progress is not None:
+            await progress(rnd, rounds, f"round {rnd}")
+        if not vr.ok:
+            lines.append(f"\n## Round {rnd}\n**Builder:**\n{prev_output}\n\n"
+                         f"**Verifier {verifier.display} FAILED ({vr.kind})** — stopping.\n")
+            return "\n".join(lines) + "\n\n---\n**Final: ⚠️ aborted — verifier failed.**"
+        last = vr.output.strip()
+        verdict = _verdict(last)
+        lines.append(f"\n## Round {rnd} — {'✅ APPROVED' if verdict == 'APPROVED' else '🔧 ISSUES'}\n")
+        lines.append(f"**Builder ({builder.display}):**\n\n{prev_output}\n")
+        lines.append(f"**Verifier ({verifier.display}):**\n\n{last}\n")
+        if verdict == "APPROVED":
+            approved = True
+            break
+
+    head = (f"**Final: ✅ APPROVED in {rnd} round(s).**" if approved
+            else f"**Final: ⚠️ NOT APPROVED after {rounds} round(s) — the last issues stand. "
+                 "Increase max_rounds or fix manually.**")
+    return "\n".join(lines) + f"\n\n---\n{head}"
+
+
+# ── fanout-compare: same task to N lanes, side by side ──────────────────────────────────────────
+
+def _compare(results: list[dict], task: str) -> str:
+    ok = sum(1 for r in results if r["ok"])
+    lines = [f"# fanout_compare — {ok}/{len(results)} lanes answered the SAME task",
+             f"_task: {task[:200]}_",
+             "_Same prompt, N models — compare the alternatives and pick/merge one, or re-run with "
+             "judge_lane for a recommendation._\n"]
+    for i, r in enumerate(results, 1):
+        tag = "✅" if r["ok"] else "❌"
+        lines.append(f"## Option {i} — {tag} {r['lane'] or '—'}\n")
+        lines.append((r["output"].strip() or "_(no output)_") + "\n")
+    return "\n".join(lines)
+
+
+async def fanout_compare(*, run_lane, resolve_lane, default_lanes, telemetry, task: str,
+                         lanes=None, judge_lane=None, cwd: str = "", run_id="", progress=None) -> str:
+    """Same task to N lanes, answers rendered SIDE BY SIDE for the host/human to compare and merge
+    (e.g. 'fix this bug' on 3 CLIs -> pick the best diff). Optional judge_lane recommends one."""
+    use = _lanes_or_default(lanes, resolve_lane, default_lanes)
+    if not use:
+        return "[error] no lanes available for fanout_compare."
+    tasks = [{"lane": ln.key, "task": task, "cwd": cwd} for ln in use]
+    run_id, results = await batch_run(tasks, run_lane=run_lane, resolve_lane=resolve_lane,
+                                      default_lane=use[0], telemetry=telemetry, run_id=run_id,
+                                      progress=progress)
+    if judge_lane:
+        jl = resolve_lane(judge_lane)
+        if jl:
+            return await _judge(jl, run_lane, results,
+                                "These are alternative solutions to the SAME task. Compare them, "
+                                "note key differences and trade-offs, and recommend ONE to adopt "
+                                "(or a specific merge), with reasons.")
+    return _compare(results, task)

@@ -208,3 +208,89 @@ def test_render_batch_reports_cache_and_resume():
         {"i": 0, "task": "a", "lane": "x", "ok": True, "output": "hi", "cached": True},
         {"i": 1, "task": "b", "lane": "y", "ok": False, "output": "[failed] boom", "cached": False}])
     assert "1/2 ok" in out and "1 replayed" in out and "resume_id `run_x`" in out
+
+
+# ── verify_repair (G.2: cross-model build -> review -> repair loop) ────────────────────────────
+
+def test_verdict_parse_fail_closed_and_last_wins():
+    assert orchestrate._verdict("looks good\nVERDICT: APPROVED") == "APPROVED"
+    assert orchestrate._verdict("VERDICT: ISSUES") == "ISSUES"
+    assert orchestrate._verdict("no verdict at all") == "ISSUES"           # fail-closed
+    assert orchestrate._verdict("VERDICT: ISSUES\nthen\nVERDICT: APPROVED") == "APPROVED"
+
+
+def _builder_verifier(verdicts):
+    """Fake: builder lane returns code; verifier lane returns the next queued verdict."""
+    seq = list(verdicts)
+    state = {"i": 0}
+
+    async def rl(lane, args, *, tool="ask", terse=True):
+        if lane.key == "check":
+            v = seq[min(state["i"], len(seq) - 1)]
+            state["i"] += 1
+            return RunResult(True, f"review notes.\nVERDICT: {v}", "ok", 1)
+        return RunResult(True, "an attempt", "ok", 1)
+    return rl
+
+
+def test_verify_repair_approved_first_round():
+    lanes = {"build": _lane("build"), "check": _lane("check")}
+    report = asyncio.run(orchestrate.verify_repair(
+        run_lane=_builder_verifier(["APPROVED"]), resolve_lane=lanes.get,
+        default_lanes=[lanes["build"], lanes["check"]], task="write f"))
+    assert "APPROVED in 1 round" in report
+    assert "Round 1" in report and "Round 2" not in report
+
+
+def test_verify_repair_loops_then_approves():
+    lanes = {"build": _lane("build"), "check": _lane("check")}
+    report = asyncio.run(orchestrate.verify_repair(
+        run_lane=_builder_verifier(["ISSUES", "APPROVED"]), resolve_lane=lanes.get,
+        default_lanes=[lanes["build"], lanes["check"]], task="write f", max_rounds=3))
+    assert "APPROVED in 2 round" in report and "Round 2" in report
+
+
+def test_verify_repair_bounds_at_max_rounds():
+    lanes = {"build": _lane("build"), "check": _lane("check")}
+    report = asyncio.run(orchestrate.verify_repair(
+        run_lane=_builder_verifier(["ISSUES"]), resolve_lane=lanes.get,
+        default_lanes=[lanes["build"], lanes["check"]], task="x", max_rounds=2))
+    assert "NOT APPROVED after 2 round" in report
+    assert "Round 1" in report and "Round 2" in report
+
+
+def test_verify_repair_needs_a_distinct_verifier():
+    lanes = {"only": _lane("only")}
+    report = asyncio.run(orchestrate.verify_repair(
+        run_lane=_ok_run_lane(), resolve_lane=lanes.get, default_lanes=[lanes["only"]], task="x"))
+    assert "needs a SECOND lane" in report
+
+
+# ── fanout_compare (G.3: same task to N lanes, side by side) ───────────────────────────────────
+
+def test_fanout_compare_lists_each_option():
+    tel = FakeTelemetry()
+    lanes = {"a": _lane("a"), "b": _lane("b")}
+    report = asyncio.run(orchestrate.fanout_compare(
+        run_lane=_ok_run_lane(), resolve_lane=lanes.get, default_lanes=[lanes["a"], lanes["b"]],
+        telemetry=tel, task="fix the bug"))
+    assert "fanout_compare" in report
+    assert "Option 1" in report and "Option 2" in report
+
+
+def test_fanout_compare_judge_recommends_one():
+    tel = FakeTelemetry()
+    lanes = {"a": _lane("a"), "b": _lane("b"), "j": _lane("j")}
+    captured = {}
+
+    async def rl(lane, args, *, tool="ask", terse=True):
+        if lane.key == "j":
+            captured["task"] = args.get("task")
+            return RunResult(True, "adopt option a", "ok", 1)
+        return RunResult(True, f"sol-{lane.key}", "ok", 1)
+
+    report = asyncio.run(orchestrate.fanout_compare(
+        run_lane=rl, resolve_lane=lanes.get, default_lanes=[lanes["a"], lanes["b"]],
+        telemetry=tel, task="fix", judge_lane="j"))
+    assert "sol-a" in captured["task"] and "sol-b" in captured["task"]   # judge sees all options
+    assert "Synthesis" in report

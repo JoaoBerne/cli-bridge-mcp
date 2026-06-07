@@ -35,14 +35,19 @@ def _lane():
 
 
 def _writer(files: dict):
-    """Fake build agent: writes each {rel_path: content} into the build cwd (target_dir)."""
+    """Fake build agent: writes each {rel_path: content} into the build cwd (target_dir). `bytes`
+    content is written binary (for artifact tests); `str` content is written as text."""
     async def run_lane(lane, args, *, tool="ask", terse=True):
         assert args.get("agent") == "build"          # a direct build must request write mode
         for rel, content in files.items():
             p = os.path.join(args["cwd"], rel)
             os.makedirs(os.path.dirname(p) or ".", exist_ok=True)
-            with open(p, "w") as fh:
-                fh.write(content)
+            if isinstance(content, bytes):
+                with open(p, "wb") as fh:
+                    fh.write(content)
+            else:
+                with open(p, "w") as fh:
+                    fh.write(content)
         return RunResult(True, f"wrote {', '.join(files)}", "ok", latency_ms=10)
     return run_lane
 
@@ -146,6 +151,27 @@ def test_direct_non_git_without_scaffold_refused(tmp_path):
     report = _run({"task": "t", "target_dir": str(target), "scaffold_git": False}, {"a.txt": "x\n"})
     assert "not a git repository" in report and "scaffold_git" in report
     assert not (target / "a.txt").exists()
+
+
+# ── artifact return (G.1: non-text files surfaced by path, not diffed) ────────────────────────
+
+def test_direct_build_reports_binary_file_as_artifact(repo):
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64          # NUL bytes -> detected as binary
+    report = _run({"task": "make a chart", "target_dir": str(repo), "zone": "assets"},
+                  {"assets/chart.png": png, "assets/notes.txt": "see the chart\n"})
+    assert "# Direct build" in report
+    assert "## Artifacts" in report
+    assert "chart.png" in report and "image/png" in report     # surfaced by path + type
+    assert (repo / "assets" / "chart.png").exists()
+    # the binary is NOT dumped as a diff (no "Binary files differ"); the text file still diffs
+    assert "Binary files" not in report
+    assert "notes.txt" in report and "see the chart" in report
+
+
+def test_direct_build_text_only_has_no_artifacts_section(repo):
+    report = _run({"task": "write code", "target_dir": str(repo), "zone": "src"},
+                  {"src/app.py": "print('hi')\n"})
+    assert "# Direct build" in report and "## Artifacts" not in report
 
 
 # ── per-zone lock ───────────────────────────────────────────────────────────────────────────
