@@ -121,6 +121,17 @@ CREATE TABLE IF NOT EXISTS lane_ratings (
   created_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_lane_ratings ON lane_ratings(lane, mode);
+CREATE TABLE IF NOT EXISTS jury_outcomes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id TEXT,
+  lane TEXT NOT NULL,
+  vote TEXT,
+  final_verdict TEXT,
+  agreed INTEGER,                       -- 1/0 vote agreed with the reference; NULL = abstain/undecided
+  source TEXT NOT NULL DEFAULT 'live',  -- 'live' (agreed = conformity w/ majority) | 'eval' (vs ground truth)
+  created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_jury_outcomes ON jury_outcomes(lane, source);
 """
 
 
@@ -329,6 +340,63 @@ def lane_quality(mode: str = "") -> dict:
         return {}
     return {lane: {"n": int(n or 0), "avg": round(avg, 2) if avg is not None else None}
             for lane, n, avg in rows}
+
+
+def jury_put(run_id: str, rows, source: str = "live") -> None:
+    """Best-effort: record each verifier's jury vote vs the final verdict. `rows` = iterable of
+    (lane, vote, final_verdict, agreed) where agreed is 1/0/None. This is the raw signal behind
+    seat_report ("earn their seat"). NEVER raises into the caller (telemetry invariant)."""
+    conn = _connect()
+    if conn is None:
+        return
+    try:
+        payload = [(run_id or "", str(lane), str(vote), str(verdict),
+                    (None if agreed is None else int(agreed)), source, _now())
+                   for (lane, vote, verdict, agreed) in rows]
+    except (TypeError, ValueError):
+        return
+    if not payload:
+        return
+    try:
+        with _LOCK:
+            conn.executemany(
+                "INSERT INTO jury_outcomes (run_id, lane, vote, final_verdict, agreed, source, "
+                "created_at) VALUES (?,?,?,?,?,?,?)", payload)
+            conn.commit()
+    except sqlite3.Error:
+        return
+
+
+def seat_report() -> dict:
+    """Per-lane "earn their seat" signal from jury votes — TWO lenses, never conflated:
+    - conformity_rate (LIVE): how often the lane's vote matched the final MAJORITY verdict. This is
+      CONFORMITY, not correctness — a lane that dissents CORRECTLY scores low here by design, so it's
+      advisory only and must be labelled as such wherever shown.
+    - accuracy_rate (EVAL): on the eval corpus (ground truth), how often the vote matched the TRUE
+      verdict. THIS is the lens that rewards a correct dissenter.
+    {lane: {"n_votes", "conformity_rate"|None, "accuracy_rate"|None}}. Best-effort: {} on error."""
+    conn = _connect()
+    if conn is None:
+        return {}
+    try:
+        with _LOCK:
+            rows = conn.execute(
+                "SELECT lane, source, COUNT(*), "
+                "SUM(CASE WHEN agreed=1 THEN 1 ELSE 0 END), "
+                "SUM(CASE WHEN agreed IS NOT NULL THEN 1 ELSE 0 END) "
+                "FROM jury_outcomes GROUP BY lane, source").fetchall()
+    except sqlite3.Error:
+        return {}
+    out: dict = {}
+    for lane, source, n, agreed_sum, decided in rows:
+        d = out.setdefault(lane, {"n_votes": 0, "conformity_rate": None, "accuracy_rate": None})
+        d["n_votes"] += int(n or 0)
+        rate = round((agreed_sum or 0) / decided, 2) if decided else None
+        if source == "eval":
+            d["accuracy_rate"] = rate
+        else:
+            d["conformity_rate"] = rate
+    return out
 
 
 def _est_credits(lane: str, total_tokens: float) -> float | None:

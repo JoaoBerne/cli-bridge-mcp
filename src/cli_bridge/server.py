@@ -2320,12 +2320,25 @@ def _render_lane_stats() -> str:
     if not stats:
         return "No lane stats yet (telemetry off, or no runs recorded)."
     by_key = {ln.key: ln for ln in all_lanes()}
+    seat = telemetry.seat_report()
     lines = ["# Lane health", ""]
     for s in stats:
         cd = f", cooldown {s['cooldown_remaining_s']}s" if s["cooldown_remaining_s"] else ""
         lines.append(
             f"- **{s['lane']}**: {s['total_runs']} runs, {s['total_failures']} failed, "
             f"{s['consecutive_failures']} consecutive fail, last={s['last_kind']}{cd}")
+        # "Earn their seat" (Lens B, advisory): how a lane votes as a jury verifier over time —
+        # shown beside the latency/error stats above (Lens A), never auto-applied to routing.
+        sr = seat.get(s["lane"])
+        if sr and sr["n_votes"]:
+            parts = []
+            if sr["accuracy_rate"] is not None:
+                parts.append(f"accuracy {sr['accuracy_rate']:.0%} (eval, vs ground truth)")
+            if sr["conformity_rate"] is not None:
+                parts.append(f"conformity {sr['conformity_rate']:.0%} "
+                             "(live — agreement with the verdict, NOT accuracy)")
+            if parts:
+                lines.append(f"  - ↳ jury seat: {sr['n_votes']} votes · " + "; ".join(parts))
         # Burst rate-limiting pattern (failures interleaved with successes never trip the
         # cooldown): point at the opt-in pacer instead of leaving the lane to die quietly.
         ln = by_key.get(s["lane"])

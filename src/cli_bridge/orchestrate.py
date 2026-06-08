@@ -574,4 +574,14 @@ async def jury(*, run_lane, resolve_lane, default_lanes, telemetry, task: str, a
     fails = sum(1 for x in votes if x["vote"] == "fail")
     verdict = "APPROVED" if passes >= k else "REJECTED"        # fail-closed: short of k => rejected
     agreement = round(passes / n, 2) if n else 0.0
+    # "Earn their seat" signal (best-effort): record each verifier's vote vs the final verdict so
+    # lane_stats can surface, over time, which lanes conform vs dissent. In live use there's no
+    # ground truth, so agreed = conformity with the MAJORITY verdict (labelled "conformity, not
+    # accuracy" downstream — a correct dissenter SHOULD score low here). abstain = no side (None).
+    jput = getattr(telemetry, "jury_put", None)
+    if jput is not None:
+        jput(run_id, [(x["lane"], x["vote"], verdict,
+                       None if x["vote"] == "abstain"
+                       else int((x["vote"] == "pass") == (verdict == "APPROVED")))
+                      for x in votes])
     return _render_jury(author, answer, votes, verdict, passes, fails, k, n, agreement, degraded)
