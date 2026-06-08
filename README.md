@@ -187,6 +187,22 @@ engine from your terminal or CI (`--json` everywhere).
 
 ---
 
+## What you actually get when you combine them
+
+One assistant whose ceiling on **every axis is the ecosystem's best** — not the tool you opened this
+morning: code with the strongest model, read 1–2M tokens when yours is too short, answer with fresh
+knowledge past a stale cutoff, generate images/video, see screenshots, and fall back to a free/local
+lane when you're capped — spread across the subscriptions you already pay for.
+
+The emergent property **no single CLI has: true cross-vendor control** — a *different vendor* in the
+reviewer's seat. Same-family subagents (Claude Code's, Grok's) can only self-confirm.
+
+The honest seam: this unites **capabilities, not mind** — stateless spawns (no shared memory), spawn
+latency/cost, uneven quality, and the host always drives. It's **orchestration, not fusion**: you
+conduct specialists, you don't get one brain with every power.
+
+→ Per-CLI strengths & limits (dated, churns fast): **[docs/COMPARISON.md](docs/COMPARISON.md)**.
+
 ## Why cli-bridge (and not another "call other models" MCP)
 
 - 🛡️ **Ban-safe by design.** It spawns each model's **official CLI**, exactly as you'd run it by hand —
