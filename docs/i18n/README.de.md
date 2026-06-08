@@ -10,9 +10,8 @@ _Das englische README ist maßgeblich; diese Übersetzung kann hinterherhinken. 
 
 # cli-bridge
 
-<!-- Beim Public-Gang wieder aktivieren (beide brechen, solange das Repo privat / unveröffentlicht ist):
 ![CI](https://github.com/JoaoBerne/cli-bridge-mcp/actions/workflows/tests.yml/badge.svg)
-![PyPI](https://img.shields.io/pypi/v/cli-bridge-mcp) -->
+![PyPI](https://img.shields.io/pypi/v/cli-bridge-mcp)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 ![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-server-purple)
@@ -47,9 +46,11 @@ Dein Assistent hat gerade eine Fähigkeit gewonnen, die er nicht hat. Das ist di
 skaliere sie auf riesige Kontext-Reads, Vision, parallele Fleißarbeit und unabhängige
 anbieterübergreifende Verifikation.
 
-_(Die Lane rendert das Bild **per Code** — Diagramme, Charts, SVGs, prozedurale Kunst — und gibt die
-Datei zurück; es ist kein Text-zu-Foto-Modell, außer du richtest eines darauf. Deshalb kommt das
-Ergebnis als Pfad zurück, nicht als Blob.)_
+_(Codex erzeugt das Bild mit **`gpt-image-2`**, einem echten Text-zu-Bild-Modell direkt im CLI —
+angerechnet auf dein ChatGPT-Abo, ohne separaten API-Schlüssel (Bildgenerierung erfordert ein
+**bezahltes** Abo; im Free-Tarif nicht verfügbar). Das Ergebnis kommt als **Pfad** zurück, nicht als
+Blob, weil Binärdateien per Artifact-Return laufen, nicht über den Textkanal. Eine Build-Lane kann
+außerdem Diagramme, Charts oder SVGs *rendern*, indem sie Code schreibt — wenn das besser passt.)_
 
 ### …und es delegiert echte Arbeit, sicher
 
@@ -89,7 +90,7 @@ starten. Leihe dir die, die deinem Host fehlt (sie muss installiert + eingeloggt
 
 | Superpower | Welche CLI hat ihn | Leihen, wenn |
 |------------|------------------|----------------|
-| **Bilder** | Codex (`gpt-image-2`, **kein API-Schlüssel** — über dein ChatGPT-Abo) | dein Host nicht zeichnen kann |
+| **Bilder** | Codex (`gpt-image-2`, **kein API-Schlüssel** — bezahltes ChatGPT-Abo, nicht Free) | dein Host nicht zeichnen kann |
 | **Riesiger Kontext** | Gemini (1-Mio.-Token-Fenster) | eine Datei/ein Repo nicht in den Kontext deines Hosts passt |
 | **Frisches Wissen** | Gemini (Google-Search-Grounding) · Grok (Live-Web/X) ⚗️ | einen Stichtag schlagen: *„wie ist die aktuelle API von `<lib>`?“* |
 | **Vision** | Gemini (`images=[…]`) ⚗️ | einen Screenshot oder ein Diagramm analysieren |
@@ -98,7 +99,7 @@ starten. Leihe dir die, die deinem Host fehlt (sie muss installiert + eingeloggt
 | **Video** ⚗️ | Gemini (Veo) · Grok (Imagine) — *wenn deine installierte CLI es bereitstellt* | du brauchst einen generierten Clip |
 
 ```
-ask_build(lane="gpt", task="generate a 1200×630 social card to assets/card.png", zone="assets")   # Codex image → file by path, no API key
+ask_build(lane="gpt", task="generate a 1200×630 social card to assets/card.png", zone="assets")   # Codex image → file by path, no API key (paid ChatGPT plan)
 ask_gemini(task="find the bug across ./src — read the files you need", cwd="path/to/repo")         # 1M-token context
 ask_gemini(task="what's the current recommended API for <lib>? check the latest docs")            # fresh knowledge (Search grounding)
 ask_gemini(task="what's wrong in this UI?", images=["screenshot.png"])                             # vision (experimental)

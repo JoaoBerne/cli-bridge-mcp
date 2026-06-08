@@ -10,9 +10,8 @@ _英文 README 为准；本翻译可能滞后。欢迎社区校对。_
 
 # cli-bridge
 
-<!-- 公开时重新启用（仓库私有/未发布期间两者都会失效）：
 ![CI](https://github.com/JoaoBerne/cli-bridge-mcp/actions/workflows/tests.yml/badge.svg)
-![PyPI](https://img.shields.io/pypi/v/cli-bridge-mcp) -->
+![PyPI](https://img.shields.io/pypi/v/cli-bridge-mcp)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 ![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-server-purple)
@@ -42,8 +41,9 @@ ask_build(lane="gpt", task="generate a 1200×630 social card to assets/card.png 
 你的助手刚刚获得了它本不具备的能力。这就是全部理念 —— 现在把它扩展到超大上下文读取、视觉、并行的体力活，以及
 独立的跨厂商验证。
 
-_（lane 通过**代码**渲染图片 —— 图表、示意图、SVG、程序化艺术 —— 然后交回文件；除非你指定，否则它不是
-文本生成照片的模型。这就是为什么结果以路径返回，而非二进制 blob。）_
+_（Codex 用 **`gpt-image-2`** 生成图片——这是内置于 CLI 的真正文本生成图片模型——计入你的 ChatGPT 套餐额度，
+无需单独的 API 密钥（图片生成需要**付费**套餐，免费套餐不可用）。结果以**路径**返回而非 blob，因为二进制通过
+artifact-return 传递，而不走文本通道。build lane 在更合适时也可以通过写代码来*渲染*图表、示意图或 SVG。）_
 
 ### …并且它能安全地委派真实工作
 
@@ -79,7 +79,7 @@ cli-bridge 不是一个功能，而是**四个杠杆**。理解它们，下面�
 
 | 超能力 | 哪个 CLI 拥有 | 何时借用 |
 |------------|------------------|----------------|
-| **图像** | Codex（`gpt-image-2`，**无 API 密钥** —— 经由你的 ChatGPT 套餐） | 你的 host 不会画图时 |
+| **图像** | Codex（`gpt-image-2`，**无 API 密钥** —— 付费 ChatGPT 套餐，非免费） | 你的 host 不会画图时 |
 | **超大上下文** | Gemini（100 万 token 窗口） | 文件/仓库装不进你 host 的上下文时 |
 | **新鲜知识** | Gemini（Google 搜索接地）· Grok（实时 web/X）⚗️ | 越过训练截止：*「`<lib>` 当前的 API 是什么？」* |
 | **视觉** | Gemini（`images=[…]`）⚗️ | 分析截图或示意图 |
@@ -88,7 +88,7 @@ cli-bridge 不是一个功能，而是**四个杠杆**。理解它们，下面�
 | **视频** ⚗️ | Gemini（Veo）· Grok（Imagine）—— *若你装的 CLI 暴露它* | 你需要一段生成的片段 |
 
 ```
-ask_build(lane="gpt", task="generate a 1200×630 social card to assets/card.png", zone="assets")   # Codex image → file by path, no API key
+ask_build(lane="gpt", task="generate a 1200×630 social card to assets/card.png", zone="assets")   # Codex image → file by path, no API key (paid ChatGPT plan)
 ask_gemini(task="find the bug across ./src — read the files you need", cwd="path/to/repo")         # 1M-token context
 ask_gemini(task="what's the current recommended API for <lib>? check the latest docs")            # fresh knowledge (Search grounding)
 ask_gemini(task="what's wrong in this UI?", images=["screenshot.png"])                             # vision (experimental)

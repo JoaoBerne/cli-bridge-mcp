@@ -77,12 +77,10 @@ jobs:
           fetch-depth: 0          # gitleaks scans full history; dep-review diffs the PR base/head
       # Fail a PR that ADDS a dependency carrying a high+ CVE. PR-scoped, native to GitHub, free,
       # zero runtime cost — right-sized for a stdlib + `mcp` project (no Trivy: it would find ~0
-      # on a one-dependency tree and just burn CI minutes). continue-on-error while the repo is
-      # PRIVATE (the dependency-graph API needs to be enabled — it's on by default once the repo is
-      # public); flip to a hard gate then by removing continue-on-error.
+      # on a one-dependency tree and just burn CI minutes). Hard gate now that the repo is public
+      # (the dependency-graph API is on by default for public repos): a PR adding a high+ CVE dep fails.
       - name: Dependency review
         if: github.event_name == 'pull_request'
-        continue-on-error: true
         uses: actions/dependency-review-action@v4
         with:
           fail-on-severity: high

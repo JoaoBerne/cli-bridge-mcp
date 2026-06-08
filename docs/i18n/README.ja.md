@@ -10,9 +10,8 @@ _英語版 README が正本です。この翻訳は遅れている場合があ�
 
 # cli-bridge
 
-<!-- 公開時に再有効化（リポジトリが非公開／未公開の間はどちらも壊れます）：
 ![CI](https://github.com/JoaoBerne/cli-bridge-mcp/actions/workflows/tests.yml/badge.svg)
-![PyPI](https://img.shields.io/pypi/v/cli-bridge-mcp) -->
+![PyPI](https://img.shields.io/pypi/v/cli-bridge-mcp)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 ![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-server-purple)
@@ -44,8 +43,10 @@ ask_build(lane="gpt", task="generate a 1200×630 social card to assets/card.png 
 あなたのアシスタントは、持っていなかった能力を今得ました。それが全体のアイデアです——これを巨大コンテキストの
 読み込み、ビジョン、並列の力仕事、独立したベンダー横断の検証へと拡張するのです。
 
-_（レーンは画像を**コードで**レンダリングします——チャート、図、SVG、プロシージャルアート——そしてファイルを
-返します。対象を指定しない限りテキスト→写真モデルではありません。だから結果は blob ではなくパスで返ります。）_
+_（Codex は画像を **`gpt-image-2`**——CLI に組み込まれた本物のテキスト→画像モデル——で生成します。ChatGPT
+プランの利用枠で計上され、別途 API キーは不要です（画像生成は**有料**プランが必要で、無料プランでは使えません）。
+結果は blob ではなく**パス**で返ります。バイナリはテキストチャネルではなく artifact-return を通るからです。
+build レーンは、適している場合にコードを書いてチャート・図・SVG を*レンダリング*することもできます。）_
 
 ### …そして本物の作業を、安全に委譲する
 
@@ -81,7 +82,7 @@ cli-bridge は単一機能ではなく、**4 つのレバー**です。これを
 
 | スーパーパワー | どの CLI が持つか | こんなとき借りる |
 |------------|------------------|----------------|
-| **画像** | Codex（`gpt-image-2`、**API キー不要**——ChatGPT プラン経由） | ホストが描けないとき |
+| **画像** | Codex（`gpt-image-2`、**API キー不要**——有料 ChatGPT プラン、無料プラン不可） | ホストが描けないとき |
 | **巨大コンテキスト** | Gemini（100 万トークンの窓） | ファイル／リポジトリがホストのコンテキストに収まらないとき |
 | **新鮮な知識** | Gemini（Google 検索グラウンディング）· Grok（ライブ web/X）⚗️ | 学習打ち切りを越える：*「`<lib>` の現在の API は？」* |
 | **ビジョン** | Gemini（`images=[…]`）⚗️ | スクリーンショットや図を解析する |
@@ -90,7 +91,7 @@ cli-bridge は単一機能ではなく、**4 つのレバー**です。これを
 | **動画** ⚗️ | Gemini（Veo）· Grok（Imagine）——*インストール済み CLI が公開していれば* | 生成クリップが必要なとき |
 
 ```
-ask_build(lane="gpt", task="generate a 1200×630 social card to assets/card.png", zone="assets")   # Codex image → file by path, no API key
+ask_build(lane="gpt", task="generate a 1200×630 social card to assets/card.png", zone="assets")   # Codex image → file by path, no API key (paid ChatGPT plan)
 ask_gemini(task="find the bug across ./src — read the files you need", cwd="path/to/repo")         # 1M-token context
 ask_gemini(task="what's the current recommended API for <lib>? check the latest docs")            # fresh knowledge (Search grounding)
 ask_gemini(task="what's wrong in this UI?", images=["screenshot.png"])                             # vision (experimental)
