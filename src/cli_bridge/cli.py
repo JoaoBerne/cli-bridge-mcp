@@ -4,6 +4,7 @@
   cli-bridge ask <lane> <task...> [--model M] [--cwd DIR]
   cli-bridge ask-all <task...> [--synthesize] [--include-paid]
   cli-bridge ask-best <task...> [--mode fast|cheap|deep|code|review|security]
+  cli-bridge build <lane> <task...> [--architect L] [--model M] [--cwd DIR]
   cli-bridge review-diff [--base REF] [--json] [--include-paid]
   cli-bridge security-review [--base REF] [--json]
   cli-bridge test-plan [--base REF] | cli-bridge premortem <task...>
@@ -22,7 +23,7 @@ import os
 import shutil
 import sys
 
-from . import config, server, telemetry, workflows
+from . import config, server, telemetry, workflows, worktrees
 from . import eval as evals
 from . import jobs as jobs_mod
 from .detect import is_installed
@@ -66,6 +67,20 @@ def _cmd_ask_best(a):
         lanes, {"task": " ".join(a.task), "mode": a.mode, "include_paid": a.include_paid,
                 "cwd": a.cwd}))
     print(out[0].text)
+
+
+def _cmd_build(a):
+    lanes, _ = _lanes()
+    lane = server._lane_by_key(a.lane, lanes)
+    if not lane:
+        sys.exit(f"[error] no such lane: {a.lane}. Run `cli-bridge doctor` to see installed lanes.")
+    architect = None
+    if a.architect:
+        architect = server._lane_by_key(a.architect, lanes)
+        if not architect:
+            sys.exit(f"[error] no such architect lane: {a.architect}.")
+    args = {"task": " ".join(a.task), "cwd": a.cwd, "model": a.model, "timeout_s": a.timeout}
+    print(asyncio.run(worktrees.ask_build_isolated(lane, args, server._run_lane, architect)))
 
 
 def _cmd_review(a):
@@ -325,6 +340,17 @@ def build_parser() -> argparse.ArgumentParser:
     ab.add_argument("--include-paid", dest="include_paid", action="store_true")
     ab.add_argument("--cwd", default="")
     ab.set_defaults(func=_cmd_ask_best)
+
+    bd = sub.add_parser("build", help="delegate a real build to a lane in a throwaway worktree → "
+                                      "diff (your repo is NEVER modified)")
+    bd.add_argument("lane")
+    bd.add_argument("task", nargs="+")
+    bd.add_argument("--architect", default="",
+                    help="optional stronger lane writes a plan first; the build lane implements it")
+    bd.add_argument("--model", default="")
+    bd.add_argument("--cwd", default="")
+    bd.add_argument("--timeout", type=int, default=None)
+    bd.set_defaults(func=_cmd_build)
 
     for nm, fn, h in (("review-diff", _cmd_review, "multi-model code review of a git diff"),
                       ("security-review", _cmd_security, "OWASP-aware security review")):
