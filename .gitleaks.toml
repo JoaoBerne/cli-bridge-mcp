@@ -1,0 +1,14 @@
+# gitleaks configuration — extends the default ruleset.
+#
+# The test tree carries INTENTIONAL synthetic secrets (fake `ghp_…`, `sk-…`, Slack-webhook
+# strings) used as fixtures to verify cli-bridge's OWN secret redaction + precheck detection.
+# They are not real credentials — policy is that tests never use real keys (see AGENTS.md/CLAUDE.md).
+# Allowlist the test tree so gitleaks doesn't flag its own bait; `src/` stays fully scanned.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Synthetic secrets in the test suite (redaction/precheck fixtures, not real credentials)"
+paths = [
+  '''^tests/''',
+]
