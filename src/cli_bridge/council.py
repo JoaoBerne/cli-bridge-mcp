@@ -316,18 +316,25 @@ async def synthesize(question, answered, targets, *, run_lane, host_sample) -> s
     if neither can do it."""
     if len(answered) < 2:
         return ""
-    transcript = "\n\n".join(f"### {lane.display}\n{res.output}" for lane, res in answered)
+    # Anonymize peers to the synthesizer (anti prestige-bias): it sees neutral labels, never vendor
+    # names, so it can't favour a brand. Built from a {label: output} mapping — NOT by stripping
+    # names back out of text. A legend maps labels → lanes for the HUMAN reader only.
+    labeled = [(f"Reviewer {chr(65 + i)}", lane, res) for i, (lane, res) in enumerate(answered)]
+    transcript = "\n\n".join(f"### {label}\n{res.output}" for label, _lane, res in labeled)
+    legend = "\n".join(f"- {label} = {lane.display}" for label, lane, _res in labeled)
     prompt = (
-        "Several AI models answered the same question. Summarize concisely: (1) where they "
-        "AGREE, (2) where they DISAGREE (name which model said what), (3) the most reliable "
-        f"takeaway. Be brief.\n\nQUESTION:\n{question}\n\nANSWERS:\n{transcript}")
+        "Several AI models answered the same question, shown under neutral labels. Summarize "
+        "concisely: (1) where they AGREE, (2) where they DISAGREE (say which REVIEWER by label), "
+        "(3) the most reliable takeaway. Refer to them ONLY by their labels; do NOT guess or name "
+        f"the underlying vendor/model. Be brief.\n\nQUESTION:\n{question}\n\nANSWERS:\n{transcript}")
     # Prefer the host's own model — free, no lane spawned, no quota.
     via_host = await host_sample(prompt, max_tokens=800)
     if via_host:
-        return f"{via_host}\n\n_(synthesized by your host model via MCP sampling — no lane spent)_"
+        return (f"{via_host}\n\n_Legend:_\n{legend}\n\n"
+                "_(synthesized by your host model via MCP sampling — no lane spent)_")
     judge = next((ln for ln in targets
                   if not ln.is_paid and not ln.is_limited and not ln.experimental), None)
     if judge is None:
         return ""
     res = await run_lane(judge, {"task": prompt, "timeout_s": ASK_ALL_SYNTH_TIMEOUT_S})
-    return res.output if res.ok else ""
+    return f"{res.output}\n\n_Legend:_\n{legend}" if res.ok else ""

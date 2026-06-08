@@ -156,6 +156,33 @@ def test_allow_self_judge_keeps_everyone_debating():
     assert len(openers) == 3                               # nobody held out
 
 
+# ── T2.2 peer anonymization (anti prestige-bias) ─────────────────────────────────────────
+
+def test_debate_anonymizes_peers_to_judge_and_legends_in_report():
+    rec = []
+
+    async def run_lane(lane, args, *, tool="ask", terse=True):
+        rec.append({"lane": lane.key, "task": args["task"]})
+        t = args["task"]
+        if "debated the question" in t:
+            return RunResult(True, "UNANIMOUS: no\nDebater A made the point.", "ok")
+        if "fact-checker" in t:
+            return RunResult(True, "CONFIRMED: ok", "ok")
+        return RunResult(True, "an opinion with no name in it", "ok")   # body carries no vendor name
+
+    report = asyncio.run(workflows.debate(_panel(3), {"task": "q?", "rounds": 1}, run_lane))
+    judge_prompt = next(c["task"] for c in rec if "debated the question" in c["task"])
+    assert "Debater A" in judge_prompt and "Debater B" in judge_prompt   # neutral labels reach judge
+    for name in ("### Gpt", "### Mistral", "### Gemini"):
+        assert name not in judge_prompt                      # no real vendor headers in the transcript
+    # peers see labels too, and are told not to self-identify
+    revise = next(c["task"] for c in rec if "ALL ANSWERS SO FAR" in c["task"])
+    assert "Debater" in revise
+    assert any("Do not reveal, claim, or guess any participant" in c["task"] for c in rec)
+    # the report ties labels back to real lanes for the human
+    assert "Labels (judge saw these" in report and "Debater A = " in report
+
+
 # ── FR-5 brief linter (pure) ─────────────────────────────────────────────────────────────
 
 def test_brief_lint_flags_thin_brief():
