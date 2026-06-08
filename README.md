@@ -216,6 +216,12 @@ live-checks each login).
 | `ask_opencode` | [opencode](https://opencode.ai) gateway (deepseek, qwen, glm, kimi…) | free by default; some models use credits |
 | `ask_ollama`   | [Ollama](https://ollama.com) (local models, offline) | $0 — runs on your machine |
 
+More local runtimes (no built-in needed): **LM Studio · MLX · llama.cpp** ship as zero-code
+recipes — point `CLI_BRIDGE_LANES_FILE` at [`examples/lmstudio.lane.json`](examples/lmstudio.lane.json),
+[`mlx.lane.json`](examples/mlx.lane.json) or [`llamacpp.lane.json`](examples/llamacpp.lane.json).
+(Same ban-safe spawn; note that several local runtimes of the *same* open weights give correlated
+answers — real council diversity comes from distinct vendors, not a second local runtime.)
+
 ⚗️ = experimental (flags not yet verified live — please report breakage).
 Cost column = the vendor's *typical published plan* as of June 2026 ([docs/COSTS.md](docs/COSTS.md)
 has limits, sunsets and sources) — cli-bridge never detects what a lane costs *you*; declare your

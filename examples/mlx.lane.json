@@ -1,0 +1,25 @@
+[
+  {
+    "//": "Apple-Silicon MLX as a local lane — point CLI_BRIDGE_LANES_FILE at this file (or merge).",
+    "//1": "ban-safe: cli-bridge spawns `mlx_lm.generate`; no keys, no network (weights are local).",
+    "//2": "`mlx_lm.generate --model <repo-or-path> --prompt <task>` runs one-shot to stdout.",
+    "//3": "--model is a real flag, so you can pass model=<id> PER CALL (ask_mlx) or set a default",
+    "//4": "below / CLI_BRIDGE_MLX_MODEL=<id>. Model = a HF repo (auto-downloaded) or a local path.",
+    "//5": "Needs `pip install mlx-lm` on PATH (Apple Silicon ONLY). The lane auto-hides when the",
+    "//6": "binary isn't found, so this entry is harmless on Intel/Windows/Linux.",
+    "//7": "JURY CAVEAT: a local runtime of open weights correlates with OTHER local runtimes of the",
+    "//8": "same weights — real jury decorrelation comes from distinct VENDORS, not a second runtime.",
+
+    "key": "mlx",
+    "display": "MLX (Apple Silicon, local)",
+    "bin": "mlx_lm.generate",
+    "cost": "free",
+    "default_model": "mlx-community/Qwen2.5-7B-Instruct-4bit",
+    "model_flag": "--model",
+    "ask": ["--prompt", "{task}"],
+    "help": ["--help"],
+    "client_ids": ["mlx", "mlx-lm"],
+    "install_hint": "pip install mlx-lm  (Apple Silicon only) — then ensure mlx_lm.generate is on PATH",
+    "note": "Local via MLX (`mlx_lm.generate`). $0, private, offline, Apple-Silicon only. Read-only. model=<HF repo or local path>. Local open weights → correlated with other local runtimes; not jury diversity."
+  }
+]
