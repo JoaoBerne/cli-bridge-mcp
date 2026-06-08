@@ -21,8 +21,8 @@ def test_excludes_paid_and_limited_by_default():
     order = router.order_lanes(_builtins(), _no_cooldown, include_paid=False)
     assert all(l.cost_label == "free" for l in order)
     keys = {l.key for l in order}
-    assert "gpt" not in keys and "claude" not in keys      # limited excluded
-    assert {"gemini", "mistral", "opencode"} <= keys
+    assert keys.isdisjoint({"gpt", "claude", "mistral"})   # limited excluded
+    assert {"gemini", "opencode"} <= keys
 
 
 def test_cooled_lane_sinks_to_bottom():
@@ -33,10 +33,10 @@ def test_cooled_lane_sinks_to_bottom():
 
 
 def test_priority_env_overrides_within_tier(monkeypatch):
-    monkeypatch.setenv("CLI_BRIDGE_MISTRAL_PRIORITY", "1")  # lower = earlier
+    monkeypatch.setenv("CLI_BRIDGE_OPENCODE_PRIORITY", "1")  # lower = earlier
     order = router.order_lanes(_builtins(), _no_cooldown, include_paid=False)
     free = [l.key for l in order if l.cost_label == "free"]
-    assert free[0] == "mistral"
+    assert free[0] == "opencode"
 
 
 def test_explain_lists_order():
@@ -72,11 +72,11 @@ def test_deep_mode_allows_paid_only_when_included():
 
 def test_fast_mode_prefers_lower_measured_latency():
     perf = {"gemini": {"runs": 5, "avg_ms": 9000, "fail_rate": 0.0},
-            "mistral": {"runs": 5, "avg_ms": 200, "fail_rate": 0.0}}
+            "opencode": {"runs": 5, "avg_ms": 200, "fail_rate": 0.0}}
     order = router.order_for_mode(_builtins(), _no_cooldown, lambda k: perf.get(k, {}),
                                   "fast", include_paid=False)
     free = [l.key for l in order if l.cost_label == "free"]
-    assert free.index("mistral") < free.index("gemini")          # faster lane first
+    assert free.index("opencode") < free.index("gemini")          # faster lane first
 
 
 def test_capability_mode_prefers_effort_capable():
@@ -87,9 +87,9 @@ def test_capability_mode_prefers_effort_capable():
 
 def test_cooled_lane_sinks_in_mode_order():
     def cooled(key):
-        return 999 if key == "mistral" else 0
+        return 999 if key == "opencode" else 0
     order = router.order_for_mode(_builtins(), cooled, _no_perf, "cheap", include_paid=False)
-    assert order[-1].key == "mistral"
+    assert order[-1].key == "opencode"
 
 
 def test_explain_mode_text():

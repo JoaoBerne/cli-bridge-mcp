@@ -37,7 +37,7 @@ Three exhaustion behaviours matter more than sticker price:
 | **Gemini CLI** | ⚠️ **SUNSET 2026-06-18** | Free personal tier (60 RPM / 1000 RPD, aggregated across models, Pro sub-quota falls back to Flash) **stops serving on 2026-06-18** — official notice; migration path is Antigravity (`agy`). cli-bridge's gemini lane auto-falls back to `agy`. |
 | **Qwen Code** | ❌ **DEAD** | OAuth free tier cut 1000→100 RPD on 2026-04-13, fully closed 2026-04-15 ([issue #3203](https://github.com/QwenLM/qwen-code/issues/3203) + official docs). Only metered API keys work now — hence the lane's `paid` default. |
 | **Codex CLI** | Headless confirmed; $0 tier **UNCONFIRMED** | `codex exec` is officially supported for scripts/CI. Codex is included on **all ChatGPT plans incl. Free** (plan-scaled quotas) per the subscriptions research — but a card-free $0 login path was not confirmed by primary sources. |
-| **Mistral Vibe** | Free tier works in practice | No surviving primary-source claim on exact quotas — **UNCONFIRMED** limits. |
+| **Mistral Vibe** | Free tier works in practice | No surviving primary-source claim on exact quotas — **UNCONFIRMED** limits; hence the lane's conservative `limited` default (override to `free` if you're on the free tier). |
 | **Grok CLI** | No free tier | Requires SuperGrok / X Premium+. Headless via `-p`. |
 | **opencode (built-in free models)** | $0, pattern-discovered | See gateway section below — names churn fast, which is why cli-bridge discovers `opencode/*-free` live and never pins a name. |
 | Copilot CLI / Cline / Aider / Goose / Amazon Q / Cursor / Windsurf | **UNCONFIRMED** | Zero claims survived adversarial verification (the popular "Copilot Free 15/150 RPD" figures were *refuted* 0-3). |
