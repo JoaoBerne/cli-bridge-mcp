@@ -368,8 +368,13 @@ COOLDOWN_TIMEOUT_THRESHOLD = 2   # consecutive timeouts before a lane is cooled
 # exhaustion: the CLI prints no error, it just answers nothing (e.g. gemini/agy once the daily free
 # quota is spent). After this many CONSECUTIVE empties the lane is cooled down so fan-out stops
 # hammering a quota-dead lane; a one-off empty stays a soft per-call fall-through.
-COOLDOWN_EMPTY_S = int_env("CLI_BRIDGE_COOLDOWN_EMPTY_S", 1800, 0, 86_400)       # 30 min
+COOLDOWN_EMPTY_S = int_env("CLI_BRIDGE_COOLDOWN_EMPTY_S", 1800, 0, 86_400)       # 30 min (base)
 COOLDOWN_EMPTY_THRESHOLD = 2     # consecutive empty (likely-quota) runs before a lane is cooled
+# Each EXTRA empty past the threshold doubles the empty-cooldown (re-probing a quota-dead lane every
+# 30 min is wasteful when the quota is a DAILY one). Capped so the lane is still re-probed within a
+# day and recovers on its own (a single success resets the streak → back to the 30-min base). Never
+# infinite: the cap bounds the wait, and the next probe after it always runs.
+COOLDOWN_EMPTY_MAX_S = int_env("CLI_BRIDGE_COOLDOWN_EMPTY_MAX_S", 21_600, 0, 86_400)   # cap 6 h
 
 
 # ── cost profile ──────────────────────────────────────────────────────────────────────
