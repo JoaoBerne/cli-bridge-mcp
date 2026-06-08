@@ -183,8 +183,10 @@ of success is *tested*, not trusted.
 | `doctor` / `setup` | Detect installed CLIs + resolved paths; `doctor deep` validates each lane against its own `--help` on your machine. | First run, or when a lane breaks. |
 | `list_models` / `list_<lane>_models` | List a lane's models where the CLI exposes them. | You want to pick a specific model. |
 
-There's also a **human CLI** (`cli-bridge doctor|ask|ask-all|ask-best|review-diff|eval|…`) — the same
-engine from your terminal or CI (`--json` everywhere).
+There's also a **human CLI** (`cli-bridge doctor|ask|ask-all|ask-best|build|review-diff|eval|…`) — the
+same engine from your terminal or CI (`--json` everywhere). `cli-bridge build <lane> "<task>"`
+delegates a real build to a lane in a throwaway worktree and prints the **diff** — your repo is never
+touched.
 
 ---
 

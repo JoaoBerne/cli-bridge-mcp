@@ -57,6 +57,26 @@ def test_ask_best(monkeypatch, capsys):
     assert "BEST:fast" in capsys.readouterr().out
 
 
+def test_build_dispatches_isolated(monkeypatch, capsys):
+    async def fake_build(lane, args, run_lane, architect=None):
+        assert lane.key == "gemini" and args["task"] == "add a version flag"
+        assert architect is None
+        return "ISOLATED-DIFF-REPORT"
+    monkeypatch.setattr(cli.worktrees, "ask_build_isolated", fake_build)
+    cli.main(["build", "gemini", "add", "a", "version", "flag"])
+    assert "ISOLATED-DIFF-REPORT" in capsys.readouterr().out
+
+
+def test_build_unknown_lane_exits():
+    with pytest.raises(SystemExit):
+        cli.main(["build", "nope", "do", "x"])
+
+
+def test_build_unknown_architect_exits():
+    with pytest.raises(SystemExit):                      # lane resolves, architect does not
+        cli.main(["build", "gemini", "do", "x", "--architect", "nope"])
+
+
 def test_usage_json(capsys):
     cli.main(["usage", "--json"])
     out = capsys.readouterr().out

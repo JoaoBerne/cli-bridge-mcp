@@ -7,6 +7,10 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added (local lane + council quality + quota resilience)
+- **`cli-bridge build <lane> "<task>"` (human CLI)** — terminal entry point for the flagship safe-build
+  path: the lane works in a **throwaway git worktree** and the command prints the **diff** — your repo
+  is never modified. `--architect <lane>` lets a stronger lane plan first. (Isolated-mode only; direct
+  in-repo writes stay MCP-side.)
 - **Ollama lane** — `ask_ollama` / `list_ollama_models` spawn the local `ollama` CLI
   (`run --hidethinking <model> <task>`, `NO_COLOR=1`/`TERM=dumb`): $0, offline, private, read-only.
   Empty model = the first from `ollama list`. Maximal jury de-correlation (with the honest caveat
