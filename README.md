@@ -138,7 +138,7 @@ surface; hide/show any with `CLI_BRIDGE_DISABLED_TOOLS` / `CLI_BRIDGE_ENABLED_TO
 ### Consult (read-only)
 | Tool | What it does | Reach for it when |
 |------|--------------|-------------------|
-| `ask_<lane>` | Ask one specific CLI — `ask_gemini`, `ask_gpt` (Codex), `ask_opencode`, `ask_ollama`, and `ask_qwen`/`ask_grok`/`ask_copilot` when installed. Supports `role="reviewer\|security\|planner\|devil"`, `conversation` (round-table memory), and `images=[…]` on Gemini. | You want a particular model's strength, persona, or modality. |
+| `ask_<lane>` | Ask one specific CLI — `ask_claude`, `ask_gpt` (Codex), `ask_gemini`, `ask_mistral`, `ask_opencode`, `ask_ollama`, and `ask_qwen`/`ask_grok`/`ask_copilot` when installed. Supports `role="reviewer\|security\|planner\|devil"`, `conversation` (round-table memory), and `images=[…]` on Gemini. | You want a particular model's strength, persona, or modality. |
 | `ask_all` | Same question to every *free* lane in parallel; returns each answer **plus a disagreement score**. `synthesize: true` adds an agree/disagree summary. | You want breadth fast and a signal of where models diverge (= uncertainty). |
 | `ask_cascade` | Tries lanes in a deterministic order, stops at the first good answer, skips cooled-down lanes; optional confidence-escalation. | You want resilience: a capped/failing lane is skipped automatically. |
 | `ask_best` | A router picks the most suitable lane by `mode` (`fast/cheap/deep/code/review/security`) + your `rate_lane` scores. | You don't want to choose a lane by hand. |
@@ -151,6 +151,7 @@ surface; hide/show any with `CLI_BRIDGE_DISABLED_TOOLS` / `CLI_BRIDGE_ENABLED_TO
 | Tool | What it does | Reach for it when |
 |------|--------------|-------------------|
 | `ask_build` | Delegates a real build. `mode=isolated` (default) edits a throwaway worktree → **diff**; `mode=direct` writes into a declared `zone` (per-zone lock + post-turn zone-violation check). `async=true` runs it as a steerable job. Non-text outputs come back **by path** (artifact-return). | You want work *done*, not just suggested — review-gated or hands-off. |
+| `ask_build_isolated` | Convenience alias for `ask_build` with `mode=isolated` — always returns a diff, never touches your tree. | You want the safe diff path by name, without setting `mode`. |
 | `job_tail` | Streams a running build's progress log (byte-offset). | You want to watch a delegate work. |
 | `build_steer` | Queues a steering instruction for the next turn, or `interrupt=true` cuts the current turn (files kept). | You need to course-correct mid-build without restarting. |
 
