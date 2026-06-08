@@ -434,9 +434,9 @@ BUILTIN_LANES: list[LaneSpec] = [
                   "(Antigravity) if installed. agent='build' EDITS files (--yolo / agy "
                   "--dangerously-skip-permissions). Note: `agy` ignores model (uses its own)."),
     LaneSpec("mistral", "Mistral (Vibe CLI)", "vibe", _mistral_ask,
-             cost_default="free",
-             cost_note="Free tier works as of June 2026; paid-plan quotas/limits unverified "
-                       "(docs/COSTS.md).",
+             cost_default="limited",
+             cost_note="Conservative default — the free tier works but its quotas are unverified and "
+                       "Mistral sells paid plans (docs/COSTS.md); set to free if you're on the free tier.",
              help_args=["--help"], caps=frozenset({"model", "agent"}), env_ask=_mistral_env,
              probe_flags=("-p", "--agent", "--trust"),
              client_ids=frozenset({"vibe", "mistral"}),

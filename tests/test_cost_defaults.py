@@ -14,8 +14,15 @@ def test_subscription_lanes_default_limited():
 
 
 def test_free_lanes_default_free():
-    for k in ("gemini", "mistral", "opencode"):
+    for k in ("gemini", "opencode", "ollama"):
         assert _lane(k).cost_label == "free", k
+
+
+def test_mistral_defaults_limited_unverified_free():
+    # The free tier works in practice, but its quotas are UNCONFIRMED and Mistral sells paid plans
+    # (docs/COSTS.md) — so the conservative shipped default is limited (excluded from default
+    # fan-out), not free. Users on the free tier override to free.
+    assert _lane("mistral").cost_label == "limited"
 
 
 def test_qwen_defaults_paid_since_oauth_shutdown():
@@ -79,8 +86,8 @@ def test_ask_all_targets_skip_limited_and_paid(tmp_path, monkeypatch):
     lns = lanes.BUILTIN_LANES
     free_only = server._ask_all_targets(lns, include_paid=False)
     keys = {l.key for l in free_only}
-    assert "gpt" not in keys and "claude" not in keys      # limited -> skipped
-    assert {"gemini", "mistral", "opencode"} <= keys        # free -> included
+    assert keys.isdisjoint({"gpt", "claude", "mistral"})   # limited -> skipped
+    assert {"gemini", "opencode"} <= keys                   # free -> included
     all_in = server._ask_all_targets(lns, include_paid=True)
     assert "gpt" in {l.key for l in all_in}                  # include_paid -> everything
 
