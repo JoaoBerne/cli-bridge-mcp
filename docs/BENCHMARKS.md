@@ -87,6 +87,32 @@ What it actually shows:
   council's precision edge would likely shrink. **Do not read "council = 2× cleaner" as general** —
   it's partly an artifact of the single-lane choice. Re-run with a cleaner strong model to test it.
 
+### What this eval does NOT measure (don't read "no recall gain" as "useless")
+
+The eval scores **one narrow thing**: recall/precision against a **closed corpus of pre-planted
+bugs**. A flat recall result means *"a council didn't catch more of these known bugs than one strong
+model"* — it does **not** mean the tool has no value. Several real, repeatedly-reported sources of
+value are **out of scope by construction** and a flat recall number says nothing about them:
+
+- **Perspective diversity / reframing.** A model from a *different* vendor family often poses the
+  problem in a way your default model didn't — surfacing a consideration, not ticking a bug off a
+  list. Scoring "did lane B find planted bug #7" can't capture "lane B reframed the whole approach".
+- **Human-in-the-loop integration.** In real use it's *you* who reads several drafts and your own
+  judgment that integrates them. The eval scores models in isolation; the primary real-world
+  configuration (you + the council) is never measured.
+- **Open-ended discovery.** A fixed corpus caps recall at the bugs someone planted. Day-to-day, the
+  win is catching something *nobody listed in advance* — which a closed benchmark cannot reward.
+- **Precision at scale / false-alarm filtering.** The ~2× fewer false alarms above is the part the
+  eval *does* support, and it's the cross-vendor mechanism (uncorrelated errors → disagreement
+  filters one model's hallucinated finding) — the eval under-counts this on a tiny corpus.
+
+So: a flat recall result is a finding about **planted-bug recall**, not a verdict on the project.
+Conflating "my benchmark measures X" with "X is all that matters" is a reasoning error, not a
+measurement. Lived "it keeps catching things for me" is real evidence for the axes above — but it
+also carries survivorship bias (you remember the hits, not the noise you filtered, and you lack the
+"would I have caught it alone?" counterfactual), which is exactly *why* this harness exists. Trust
+neither the benchmark alone nor the anecdote alone.
+
 Reproduce on your machine (`--repeats 5` to publish; pick a headroom lane for `--single-lane`):
 
 ```bash
