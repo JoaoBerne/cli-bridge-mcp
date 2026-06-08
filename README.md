@@ -1,9 +1,6 @@
 <div align="center">
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/banner-dark.svg">
-  <img src="assets/banner-light.svg" width="860" alt="You → cli-bridge → a council of AI CLIs in parallel → one merged review">
-</picture>
+<img src="assets/banner.png" width="860" alt="cli-bridge — your assistant borrows the powers of every AI CLI you already have: huge-context reads, vision, parallel builds, cross-vendor checks">
 
 **English** · [Français](docs/i18n/README.fr.md) · [简体中文](docs/i18n/README.zh-CN.md) · [Español](docs/i18n/README.es.md) · [Português (BR)](docs/i18n/README.pt-BR.md) · [日本語](docs/i18n/README.ja.md) · [Deutsch](docs/i18n/README.de.md)
 
@@ -18,605 +15,178 @@
 ![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-server-purple)
 ![ban--safe](https://img.shields.io/badge/ban--safe-no%20token%20extraction-orange)
 
-**Your AI assistant, but it can phone a friend.**
+**Your assistant, with the powers of every CLI you already have.**
 
-> **No API keys · no Node · no daemon · stdlib + `mcp` only.** It drives the official CLIs you're
-> already logged into — nothing to provision, nothing new to trust with a secret.
+> **No API keys · no token extraction · no Node · no daemon · stdlib + `mcp` only.**
 
-`cli-bridge` is a [Model Context Protocol](https://modelcontextprotocol.io) server that
-**orchestrates the AI CLIs you've already installed and logged into** — Claude Code, Codex,
-Gemini CLI, opencode, … — from whatever assistant you're talking to. No API keys, no token
-extraction, a local-only log, a hard cost cap, and writes only as throwaway-worktree diffs.
-That part is indisputable plumbing; here's what it unlocks:
-
-Stuck on a gnarly bug? Have your assistant ask GPT *and* Gemini in parallel and compare. Need a
-1M-token read of a huge file? Hand it to Gemini. Want a cheap second opinion? Fire it at a free
-model. One question, every model, side by side — without leaving your terminal.
-
-```
-You → Claude:  "ask the council whether this auth logic is safe"
-Claude → cli-bridge → [ Gemini ] [ GPT ] [ Mistral ] [ Qwen ] … in parallel
-            ← three independent reviews + a synthesis of where they agree & disagree
-```
-
-<div align="center">
-
-<img src="assets/demo.gif" width="860" alt="cli-bridge security-review demo: a committed auth bypass is caught independently by two models, merged into one severity-ranked report, $0 on free lanes">
-
-_Real run (2.5× speed): a committed auth bypass — `security-review` fans OWASP roles across free
-models in parallel; two models flag it **blocker** independently, and `usage` shows the receipts._
-_Generated with [vhs](https://github.com/charmbracelet/vhs) — [view source](docs/demo/)._
-
-</div>
-
-> **Why it's different in one breath:** it never holds an API key and never extracts a token — it
-> drives the official CLIs you've **already installed and logged into**. A free-lane council costs
-> **$0.00** (the receipts are in `usage_report`); paid lanes only ever run inside a hard daily cap
-> *you* set. And when you ask it to *do* work, it edits in a throwaway git worktree and hands back
-> a **diff** — your live repo is never touched.
-
-> **And the honest part:** "more models = better" is *fragile* — big models share training data,
-> so their errors correlate. We measured our own central claim (`cli-bridge eval`, shipped, no LLM
-> judge): a diverse council did **not** catch more bugs than one strong model — it cut the false
-> alarms **~2×**. We publish the numbers either way ([BENCHMARKS.md](docs/BENCHMARKS.md)), and the
-> harness ships so you can run it on *your* CLIs.
+The assistant you're talking to can't read a 2M-token repo in one pass, can't see a screenshot,
+can't hand you a generated image, and can't check its own work without bias. The other AI CLIs
+you've **already installed and logged into** — Claude Code, Codex, Gemini, opencode, plus local
+models via Ollama — each do something yours can't. `cli-bridge` is a [Model Context Protocol](https://modelcontextprotocol.io) server
+that lets your assistant **borrow them**: it spawns the official CLI as a subprocess (exactly as
+you'd run it by hand — no keys, no token extraction) and hands the result back.
 
 ---
 
-## What you can actually do with it
+## The 10-second demo
 
-Concrete jobs a dev reaches for — each is one sentence of *when*, then the exact call. You type
-these to your assistant ("ask the council…", "delegate the frontend to codex…"); it makes the call.
+You're in Claude. Claude can't hand you an image. Codex can — it writes the code that renders one
+and runs it. So ask it:
 
-1. **Get a real second opinion before you ship.** Pressure-test a conclusion you already reached.
-   ```
-   challenge(task="I'm going to drop the cache layer — here's why: …")        # one skeptic
-   consensus(task="which migration strategy is safest here?")                  # N answer, peer-rank the best
-   ```
-2. **Demolish your plan before you write code (flagship).** Hand a plan file to the council, each
-   lane attacks a different angle (flaws / gaps / over-engineering / sequencing).
-   ```
-   workflow(preset="refine_plan", plan_file="docs/plan.md")                    # add judge_lane for one patch list
-   ```
-3. **Delegate a real build to another CLI while you work in parallel.** It writes real files in a
-   guarded `zone` of your repo; you keep building elsewhere.
-   ```
-   ask_build(task="build the landing page", target_dir=".", zone="frontend", async=true)
-   job_tail(job_id=…)   ·   build_steer(job_id=…, instruction="use Tailwind, not inline CSS")
-   ```
-4. **Have one model check another's work (cross-model verify-repair).** A builds, a *different*
-   model reviews, repair loops until approved — uncorrelated blind spots catch what self-review can't.
-   ```
-   workflow(preset="verify_repair", task="implement retry with backoff",
-            builder_lane="gpt", verifier_lane="gemini")
-   ```
-5. **Borrow a capability another CLI has.** e.g. Codex can generate images — let it write the file
-   into a zone and you get the **path** back, never a binary blob.
-   ```
-   ask_build(task="generate a hero image as assets/hero.png", target_dir=".", zone="assets")
-   ```
-6. **Fan one job out and compare, or review a diff with many eyes.**
-   ```
-   workflow(preset="fanout_compare", task="fix this failing test", lanes=["gpt","gemini","opencode"])
-   review_diff(base="origin/main")   ·   security_review(base="origin/main")   # OWASP, severity-ranked
-   ```
-7. **Get a cross-vendor jury to vote on an answer (the verification edge).** N verifiers from
-   *different model families* than the author vote PASS/FAIL — uncorrelated blind spots, the one
-   thing a single-vendor tool can't do. Fail-closed; disagreement is surfaced, not hidden.
-   ```
-   workflow(preset="jury", task="is this migration safe?", author_lane="gpt")   # verifiers auto-picked cross-family
-   ```
-8. **See the bill before you spend, and cap it.** Preview a fan-out's cost, then bound it.
-   ```
-   batch_run(tasks=[...], dry_run=true)              # cost envelope (calls + est token/credit range), nothing spawned
-   batch_run(tasks=[...], max_calls=10, max_credits=2.0)   # hard per-invocation budget; over-budget tasks skipped
-   ```
+```
+ask_build(lane="gpt", task="generate a 1200×630 social card to assets/card.png — write a script that renders it, then run it", zone="assets")
+→ Codex writes assets/card.png · you get the path back, never a binary blob (artifact-return)
+```
 
-_Also: `ask_<lane>(role="reviewer"|"security"|"planner"|"devil")` for a quick persona ·
-`ask_gemini(images=[...])` for ban-safe vision · `CLI_BRIDGE_LEAN=1` for a curated 12-tool surface._
+Your assistant just gained an ability it doesn't have. That's the whole idea — now scale it to
+giant-context reads, vision, parallel grunt-work, and independent cross-vendor verification.
 
-**Honest north-star, not a promise:** cli-bridge is the best dev tool for *driving several AI
-subscriptions you already pay for* and orchestrating sub-agents across them. The longer-horizon
-idea — a neutral bus for AIs to collaborate — is a direction, **not** a shipped protocol; it lives
-or dies on whether the CLIs stay scriptable. We build for the real thing today and are upfront
-about the rest.
+_(The lane renders the image **via code** — charts, diagrams, SVGs, procedural art — and hands back
+the file; it's not a text-to-photo model unless you point one at it. That's why the result comes back
+as a path, not a blob.)_
 
 ---
 
-## Why this one
+## How to think about it (the mental model)
 
-There are other "call other models" MCPs. Here's what makes cli-bridge different:
+cli-bridge isn't one feature, it's **four levers**. Get these and every tool below slots into place:
 
-- 🛡️ **Ban-safe by design.** It spawns each model's **official CLI** — exactly as you'd run it by
-  hand. No OAuth-token extraction, no API-key reuse, nothing that gets accounts flagged. Each CLI
-  handles its own auth and billing.
-- 💸 **Sourced cost defaults, then *you* tune to your plan.** Out of the box `ask_all` builds a
-  free council and never touches subscription quota (Claude, GPT) or paid credits unless you ask.
-  Each lane ships a tier sourced from the vendor's published plans
-  ([docs/COSTS.md](docs/COSTS.md), dated) — **never detected from your account, and labeled as
-  such** — that you override per your own subscriptions
-  (`CLI_BRIDGE_<LANE>_COST=free|limited|paid`); on a big plan, mark them all `free`, or set
-  `CLI_BRIDGE_PROFILE=max`.
-- 🔌 **Works from any host.** Driving Claude Code? The Claude lane is shown as a normal tool but
-  kept out of `ask_all`/`ask_cascade` fan-out (asking your own running model in a parallel council
-  is redundant) — set `CLI_BRIDGE_HIDE_HOST=1` to hide it entirely. Driving Codex or opencode
-  instead? Same deal, detected automatically from the MCP handshake.
-- 🧩 **Add any CLI — or your own API — without forking.** Built-in lanes for Claude, GPT, Gemini,
-  Mistral, Qwen, Copilot, Grok, opencode and **Ollama** (local models, $0, offline). Register
-  **your own CLI from a JSON file**, or wrap
-  **your own API** by spawning `curl`. Zero code.
-- 🧠 **Council synthesis.** `ask_all` can have a free model summarize where the others *agree* and
-  *disagree* — turn three opinions into one decision.
-- 🔬 **Multi-model workflows.** `review_diff` and `security_review` fan **role-diverse** reviewers
-  across the council, then merge + dedupe into one severity-ranked report. `debate` has models
-  critique and revise each other over bounded rounds before a judge concludes.
-- ✍️ **Read-only by default, writes on demand.** Opt into `agent: build` to have any capable lane
-  actually **edit files** — or pick a specific `model` per call, including a **sibling of your own
-  family** (ask Opus 4.6 from Claude Code 4.8).
-- 🪶 **Subagent-style returns.** A delegate works in its own context and hands back a digest; huge
-  outputs spill to a file and only a preview comes back, so your assistant's context stays lean.
-- 🔁 **Automatic fallback.** `ask_cascade` tries lanes cheapest→strongest and moves on when
-  one hits quota/auth/timeout — so a dead lane degrades gracefully instead of failing you.
-- 🩺 **Self-aware.** Local telemetry tracks each lane's health and puts a lane in cooldown
-  after repeated quota/auth/timeout failures, so `ask_all`/`ask_cascade` route around it.
-- 🎯 **Learns your stack.** Rate a lane's answer 1–5 with `rate_lane` and `ask_best` prefers the
-  models that actually win each task-type **on your machine** — a local quality signal stored in
-  sqlite that survives `/compact` and restarts. Not a public leaderboard; *your* outcomes.
-- 🧱 **Hardened.** Timeouts kill the whole process tree (no orphans burning quota), host
-  cancellation kills the delegate, secrets are redacted, errors are classified
-  (`quota` / `auth` / `timeout`) so your assistant knows what to do next. Works on
-  macOS / Linux / Windows.
-- 📐 **Measured, not asserted.** "More models find more bugs" is *falsifiable*, so cli-bridge
-  ships the test: `cli-bridge eval` pits a council against one strong model + self-consistency
-  at **equal call budget** on a corpus of seeded reasoning bugs, scored deterministically (no LLM
-  judge). It reports mean ± sd with a "no measurable difference" guard and a per-bug win/loss
-  table — and publishes the result even when the council loses. See
-  [BENCHMARKS.md § Quality](docs/BENCHMARKS.md#quality--does-a-council-actually-beat-one-strong-model).
-
-### vs. other multi-model MCPs
-
-| | cli-bridge | API-key gateways | token-reuse bridges |
-|---|:---:|:---:|:---:|
-| Ban-safe (spawns official CLI) | ✅ | ➖ (your keys) | ❌ (ToS risk) |
-| No API keys to manage | ✅ | ❌ | ✅ |
-| Uses your existing subscriptions ($0.00 free council) | ✅ | ❌ | ✅ |
-| Per-plan cost tiers + hard daily cap + cooldown | ✅ | ➖ | ❌ |
-| Automatic fallback (cascade) | ✅ | some | ❌ |
-| Routing that **learns from your outcomes** | ✅ | ❌ | ❌ |
-| Add any CLI / your own API, no fork | ✅ | ➖ | ❌ |
-| Detects the calling host (keeps it out of fan-out; opt-in hide) | ✅ | n/a | ➖ |
-| Round-table memory that survives a restart | ✅ | ➖ (in-memory) | ➖ |
-| Safe agentic write (worktree → diff) | ✅ | ➖ | ❌ |
-| Ships a deterministic quality eval (council vs single) | ✅ | ❌ | ❌ |
+1. **Borrow** — reach a capability your assistant lacks (vision, a 1M-token context window, a file a
+   coding agent generates, a model that's simply better at *this*).
+2. **Spread** — when one subscription hits its limit, keep going on another lane you already pay for.
+3. **Offload** — fan laborious, parallel grunt-work across cheap/free lanes while you build elsewhere.
+4. **Verify** — have a *different vendor family* check the work, because a model can't catch its own
+   blind spots. This is the one thing a single-vendor tool structurally cannot do.
 
 ---
 
-## Quick start (≈5 min)
+## What this unlocks
 
-### 1. Install
+Each block: one sentence of *when you reach for it*, the exact call, and *what you get back*.
 
-```bash
-# zero-install run (recommended)
-uvx cli-bridge-mcp
+### Borrow abilities your assistant doesn't have
+When a different CLI can do something your host can't — read a giant file, see an image, generate a file.
 
-# or install it
-uv tool install cli-bridge-mcp     # or: pipx install cli-bridge-mcp
+```
+ask_gemini(task="find the bug across ./src — read the files you need", cwd="path/to/repo")   # 1M-token context
+ask_gemini(task="what's wrong in this UI?", images=["screenshot.png"])                        # ban-safe vision (experimental)
+ask_build(lane="gpt", task="render the dependency graph to assets/deps.svg and run it", zone="assets")  # file back by path
 ```
 
-You only get a lane for a CLI you've **already installed and logged into**. cli-bridge auto-detects
-what's on your `PATH`. Run the `doctor` tool any time to see what's wired up (`doctor deep` even
-live-checks each login).
+### Never stop working when you hit a limit
+When your main subscription caps out mid-task. `ask_cascade` falls through to another lane you already
+pay for, skipping any lane that's cooled down after a quota/auth/timeout error.
 
-| Lane | CLI | Cost (typical) |
-|------|-----|------|
-| `ask_claude`   | [Claude Code](https://docs.claude.com/claude-code) | subscription |
-| `ask_gpt`      | [OpenAI Codex](https://github.com/openai/codex) | subscription |
-| `ask_gemini`   | Gemini CLI (or `agy` / Antigravity) | free / subscription |
-| `ask_mistral`  | Mistral Vibe | free tier |
-| `ask_qwen` ⚗️  | Qwen Code | metered API key (free OAuth tier closed Apr 2026) |
-| `ask_copilot` ⚗️ | GitHub Copilot CLI | subscription (usage-based credits since 2026-06) |
-| `ask_grok` ⚗️  | xAI Grok CLI | subscription (SuperGrok / X Premium+) |
-| `ask_opencode` | [opencode](https://opencode.ai) gateway (deepseek, qwen, glm, kimi…) | free by default; some models use credits |
-| `ask_ollama`   | [Ollama](https://ollama.com) (local models, offline) | $0 — runs on your machine |
-
-More local runtimes (no built-in needed): **LM Studio · MLX · llama.cpp** ship as zero-code
-recipes — point `CLI_BRIDGE_LANES_FILE` at [`examples/lmstudio.lane.json`](examples/lmstudio.lane.json),
-[`mlx.lane.json`](examples/mlx.lane.json) or [`llamacpp.lane.json`](examples/llamacpp.lane.json).
-(Same ban-safe spawn; note that several local runtimes of the *same* open weights give correlated
-answers — real council diversity comes from distinct vendors, not a second local runtime.)
-
-Coding with a **local model as your brain** and want cloud power only when you ask? See
-[`examples/local-first-host.md`](examples/local-first-host.md) — a local-model MCP host (opencode on
-ollama) that escalates one hard task to a strong cloud lane, staying private/$0 by default.
-
-⚗️ = experimental (flags not yet verified live — please report breakage).
-Cost column = the vendor's *typical published plan* as of June 2026 ([docs/COSTS.md](docs/COSTS.md)
-has limits, sunsets and sources) — cli-bridge never detects what a lane costs *you*; declare your
-own plan with `CLI_BRIDGE_<LANE>_COST`.
-
-### The $0 council (no subscriptions at all)
-
-No paid plan, no card? You can still assemble a real multi-model council in ~5 minutes from
-providers with a **genuinely free, hard-stop tier** (exhaustion = HTTP 429, a bill is
-structurally impossible — verified June 2026, sources in [docs/COSTS.md](docs/COSTS.md)):
-
-```bash
-# 1. Get free API keys (no card): console.groq.com · cloud.cerebras.ai ·
-#    a GitHub PAT (models scope) · openrouter.ai/keys
-export GROQ_API_KEY=... CEREBRAS_API_KEY=... GITHUB_MODELS_TOKEN=... OPENROUTER_API_KEY=...
-# 2. Point cli-bridge at the ready-made lanes
-export CLI_BRIDGE_LANES_FILE=/path/to/examples/free-apis.json
+```
+ask_cascade(task="finish wiring this endpoint")   # cheapest→strongest; a cooled-down lane is skipped
+ask_best(task="…", mode="deep")                   # let the router pick the most suitable available lane
 ```
 
-That's **Groq** (llama-3.3-70b, 1k req/day) + **Cerebras** (gpt-oss-120b) + **GitHub Models**
-(every GitHub account has free access) + **OpenRouter `:free`** breadth — four independent
-voices for `ask_all`/`consensus`/`debate`, plus opencode's built-in free models if installed.
-Caveats: Gemini CLI's free tier **sunsets 2026-06-18**; free tiers churn in weeks — check
-[docs/COSTS.md](docs/COSTS.md) for what was true at verification time.
+### Offload the grunt work — in parallel, and cheap
+When the work is laborious but not hard (refactors, migrations, test coverage). Fan it out, journaled
+so a server restart resumes instead of restarting; delegate a build and keep working.
 
-### 2. Register it with your host
-
-It's a plain stdio MCP server (`uvx cli-bridge-mcp`) — it works in every MCP client, and it
-detects whichever host is calling and keeps that lane out of fan-out (`CLI_BRIDGE_HIDE_HOST=1`
-hides it entirely).
-
-**Claude Code** — one command:
-
-```bash
-claude mcp add cli-bridge -- uvx cli-bridge-mcp
+```
+batch_run(tasks=[...], dry_run=true)                       # cost envelope first — nothing is spawned
+batch_run(tasks=[...], max_calls=20, max_credits=2.0)      # then run under a hard budget (resumable)
+ask_build(lane="opencode", task="add the landing page", zone="frontend", mode="direct", async=true)   # delegate, keep building
+job_tail(job_id="…")  ·  build_steer(job_id="…", instruction="use Tailwind, not inline CSS")
 ```
 
-[![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_cli--bridge-0098FF?logo=githubcopilot&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=cli-bridge&config=%7B%22name%22%3A%22cli-bridge%22%2C%22command%22%3A%22uvx%22%2C%22args%22%3A%5B%22cli-bridge-mcp%22%5D%7D)
-[![Install in Cursor](https://img.shields.io/badge/Cursor-Install_cli--bridge-111111?logo=cursor&logoColor=white)](https://cursor.com/en/install-mcp?name=cli-bridge&config=eyJjb21tYW5kIjoidXZ4IiwiYXJncyI6WyJjbGktYnJpZGdlLW1jcCJdfQ==)
+### Break self-confirmation — the 2026 problem one vendor can't solve
+When you need to *trust* a result. A model reviewing its own work (or a sibling's) just confirms its
+own blind spots. cli-bridge puts a **different model family** in the reviewer's seat.
 
-<details>
-<summary><b>Claude Desktop</b> (<code>claude_desktop_config.json</code>)</summary>
-
-```json
-{ "mcpServers": { "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } } }
 ```
-</details>
-
-<details>
-<summary><b>Codex</b> (<code>~/.codex/config.toml</code>)</summary>
-
-```toml
-[mcp_servers.cli-bridge]
-command = "uvx"
-args = ["cli-bridge-mcp"]
+workflow(preset="jury", task="is this migration safe?", author_lane="gpt")            # cross-family vote, fail-closed
+workflow(preset="verify_repair", task="add retry with backoff",
+         builder_lane="gpt", verifier_lane="gemini")                                   # A builds, B reviews, loop to green
+security_review(base="origin/main")   ·   review_diff(base="origin/main")              # OWASP, severity-ranked
 ```
-</details>
 
-<details>
-<summary><b>Cursor</b> (<code>~/.cursor/mcp.json</code>)</summary>
+### Get a real second opinion
+When you've reached a conclusion and want it pressure-tested, or several models side by side.
 
-```json
-{ "mcpServers": { "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } } }
 ```
-</details>
-
-<details>
-<summary><b>VS Code</b> (<code>.vscode/mcp.json</code> or user settings)</summary>
-
-```json
-{ "servers": { "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } } }
+challenge(task="I'm dropping the cache layer — here's why: …")                         # one skeptic attacks it
+consensus(task="which migration strategy is safest here?")                             # N answer, peer-rank the best
+workflow(preset="fanout_compare", task="fix this failing test", lanes=["gpt","gemini","opencode"])
 ```
-</details>
-
-<details>
-<summary><b>Gemini CLI</b> (<code>~/.gemini/settings.json</code>)</summary>
-
-```json
-{ "mcpServers": { "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } } }
-```
-</details>
-
-<details>
-<summary><b>opencode</b> (<code>opencode.json</code>)</summary>
-
-```json
-{ "mcp": { "cli-bridge": { "type": "local", "command": ["uvx", "cli-bridge-mcp"] } } }
-```
-</details>
-
-<details>
-<summary><b>Windsurf</b> (<code>~/.codeium/windsurf/mcp_config.json</code>)</summary>
-
-```json
-{ "mcpServers": { "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } } }
-```
-</details>
-
-<details>
-<summary><b>Warp</b> (Settings → AI → MCP servers)</summary>
-
-```json
-{ "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } }
-```
-</details>
-
-### 3. Use it
-
-Just talk to your assistant:
-
-> *"Ask Gemini for a second opinion on this function."*
-> *"Have the whole council review my diff and synthesize where they disagree."* (→ `review_diff`)
-> *"Get GPT to think hard about this race condition."* (→ `effort: high`)
-> *"Run a security review on my staged changes."* (→ `security_review`)
-> *"Make the models debate whether we need this abstraction."* (→ `debate`)
-> *"Ask gpt to implement this function."* (→ `agent: build`, edits files)
-> *"Ask Opus 4.6 to double-check my reasoning."* (sibling model, from Claude Code)
-> *"Pick the best lane for a deep review — and remember that one nailed it."* (→ `ask_best` + `rate_lane`; next time it routes there first)
-
-Hosts that support MCP prompts also surface `review_diff`, `security_review`, `debate`,
-`premortem`, `test_plan`, `apilookup`, and `cost_setup` as native slash commands.
 
 ---
 
-## Tools
+## The full toolbox
 
-### Ask — one model, or several at once
-_Get an answer: one lane, a parallel council, or let the router pick._
+Every tool, grouped by what you're trying to do. Run `CLI_BRIDGE_LEAN=1` for a curated ~12-tool
+surface; hide/show any with `CLI_BRIDGE_DISABLED_TOOLS` / `CLI_BRIDGE_ENABLED_TOOLS`.
 
-| Tool | What it does |
-|------|--------------|
-| `ask_<lane>` | Ask one model. Params: `task`, optional `model`, `effort`, `agent`, `cwd`, `timeout_s`, **`conversation`** (start/continue a round-table thread — see below). |
-| `ask_all` | Fan-out the same question to every free, non-limited lane in parallel. Returns an **`agreement` score** (0–1, how aligned the answers are — low = the council disagrees, treat as uncertain). `synthesize: true` adds an agreement/disagreement summary. `include_paid: true` to also query limited/paid lanes. |
-| `ask_cascade` | Ask one model **with automatic fallback** — tries lanes cheapest→strongest, skipping cooled ones, moving on at quota/auth/timeout. Returns the first success + a trace of what was tried (cost tier, latency, why skipped). |
-| `ask_best` | Pick **one lane by mode** (`fast`/`cheap`/`deep`/`code`/`review`/`security`) from cost, health, measured latency **and your own `rate_lane` scores**, then run it with fallback. For "just use the right model" — `ask_all` compares, `ask_cascade` is plain cheapest-first. |
-| `rate_lane` | **Teach the router.** Score a lane's answer 1–5 for a task-type (`mode`) → `ask_best` then prefers the lanes that win that mode **on your machine**. Stored in sqlite (survives `/compact`/restart); a two-rating floor before any lane steers, so feedback is honest, not noisy. Every `ask_best` answer prints the exact call. |
-| `route_plan` | Show the order `ask_cascade` would try, given your profile + current cooldowns (read-only, runs nothing). Pass `mode` to preview `ask_best` — including each lane's running rating. |
-| `ask_all_async` / `job_status` / `job_result` / `job_cancel` / `jobs_list` | Run a fan-out as a **background job** that returns a job id in <1s, so a slow council run can't hit the host's tool-call deadline. Cancel kills the delegates' process groups. |
+### Consult (read-only)
+| Tool | What it does | Reach for it when |
+|------|--------------|-------------------|
+| `ask_<lane>` | Ask one specific CLI — `ask_gemini`, `ask_gpt` (Codex), `ask_opencode`, `ask_ollama`, and `ask_qwen`/`ask_grok`/`ask_copilot` when installed. Supports `role="reviewer\|security\|planner\|devil"`, `conversation` (round-table memory), and `images=[…]` on Gemini. | You want a particular model's strength, persona, or modality. |
+| `ask_all` | Same question to every *free* lane in parallel; returns each answer **plus a disagreement score**. `synthesize: true` adds an agree/disagree summary. | You want breadth fast and a signal of where models diverge (= uncertainty). |
+| `ask_cascade` | Tries lanes in a deterministic order, stops at the first good answer, skips cooled-down lanes; optional confidence-escalation. | You want resilience: a capped/failing lane is skipped automatically. |
+| `ask_best` | A router picks the most suitable lane by `mode` (`fast/cheap/deep/code/review/security`) + your `rate_lane` scores. | You don't want to choose a lane by hand. |
+| `ask_all_async` + `job_status`/`job_result`/`job_cancel`/`jobs_list` | Fire `ask_all` as a background job (id in <1s). | The fan-out is slow and you want to keep working. |
+| `consensus` | N lanes answer, then peers rank to **select** the best (selection beats synthesis). | A single defensible answer matters more than a blend. |
+| `challenge` | One lane plays skeptic against a conclusion you supply. | You want your own reasoning attacked before you commit. |
+| `conversations_list` / `conversation_show` | List / read persistent round-table threads (survive `/compact` and restarts). | You want to recover or read a multi-model thread. |
 
-### Review & reason — structured, multi-model
-_Findings, debates, and verdicts — not just a chat reply._
+### Build (opt-in write)
+| Tool | What it does | Reach for it when |
+|------|--------------|-------------------|
+| `ask_build` | Delegates a real build. `mode=isolated` (default) edits a throwaway worktree → **diff**; `mode=direct` writes into a declared `zone` (per-zone lock + post-turn zone-violation check). `async=true` runs it as a steerable job. Non-text outputs come back **by path** (artifact-return). | You want work *done*, not just suggested — review-gated or hands-off. |
+| `job_tail` | Streams a running build's progress log (byte-offset). | You want to watch a delegate work. |
+| `build_steer` | Queues a steering instruction for the next turn, or `interrupt=true` cuts the current turn (files kept). | You need to course-correct mid-build without restarting. |
 
-| Tool | What it does |
-|------|--------------|
-| `review_diff` | Multi-model code review of a git diff: lanes review in parallel with **different focuses** (correctness / security / tests / maintainability), each returning JSON findings; deterministic prechecks (secrets, dangerous shell) seed them; findings **merge by file/line/title** with agreement-based confidence (single/majority/consensus). `output_format: markdown` (default) or `json`. Params: `cwd`, `base` (default HEAD), `diff`, `include_paid`, `timeout_s`. |
-| `security_review` | OWASP-aware **security-only** review of a git diff (injection / auth & access control / secrets & crypto / data exposure & SSRF) → severity-ranked findings + a `residual_risk` section. |
-| `debate` | Several models answer a question, **see each other's answers and revise** over bounded rounds (default 1, max 3), then an **independent judge** (held out of the debate when 3+ lanes) writes the final consensus + remaining disagreement. Hardened from production use: `context_files` injects key files into every debater prompt (**grounding** — without it the council only paraphrases your brief), a **fact-check pass** (free lane, on by default) flags the verdict's unverifiable commands/tags/versions, claims carry provenance tags (`[brief]`/`[own-knowledge]`/`[verified]`), a thin brief gets a linter warning, and `steelman: true` makes one lane argue *against* a unanimous verdict before the judge re-concludes. `summary_only` drops the full positions (~60-80 % fewer tokens); `dry_run` returns a preflight data manifest (which files/chars go to which vendors) before anything is sent. Params: `task`, `rounds`, `adversarial`, `context_files`, `fact_check`, `summary_only`, `allow_self_judge`, `steelman`, `dry_run`, `include_paid`, `cwd`, `timeout_s`. |
-| `consensus` | The "LLM council" done better: each lane answers blind, then **ranks the anonymized answers** (no self-favouring), votes are aggregated **deterministically** (Borda count), and the **peer-ranked #1 answer is returned verbatim** — because *selecting* the best answer beats *blending* them ([arXiv 2603.20324](https://arxiv.org/abs/2603.20324): synthesis was preferred over the baseline in **0 of 42 tasks**; judge-based selection beat MoA-style synthesis by ΔWR ≈ +0.63, Glass's Δ ≈ 2.07). `synthesize: true` opts into a chairman blend (the weaker mode). Returns the final answer + a peer-vote ranking table. `dry_run` returns a preflight data manifest (which files/chars go to which vendors) without spawning. Supports `context_files` grounding and `summary_only`. Params: `task`, `context_files`, `synthesize`, `summary_only`, `dry_run`, `include_paid`, `cwd`, `timeout_s`. |
-| `challenge` | Hand a claim to **one outside lane** with a critical-reassessment prompt → an independent skeptical review (with an integrity guardrail — it won't manufacture disagreement). Pressure-test your own conclusion before acting. Optional `lane`. |
-| `premortem` | Each lane imagines the plan **already failed** and lists likely failure modes + mitigations; merged into a prioritized risk list. Run it before building. |
-| `test_plan` | Derive a prioritized **test plan** (behaviors, edge cases, concrete cases) from a git diff or a description. |
-| `commit_msg` | Generate a **Conventional Commit** message from your staged diff (falls back to the working tree). Read-only — emits text, never commits. Optional `lane`, `cwd`. |
-| `pr_describe` | Generate a **PR title + description** (Summary / Changes / Testing) from the branch's diff + commit log vs a base (default origin/main → main). Read-only. Optional `base`, `lane`, `cwd`. |
+Async builds run against an executable **Definition-of-Done** gate (`dod_cmd`) — the delegate's claim
+of success is *tested*, not trusted.
 
-### Build — delegate real work, safely
-_A delegate edits code; you get a diff, or a zone-guarded build you can steer._
+### Review & verify
+| Tool | What it does | Reach for it when |
+|------|--------------|-------------------|
+| `review_diff` | Structured review of a diff → findings (severity, file, rationale), deterministically merged across lanes with single/majority/consensus confidence. | Before a change lands. |
+| `security_review` | OWASP-oriented, severity-ranked security pass + a `residual_risk` section. | The change touches auth, input handling, secrets. |
+| `debate` | Models critique each other over bounded rounds, ending with a `VOTE` footer + convergence early-stop; an independent judge concludes. | A genuinely contested decision. |
+| `premortem` / `test_plan` | Failure-mode analysis of a plan / a prioritized test plan from a diff or description. | Before writing code. |
+| `commit_msg` / `pr_describe` | A Conventional-Commit message from your staged diff / a PR title+body from the branch. Read-only — emits text. | You're about to commit or open a PR. |
+| `workflow(preset=…)` | Named pipelines: `jury` (cross-family k-of-N vote, fail-closed), `verify_repair` (cross-model build→review→repair loop), `refine_plan`, `fanout_compare`, `council_review`, `map_review`, `research_verify`. | You want a vetted multi-step pattern in one call. |
 
-| Tool | What it does |
-|------|--------------|
-| `ask_build` | **Commission a real build.** `mode=isolated` (default) edits a throwaway worktree and returns a **diff** — repo untouched. `mode=direct` builds straight into a target dir, guarded by git + a **zone contract** (delegate writes only inside `zone`; out-of-zone writes are detected and reverted; undo is zone-scoped, never a global reset) so the host can build other parts of the **same repo in parallel**. `async=true` makes it a **steerable** job. `dry_run` previews the brief. Non-text files the build writes (images, PDFs, binaries) are returned as **artifacts by path** (type + size), not dumped as a binary diff — so a delegate can have another CLI *generate* a file and hand you the path (capability-borrowing). (`ask_build_isolated` is a legacy alias.) |
-| `job_tail` / `build_steer` | **Follow & steer a running build like a human.** `job_tail(job_id, offset)` streams its progress log (byte-offset). `build_steer(job_id, instruction, interrupt)` queues a correction for the next turn, or `interrupt=true` cuts the current turn (files written so far are kept). An optional executable **Definition of Done** (`dod_cmd`, an argv list) is run after each turn — pass = done, fail = one more turn with the error fed back. |
+### Orchestrate
+| Tool | What it does | Reach for it when |
+|------|--------------|-------------------|
+| `batch_run` | Durable, **journaled** fan-out over many tasks. `dry_run=true` returns a cost envelope (nothing spawned); `max_calls`/`max_credits` cap spend; `resume_id` replays finished tasks and runs only the rest across a restart. | Bulk work you want bounded and crash-safe. |
 
-### Orchestrate — durable, resumable fan-out
-_Many asks (or a ready-made workflow) in one call that survives a restart._
+### Operate
+| Tool | What it does | Reach for it when |
+|------|--------------|-------------------|
+| `usage_report` / `usage_budget` | Estimated token/credit accounting (chars/4 — honestly labeled an estimate) + budgeting vs a daily cap. | You want to see the bill / set a cap. |
+| `rate_lane` / `route_plan` | Score a lane 1–5 for a mode so `ask_best` learns your stack / preview the order a cascade would try. | You want the router to improve over time. |
+| `lane_stats` / `reset_lane_state` | Per-lane health, cooldowns, and the "earn their seat" jury signal / clear a lane's counters. | A lane is misbehaving, or you want the seat report. |
+| `set_lane_cost` | Record what a lane costs *you* ("Codex is free on my plan") — persisted, no `setup` needed. | You tell it a pricing fact in passing. |
+| `doctor` / `setup` | Detect installed CLIs + resolved paths; `doctor deep` validates each lane against its own `--help` on your machine. | First run, or when a lane breaks. |
+| `list_models` / `list_<lane>_models` | List a lane's models where the CLI exposes them. | You want to pick a specific model. |
 
-| Tool | What it does |
-|------|--------------|
-| `batch_run` | **Durable fan-out**: run many independent asks in parallel in **one call** instead of N (saves host context + quota). Each result is journalled, so `resume_id` replays the tasks that already finished and runs only the rest — **survives a server restart**. `dry_run: true` returns a **cost envelope** (calls + est token/credit range) without spawning; `max_calls`/`max_credits` cap the invocation (over-budget tasks skipped). `async`-able. |
-| `workflow` | **Ready-made multi-model workflows** over the batch substrate. **`refine_plan`** — let the council DEMOLISH your plan from distinct angles (pass `plan_file`; each lane reads it, never recopied). `council_review` (N lanes answer one question + optional judge), `map_review` (review many files in parallel), `research_verify` (answer then adversarially cross-check), **`verify_repair`** (one lane builds, a **different model** reviews, repair loop until `VERDICT: APPROVED` or `max_rounds` — cross-model catches what self-review can't), **`fanout_compare`** (same task to N lanes, answers side by side to pick/merge), **`jury`** (author produces → N verifiers from **different vendor families** vote PASS/FAIL/ABSTAIN, k-of-N **fail-closed**, author≠reviewer enforced — the cross-vendor verification edge a single-vendor tool can't match). All resumable + async-able. |
-
-### Admin & utilities
-_Discovery, round-table memory, health, cost, and setup._
-
-| Tool | What it does |
-|------|--------------|
-| `list_models` | List a lane's available models (`lane` param) where the CLI exposes them; otherwise shows the resolved default model + how to choose one. (`list_<lane>_models` also exists for lanes with a native list command.) |
-| `conversations_list` / `conversation_show` | List recent **round-table threads** (recover an id after a context reset) / show one thread's full transcript, attributed by lane. |
-| `doctor` | Health check: installed CLIs, detected host, cost/quota stance, cooldowns, defaults. `deep: true` live-probes each free lane's auth **and checks every lane's flags against its `--help`** — warns if a CLI renamed/removed a flag cli-bridge relies on (drift) before the lane fails silently. |
-| `usage_report` | Local-only stats: runs, per-lane success/latency, and **estimated** tokens (chars/4) + credits (per-lane `CREDITS_PER_1K`). `since`, `format=text\|json`. |
-| `usage_budget` | Today's runs per lane vs `CLI_BRIDGE_<LANE>_DAILY_LIMIT` + estimated spend; flags lanes over their limit. |
-| `lane_stats` | Per-lane health: runs, failures, consecutive failures/timeouts, active cooldown. |
-| `reset_lane_state` | Clear a lane's cooldown/failure counters (after re-login or quota reset). |
-| `setup` | List installed lanes with their *sourced* typical-plan cost (free/limited/paid — never detected from your account), ask which you actually pay for, and **recommend a profile + daily cap** to confirm — then walk the user through it. |
-
-There's also a **human CLI** — the same engine from your terminal or CI:
-`cli-bridge init` (detect CLIs + print MCP wiring), `doctor`, `ask <lane> <task>`, `ask-all`,
-`ask-best --mode`, `review-diff --base origin/main --json`, `bench --lane gemini --prompt … `
-(latency p50/p95/p99), `usage`, `budget`, `jobs`, `setup --write`. See
-`examples/github-action-pr-review.yml` for a PR-review GitHub Action (self-hosted runner).
-
-**Read-only by default; opt-in writes.** A delegate normally analyses and answers — your host
-applies any edits. Pass `agent: "build"` to let it **edit files directly** (e.g. *"ask gpt to
-implement this function"*): claude → `--permission-mode acceptEdits`, gpt → `--sandbox
-workspace-write`, mistral → `--agent accept-edits`, gemini → `--yolo` (or `agy`
-`--dangerously-skip-permissions`), opencode → `--agent build`. Build-capable lanes are annotated
-non-read-only, and a `build` run is never served from cache.
-
-### Delegate a real build — supervised, in your repo
-
-`ask_build` turns a delegate into a teammate that builds a **complete, real** result, not just a
-diff to copy. Two modes:
-
-- **`mode=isolated`** (default, safest) — the delegate edits a throwaway git worktree at HEAD; you
-  get the diff and apply it yourself. Nothing in your repo moves.
-- **`mode=direct`** — the delegate writes **real files** into `target_dir`, so you (the host) can
-  build other parts of the **same repo in parallel** (e.g. *"I do the backend, codex does
-  `frontend/`"*). Safety is by git + a **zone contract**, not isolation:
-  - the brief tells the delegate it may write **only inside `zone`** (a path under `target_dir`);
-  - every undo is **zone-scoped** (`git checkout -- <zone>` + `git clean -fd <zone>`, never a global
-    `git reset --hard`), so your uncommitted work outside the zone is never touched;
-  - a **per-zone lock** lets disjoint zones build at once but blocks two builds on the same zone;
-  - after each turn a **global `git status` check** catches anything written outside the zone (an
-    escape via `../`, an absolute path, a symlink) and **reverts the build** — git scoping guards git
-    ops, it can't sandbox the subprocess, so this check is mandatory. A missing/empty `target_dir`
-    is created and `git init`-ed, so the safety net always exists.
-
-**Watch it and steer it.** Run with `async=true` to get a `job_id`, then:
-
-- `job_tail(job_id, offset)` streams the build's progress so you can post step summaries;
-- `build_steer(job_id, "use Tailwind, not inline CSS")` queues a correction for the next turn;
-  `build_steer(job_id, interrupt=true)` cuts the current turn short (files written so far are kept);
-- pass `dod_cmd` (an **argv list**, e.g. `["npm","run","build"]`, never a shell string) for a
-  Definition of Done that's **tested for real** after each turn — pass = done, fail = one more turn
-  with the error fed back, bounded by `max_fail_retries` (default 3) and `max_turns` (default 12).
-
-Continuity is the filesystem (the delegate re-reads its own files each turn); the raw transcript
-lives in the delegate CLI's own session, while cli-bridge keeps the step-level log for `job_tail`.
-
-### Pressure-test your plan before you build (`workflow refine_plan`)
-
-cli-bridge is strong at *demolishing a plan* before you commit code. `workflow preset=refine_plan`
-fans your plan out to several lanes, each critiquing it from a **distinct angle** (technical flaws &
-failure modes / gaps / over-engineering / sequencing), then groups the findings for you to merge —
-or pass `judge_lane` for one deduped, severity-ranked patch list.
-
-```jsonc
-// one call → N CLIs tear the plan apart, each from a different angle
-{ "preset": "refine_plan", "plan_file": "docs/plan.md", "judge_lane": "gpt" }
-```
-
-Pass **`plan_file`** (a path), not the text: each lane reads the file from its own working
-directory, so the plan is **never recopied into N prompts** — the token-frugal default for every
-artifact review (`map_review`, `review_diff`, `debate context_files` work the same way). Like every
-`workflow`/`batch_run`, it's **resumable** (`resume_id` replays finished tasks after a restart) and
-can run `async`.
-
-**Pick a model per call** with `model` (e.g. `model: "claude-opus-4-6"`). From inside a host you
-can even consult a **sibling model of your own family** — `ask_<your-host>` appears as a separate
-tool that requires an explicit `model`, so from Claude Code you can ask Opus 4.6 while running 4.8.
-(Antigravity's `agy` has no per-call model flag — it uses whatever its own settings select.)
-
-**Round-table conversations.** Pass `conversation: "new"` to any `ask_<lane>` to start a multi-turn
-thread; reuse the returned id — **even on a different lane** — to continue. Each lane sees the
-shared transcript with your own turns marked "You" and the others named, so a council can build on
-each other instead of starting cold every time. The transcript is stored locally (sqlite), so a
-thread **survives the host's context reset (`/compact`) and a server restart** — recover one with
-`conversations_list`, read it with `conversation_show`. A sliding window
-(`CLI_BRIDGE_CONVO_MAX_CHARS`, default 32000) keeps the newest turns and drops the oldest, so the
-per-turn cost stays bounded however long the thread runs.
-
-For opencode, an empty `model` asks `opencode models` for the current `opencode/*-free` list and
-uses one (the $0 rate-limited tier), chosen by pattern + sorted — never a pinned name, so a retired
-free model is replaced automatically. It's **cost-safe**: a bare `opencode/*` Zen model bills
-per-token (API cost) and `opencode-go/*` spends prepaid credits, so the default never silently
-selects a paid model — pass those explicitly when you want them. If the lookup fails it falls back
-to a free seed; set `CLI_BRIDGE_OPENCODE_MODEL` to pin your own default.
-
-`ask_all` keeps per-lane calls short (45s default, 60s max) so the MCP host gets a response before
-its own tool-call deadline. For a slow/deep answer, call that lane directly with a longer
-`timeout_s`.
+There's also a **human CLI** (`cli-bridge doctor|ask|ask-all|ask-best|review-diff|eval|…`) — the same
+engine from your terminal or CI (`--json` everywhere).
 
 ---
 
-## Configuration
+## Why cli-bridge (and not another "call other models" MCP)
 
-Everything is environment variables — no code edits. Tune it to **your** subscriptions:
-
-| Variable | Effect |
-|----------|--------|
-| `CLI_BRIDGE_<LANE>_COST` | `free`, `limited`, or `paid`. `free` joins `ask_all`; `limited` is quota-sensitive and skipped by broad fan-out; `paid` spends money/credits and is skipped by default. |
-| `CLI_BRIDGE_<LANE>_ENABLED` | `false` to hide a lane even if its CLI is installed. |
-| `CLI_BRIDGE_<LANE>_BIN` | Point a lane at a different binary (e.g. `CLI_BRIDGE_GEMINI_BIN=agy`). |
-| `CLI_BRIDGE_<LANE>_MODEL` | Default model for a lane when the caller doesn't pass one. |
-| `CLI_BRIDGE_PROFILE` | `saver`, `balanced`, or `max`. `max` includes limited/paid lanes in `ask_all` unless the caller overrides `include_paid`. |
-| `CLI_BRIDGE_HOST` | Force the host identity (which lane is the caller). Normally auto-detected. |
-| `CLI_BRIDGE_HIDE_HOST` | `1` hides the host's own lane entirely (legacy: reachable only as an explicit-model *sibling* consult). Default off — the host lane is a normal, visible tool; it's only ever kept out of `ask_all`/`ask_cascade` fan-out. |
-| `CLI_BRIDGE_LANES_FILE` | Path to a JSON file adding **your own** CLIs/APIs as lanes. |
-| `CLI_BRIDGE_DISABLED_TOOLS` | Comma-separated tool names to hide from the listing (e.g. `debate,premortem,test_plan`) — trims the schema context every host pays per request. `doctor`/`setup` can't be hidden. |
-| `CLI_BRIDGE_ENABLED_TOOLS` | Allowlist for a one-env **lean mode**: when set, only these tools (+ `doctor`/`setup`) are exposed (e.g. `ask_best,ask_all,review_diff`). |
-| `CLI_BRIDGE_<LANE>_PRIORITY` | Lower runs earlier in `ask_cascade` (default 50). Pin your preferred order. |
-| `CLI_BRIDGE_INLINE_MAX_CHARS` | Above this, an answer spills to a file instead of flooding context (default 12000). |
-| `CLI_BRIDGE_TERSE` | `off` / `lite` (default) / `full` / `ultra`. Prepends a compact response-style preamble to delegate prompts (English, reason fully internally, answer terse, code/JSON untouched) to cut both your context and the delegate's output tokens. Never applied to structured workflow tools. |
-| `CLI_BRIDGE_TERSE_MIN_CHARS` | Skip the terse preamble for tasks shorter than this many chars (default `0` = never skip). Tiny tasks can't repay the preamble's fixed overhead. |
-| `CLI_BRIDGE_GUARD` | `off` / `warn` (default) / `strict`. Scans **delegate output** for prompt-injection / tool-poisoning; `warn` prepends a banner, `strict` withholds the body. Runs after secret redaction. |
-| `CLI_BRIDGE_MOCK` | `1` = dry-run: lanes report installed and return a canned answer without spawning any CLI. Try the whole tool with **zero CLIs installed**. |
-| `CLI_BRIDGE_RETRIES` | Retries on a TRANSIENT failure (default 1). Makes a flaky CLI work first-try; quota/auth/not-found/timeout are never retried. |
-| `CLI_BRIDGE_TRACE_DIR` | If set, each delegation writes a redacted JSON trace (argv, timing, output) here — reproducible debug / audit. Off by default. |
-| `CLI_BRIDGE_MAX_PARALLEL` | Cap on simultaneous delegate spawns in `ask_all` (default 6). Stops a wide council (many custom lanes) from OOM-ing a small machine or bursting quota. |
-| `CLI_BRIDGE_DAILY_CREDIT_CAP` | Hard ceiling on *estimated* paid spend per UTC day. >0 refuses a paid lane once today's estimate hits it — makes "cost-safe" enforceable, not just reported. Free lanes never gated. |
-| `CLI_BRIDGE_ALLOW_LANES` | Allowlist, e.g. `gemini,gpt`. Empty = all. Locked-down / team setups: only these lanes are exposed. |
-| `CLI_BRIDGE_DISABLE_BUILD` | `1` forces every delegate to read-only (plan) even if a caller asks `agent: build`. For shared machines. |
-| `CLI_BRIDGE_OVERFLOW_MAX_FILES` | Cap on overflow-dir file count (default 200); oldest beyond are pruned so `/tmp` can't grow unbounded. |
-| `CLI_BRIDGE_CONFIG_FILE` | Path to a JSON config (default `~/.config/cli-bridge/config.json`). A friendlier alternative to env vars — **env always wins**. See below. |
-| `CLI_BRIDGE_CACHE_TTL_S` | `0` = off (default). When `>0`, an identical call within this many seconds returns the cached answer instead of re-spawning the CLI (saves quota/credits on repeats; build runs are never cached). |
-| `CLI_BRIDGE_<LANE>_CREDITS_PER_1K` | Credits per 1k tokens for a lane, used by `usage_report`/`usage_budget` to **estimate** spend (chars/4). |
-| `CLI_BRIDGE_<LANE>_DAILY_LIMIT` | Max runs/day for a lane; `usage_budget` flags when exceeded. |
-| `CLI_BRIDGE_<LANE>_MIN_INTERVAL_S` | Anti-burst spawn pacing: minimum seconds between spawns of this lane (default `0` = off). Set it (e.g. `2`) when a free tier rate-limits under back-to-back calls — same-lane bursts get evenly spaced, other lanes stay parallel. `lane_stats` hints when a lane shows the rate-limited pattern. |
-| `CLI_BRIDGE_KEEP_WORKTREES` | Keep `ask_build_isolated` worktrees instead of discarding them (for inspection). |
-| `CLI_BRIDGE_REVIEW_TIMEOUT_S` | Per-reviewer timeout for `review_diff` / `security_review` (default 180; these are deliberately heavier than `ask_all`). |
-| `CLI_BRIDGE_OVERFLOW_TTL_H` | Hours before a spilled overflow file is pruned (default 24). |
-| `CLI_BRIDGE_TELEMETRY` | `off` to disable the local run log / cooldown tracking (default on, machine-local only). |
-| `CLI_BRIDGE_TRACE_FOOTER` | `off` hides the `## Trace` JSON footer in workflow reports — nicer for humans reading them in a terminal; MCP hosts usually want it (default on). |
-| `CLI_BRIDGE_STATE_DB` | Path to the local sqlite state DB (default `~/.local/share/cli-bridge/state.sqlite`). |
-| `CLI_BRIDGE_STORE_TRANSCRIPTS` | `true` to keep a longer task preview in telemetry (default: hash + 60-char preview only). |
-| `CLI_BRIDGE_LOG` / `_LOG_FILE` | `debug`/`info` to log what ran where (default: silent). |
-
-### Config file (instead of a wall of env vars)
-
-Prefer a file? Drop `~/.config/cli-bridge/config.json` (or point `CLI_BRIDGE_CONFIG_FILE` at one).
-It fills in any env var you haven't set — **the environment always wins**, and defaults still work
-with no file at all:
-
-```json
-{
-  "profile": "balanced",
-  "guard": "warn",
-  "daily_credit_cap": 5.0,
-  "lanes": {
-    "gemini":   { "cost": "free" },
-    "opencode": { "cost": "free", "model": "opencode/deepseek-v4-flash-free" },
-    "gpt":      { "cost": "limited", "daily_limit": 50 }
-  }
-}
-```
-
-### Add your own CLI (no fork)
-
-`my-lanes.json`, then `CLI_BRIDGE_LANES_FILE=/path/to/my-lanes.json`:
-
-```json
-[
-  {
-    "key": "aider", "display": "Aider", "bin": "aider",
-    "ask": ["--message", "{task}"], "model_flag": "--model",
-    "client_ids": ["aider"], "note": "Aider one-shot via --message."
-  }
-]
-```
-
-You now have an `ask_aider` tool. (A custom lane with a built-in key, e.g. `grok`, *overrides*
-the built-in — handy when your install's flags differ.)
-
-**The wider ecosystem, ready to plug in:** `examples/community-lanes.json` ships best-effort
-lanes for **Aider, Goose, Plandex, Amp, Crush, Amazon Q Developer CLI and Droid (Factory)** —
-all marked experimental and `limited` (kept out of broad fan-out until *you* declare what they
-cost you), and all covered by `doctor deep`'s flag-drift check, which validates each lane
-against the CLI's own `--help` on *your* machine before anything breaks silently. Claude Code,
-Codex, Gemini + Antigravity (`agy`), opencode, Qwen Code, Copilot and Grok are already
-built-in. Anything else (Cline, OpenHands, Continue, Roo/Kilo Code, Kimi K2 CLI, …) is the
-same 3-line JSON away — and any of these CLIs that speaks MCP can sit on the *other* side too,
-running cli-bridge as its server.
-
-### Bring your own API (no CLI needed)
-
-Wrap any OpenAI-compatible endpoint by spawning `curl`. Your key stays in an env var, never in the
-file. `{task_json}` is the prompt, JSON-escaped:
-
-```json
-[
-  {
-    "key": "myapi", "display": "My API", "bin": "curl", "default_model": "gpt-4o-mini",
-    "paid": true,
-    "ask": [
-      "-sS",
-      "--variable", "%MY_API_KEY",
-      "--expand-header", "Authorization: Bearer {{MY_API_KEY}}",
-      "https://api.openai.com/v1/chat/completions",
-      "-d", "{\"model\":\"{model}\",\"messages\":[{\"role\":\"user\",\"content\":\"{task_json}\"}]}"
-    ]
-  }
-]
-```
-
-The `--variable %MY_API_KEY` + `--expand-header` pair (curl ≥ 8.3) imports the key *inside*
-curl — it never appears in the process list. `doctor` warns if a custom lane expands a `${ENV}`
-secret into argv instead.
-
-(See `examples/` for both, ready to copy.)
+- 🛡️ **Ban-safe by design.** It spawns each model's **official CLI**, exactly as you'd run it by hand —
+  no OAuth-token extraction, no API-key reuse. Each CLI handles its own auth and billing.
+- 💸 **Cost-safe defaults you tune to your plan.** Out of the box `ask_all` / `ask_cascade` build a
+  *free* council and never touch paid quota unless you ask. Each lane ships a tier sourced from the
+  vendor's published plans (dated in [docs/COSTS.md](docs/COSTS.md), **never detected from your
+  account**); override per lane with `CLI_BRIDGE_<LANE>_COST=free|limited|paid`.
+- 🔌 **Works from any host.** Claude Code, Codex, opencode, Cursor, VS Code (Cline/Continue), Zed —
+  anything that speaks MCP over stdio. The host's own lane is kept out of fan-out; hide it with
+  `CLI_BRIDGE_HIDE_HOST=1`. Even a **local model can be the host** — see
+  [`examples/local-first-host.md`](examples/local-first-host.md).
+- 🧭 **The cross-vendor edge is the moat.** Independent verification means a *different vendor* in the
+  reviewer's seat — the scarce thing as AI writes a larger share of code, and exactly what a
+  single-vendor tool can't offer.
 
 ---
 
@@ -625,80 +195,135 @@ secret into argv instead.
 ```
 host (Claude/Codex/…) ──MCP──> cli-bridge ──spawn──> official CLI ──> model
                                     │
-              keeps the host's own lane out of fan-out · only shows installed, enabled CLIs
-              kills the whole process tree on timeout / cancellation
-              redacts secrets · classifies errors · spills huge output to a file
+       keeps the host's own lane out of fan-out · only shows installed, enabled CLIs
+       kills the whole process tree on timeout/cancellation · redacts secrets
+       classifies errors (auth/limit/failed) · spills huge output to a file
 ```
 
 No network calls of its own. No keys stored. It runs the same binaries you already trust, in your
 working directory, and hands the answer back.
 
-### Works in IDE MCP hosts too
+<div align="center">
 
-cli-bridge is plain MCP over stdio, so any MCP-capable host works — not just terminal CLIs.
-Point Cursor / VS Code (Cline, Continue) / Zed at the **same command** (`uvx cli-bridge-mcp`, or
-`<python> -m cli_bridge`). The host's own lane stays out of fan-out (hide it with
-`CLI_BRIDGE_HIDE_HOST=1`); everything else is identical.
+<img src="assets/demo.gif" width="860" alt="cli-bridge security-review demo: a committed auth bypass is caught independently by two models, merged into one severity-ranked report, $0 on free lanes">
 
-### Known limitations (honest list)
+_Real run (2.5× speed): the Verify lever — `security-review` fans OWASP roles across free models in
+parallel; two flag a committed auth bypass **blocker** independently, and `usage` shows the receipts._
 
-- **Ban-safe depends on each provider's ToS.** cli-bridge only runs the official CLI you'd run
-  by hand — but non-interactive/scripted use isn't *guaranteed* sanctioned and can change. Use
-  your own accounts within their terms; treat "ban-safe" as "no token/key extraction", not a
-  blanket guarantee.
-- **Async jobs are in-process.** A server restart marks running jobs `interrupted`. `batch_run`
-  and `workflow` are the exception — they journal each task, so a `resume_id` replays the finished
-  ones and runs only the rest across a restart.
-- **Shell-wrapper PATH traps.** If your shell wraps the delegate CLIs in a function or alias (e.g.
-  a `_opsec`-style guard in `.zshrc`), running cli-bridge *from that shell* can break — but
-  cli-bridge spawns each CLI's **binary directly** (no shell), so it's unaffected; only a wrapper
-  that shadows the binary on `PATH` matters. `doctor` shows the resolved path per lane.
-- **The injection guard is heuristic.** It catches high-signal patterns, not everything; in
-  `warn` mode the text still reaches the host (treat delegate output as data).
+</div>
+
+---
+
+## Writing code safely: two modes
+
+Writes are contained, two ways — **you pick** review-gated or hands-off:
+
+- **`isolated` (default).** Edits in a throwaway git worktree and hands back a **diff**. Your working
+  tree is never touched.
+- **`direct`.** Writes real files, **but only inside a `zone` you declare**, behind a per-zone lock
+  with a post-turn zone-violation check. You in `backend/`, a delegate in `frontend/`, concurrently —
+  neither can scribble across your whole repo; undo is zone-scoped, never a global reset.
+
+Delegate re-entry is depth-capped (`CLI_BRIDGE_MAX_DEPTH`, default 1) so a misconfigured delegate
+can't fork-bomb the council.
+
+---
+
+## Quick start (≈5 min)
+
+```bash
+# Run it (no install):
+uvx cli-bridge-mcp
+# or:  python -m cli_bridge
+
+# Point your MCP host at that same command, then:
+cli-bridge doctor        # see which CLIs are detected + their resolved paths
+```
+
+### Lanes
+
+**Built-in:** Claude Code, Codex, Gemini (+ Antigravity `agy`), opencode, **Ollama (local models, $0,
+offline)**, Qwen Code, Copilot, Grok.
+
+**Local runtimes** beyond Ollama — **LM Studio · MLX · llama.cpp** — ship as zero-code recipes:
+point `CLI_BRIDGE_LANES_FILE` at [`examples/lmstudio.lane.json`](examples/lmstudio.lane.json),
+[`mlx.lane.json`](examples/mlx.lane.json), or [`llamacpp.lane.json`](examples/llamacpp.lane.json).
+(Several local runtimes of the *same* open weights give correlated answers — real council diversity
+comes from distinct vendors, not a second local runtime.)
+
+**Community lanes** (`examples/community-lanes.json`, experimental + `limited` until you declare their
+cost): Aider, Goose, Plandex, Amp, Crush, Amazon Q Developer CLI, Droid.
+
+**Anything else is ~3 lines of JSON.** Add a custom lane, or wrap any OpenAI-compatible endpoint by
+spawning `curl` (key kept inside curl, never in argv). See [`examples/`](examples/) for recipes.
+
+---
+
+## The honest part
+
+"More models = better" is *fragile* — big models share training data, so their errors correlate. We
+measured our own central claim (`cli-bridge eval`, no LLM judge): a diverse council did **not** catch
+more bugs than one strong model — it cut the false alarms **~2×**. Same catch rate, far less noise —
+which is exactly what keeps a reviewer trustworthy instead of muted. **Precision is the product, not
+recall.** The harness ships, so you can confirm it on *your* CLIs — numbers either way in
+[docs/BENCHMARKS.md](docs/BENCHMARKS.md).
+
+---
+
+## Known limitations
+
+- **Ban-safe = no token/key extraction**, not a blanket guarantee — non-interactive use of a
+  provider's CLI isn't formally sanctioned everywhere and can change. Use your own accounts within
+  their terms.
+- **Async jobs are in-process** — a server restart marks running jobs `interrupted`. `batch_run` /
+  `workflow` are the exception: they journal each task and resume via `resume_id`.
+- **The injection guard is heuristic** — it catches high-signal patterns, not everything; treat
+  delegate output as data, not instructions.
 - **Token/credit figures are estimates** (chars/4 + your `CREDITS_PER_1K`), never exact.
-- **BYO-API (curl) lanes:** a `${ENV}` key is substituted into the argv, so it can appear in this
-  machine's process list while the call runs (it's never logged — traces redact it). Prefer a
-  provider's own CLI when possible; for curl, a header-file (`curl -H @file`) avoids argv exposure.
-- **Experimental lanes** (`qwen`, `copilot`, `grok`): flags aren't verified live — report breakage.
-- **Cost tiers are sourced defaults, not detection** — vendor-plan facts dated June 2026
-  ([docs/COSTS.md](docs/COSTS.md)); plans/quotas churn, `doctor` warns when the snapshot is stale.
-- **Sandboxed host:** if your host runs the server in a strict sandbox (read-only FS / no
-  network), spawned CLIs inherit it and may fail to reach their providers. cli-bridge surfaces
-  this as an `auth`/`failed` error rather than hanging.
-- **Delegate re-entry is depth-capped.** Each spawn is stamped `CLI_BRIDGE_DEPTH`; a delegate that
-  itself loads cli-bridge is refused once it would exceed `CLI_BRIDGE_MAX_DEPTH` (default 1), so a
-  misconfigured delegate can't fork-bomb the council/quota. Raise `CLI_BRIDGE_MAX_DEPTH` only if you
-  deliberately want nested delegation.
+- **Cost tiers are sourced defaults, not detection** — vendor-plan facts are dated; `doctor` warns
+  when the snapshot is stale.
+- **Experimental** (`qwen`, `copilot`, `grok`, community lanes, Gemini `images=`): flags aren't
+  verified live — `doctor deep` checks them against each CLI's `--help` on your machine.
+
+---
+
+## Roadmap
+
+See [`CHANGELOG.md`](CHANGELOG.md) for shipped history. Currently **exploring (not shipped)**: an
+**independent-oracle** verify mode (a cross-family lane writes tests from the *spec*, blind to the
+implementation, so the test catches the bug instead of mirroring it) and tighter **limit-aware
+failover**. Big inter-agent "bus" ideas (recursive spawn, shared state, wire protocol) are positioned
+honestly as a *direction*, never sold as a shipped protocol — see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ---
 
 ## References
 
-The design choices above aren't vibes — each maps to a finding in the literature. Every entry
-below was checked against its source (authors + venue), because a tool that sells "honest
-cross-vendor verification" should get its own citations right.
+The design choices above aren't vibes — each maps to a finding in the literature. Every entry was
+checked against its source (authors + venue), because a tool that sells "honest cross-vendor
+verification" should get its own citations right.
 
 | Paper | ID | What it backs here |
 |-------|----|--------------------|
-| Du et al. — *Improving Factuality and Reasoning via Multiagent Debate* | [arXiv 2305.14325](https://arxiv.org/abs/2305.14325) | `debate`: multiple models critiquing each other beats one model alone |
-| ReConcile — *Round-Table Conference Improves Reasoning* | [arXiv 2309.13007](https://arxiv.org/abs/2309.13007) | `debate` convergence + confidence-weighted consensus |
-| Mixture-of-Agents | [arXiv 2406.04692](https://arxiv.org/abs/2406.04692) | layered aggregation across diverse models (and its limits — see below) |
-| Chain-of-Agents | [arXiv 2406.02818](https://arxiv.org/abs/2406.02818) | role-specialized multi-agent pipelines |
-| CriticGPT — *LLM Critics Help Catch LLM Bugs* (McAleese et al.) | [arXiv 2407.00215](https://arxiv.org/abs/2407.00215) | `review_diff` / `security_review`: an LLM critic catches bugs humans miss |
-| Perez et al. — *Discovering Language Model Behaviors* (sycophancy) | [arXiv 2212.09251](https://arxiv.org/abs/2212.09251) | why a *same-family* judge is weak → cross-vendor `jury` + peer anonymization |
-| Wynn, Satija & Hadfield — *Talk Isn't Always Cheap* | [arXiv 2509.05396](https://arxiv.org/abs/2509.05396) | debate failure modes → fail-closed verdicts, bounded rounds |
-| CONSENSAGENT — *Consensus via Sycophancy Mitigation* (Findings of ACL 2025) | [ACL 2025](https://aclanthology.org/2025.findings-acl.1141/) | sycophancy in multi-agent consensus → "earn their seat" / anonymized peers |
-| Maryanskyy — *When Agents Disagree: The Selection Bottleneck* | [arXiv 2603.20324](https://arxiv.org/abs/2603.20324) | `consensus`: **selection > synthesis** (the deterministic peer-vote default) |
+| Du et al. — *Improving Factuality and Reasoning via Multiagent Debate* | [2305.14325](https://arxiv.org/abs/2305.14325) | `debate`: models critiquing each other beat one model alone |
+| ReConcile — *Round-Table Conference Improves Reasoning* | [2309.13007](https://arxiv.org/abs/2309.13007) | `debate` convergence + confidence-weighted consensus |
+| Mixture-of-Agents | [2406.04692](https://arxiv.org/abs/2406.04692) | layered aggregation across diverse models (and its limits) |
+| Chain-of-Agents | [2406.02818](https://arxiv.org/abs/2406.02818) | role-specialized multi-agent pipelines |
+| CriticGPT — *LLM Critics Help Catch LLM Bugs* | [2407.00215](https://arxiv.org/abs/2407.00215) | `review_diff` / `security_review`: an LLM critic catches bugs humans miss |
+| Perez et al. — *Discovering Language Model Behaviors* (sycophancy) | [2212.09251](https://arxiv.org/abs/2212.09251) | why a same-family judge is weak → cross-vendor `jury` + peer anonymization |
+| Wynn, Satija & Hadfield — *Talk Isn't Always Cheap* | [2509.05396](https://arxiv.org/abs/2509.05396) | debate failure modes → fail-closed verdicts, bounded rounds |
+| CONSENSAGENT — *Consensus via Sycophancy Mitigation* (Findings of ACL 2025) | [ACL 2025](https://aclanthology.org/2025.findings-acl.1141/) | sycophancy in consensus → "earn their seat" / anonymized peers |
+| Maryanskyy — *When Agents Disagree: The Selection Bottleneck* | [2603.20324](https://arxiv.org/abs/2603.20324) | `consensus`: **selection > synthesis** (the deterministic peer-vote default) |
 
-> **A citation hygiene note.** *Talk Isn't Always Cheap* (2509.05396) is **Wynn, Satija &
-> Hadfield** — a popular council framework miscites it as "Xiong et al." Double-check attributions
-> before repeating them; we did, and flag it because honesty is the whole pitch.
+> **A citation hygiene note.** *Talk Isn't Always Cheap* (2509.05396) is **Wynn, Satija & Hadfield** —
+> a popular council framework miscites it as "Xiong et al." We double-check attributions before
+> repeating them, and flag it because honesty is the whole pitch.
 
 ## Development
 
 ```bash
 uv venv && uv pip install -e . pytest pytest-asyncio
-pytest -q          # unit + integration (cross-host) tests
+pytest -q          # unit + integration (cross-host) tests; no real CLI or network needed
 ```
 
 ## License
@@ -709,10 +334,7 @@ MIT
 
 <div align="center">
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/mark-dark.svg">
-  <img src="assets/mark-light.svg" width="84" alt="cli-bridge">
-</picture>
+<img src="assets/mark.png" width="84" alt="cli-bridge">
 
 <sub>one side · bridged to a council</sub>
 
