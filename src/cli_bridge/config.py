@@ -209,6 +209,47 @@ def build_disabled() -> bool:
     return os.environ.get("CLI_BRIDGE_DISABLE_BUILD", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def strip_nesting_env() -> bool:
+    """CLI_BRIDGE_STRIP_NESTING_ENV=1 → when spawning a delegate CLI, drop the HOST's own
+    session-marker env vars (CLAUDE_*/CODEX_* by default). Some CLIs refuse to run as a "nested
+    session" when they see their own markers — the symptom is EMPTY output when cli-bridge runs
+    INSIDE Claude Code / Codex and spawns `claude` / `codex`. Opt-in, default OFF (consistent with
+    HIDE_HOST / LEAN — flip the default on after a real soak). This is a FUNCTION fix, NOT
+    credential isolation: auth tokens are deliberately kept (see strip_nesting) so the child can
+    still authenticate."""
+    return os.environ.get("CLI_BRIDGE_STRIP_NESTING_ENV", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def strip_prefixes() -> tuple[str, ...]:
+    """Env-var name prefixes removed from a delegate's spawn env when strip_nesting_env() is on.
+    Default 'CLAUDE_,CODEX_' — extend for other hosts (e.g. CLI_BRIDGE_STRIP_PREFIXES="GEMINI_"
+    for a Gemini host, "GITHUB_" for Copilot) without a code change."""
+    raw = os.environ.get("CLI_BRIDGE_STRIP_PREFIXES", "").strip() or "CLAUDE_,CODEX_"
+    return tuple(p.strip() for p in raw.split(",") if p.strip())
+
+
+# Kept even when they match a strip prefix: the child still needs to find binaries (PATH/HOME/…)
+# and AUTHENTICATE. The guard removes SESSION MARKERS that trigger a nested-session refusal, never
+# credentials — so any *_TOKEN / *_API_KEY (e.g. CLAUDE_CODE_OAUTH_TOKEN) and the basics survive.
+_NESTING_KEEP = frozenset({"PATH", "HOME", "SHELL", "LANG", "TERM"})
+
+
+def strip_nesting(env: dict[str, str]) -> dict[str, str]:
+    """Return a COPY of `env` with host session-marker vars removed (prefix-matched via
+    strip_prefixes()), but auth tokens and the basics always kept. Pure — testable without
+    spawning anything."""
+    prefixes = strip_prefixes()
+    out: dict[str, str] = {}
+    for k, v in env.items():
+        if k in _NESTING_KEEP or k.endswith("_TOKEN") or k.endswith("_API_KEY"):
+            out[k] = v
+        elif any(k.startswith(p) for p in prefixes):
+            continue                                   # drop the session marker
+        else:
+            out[k] = v
+    return out
+
+
 def max_parallel() -> int:
     """Cap on simultaneous delegate spawns in a fan-out (ask_all). Default 6 — high enough that
     a normal free council never hits it, low enough that many custom lanes can't OOM a small
