@@ -188,10 +188,15 @@ class FixtureScore:
     fp_other: int = 0                                      # flagged something not in ground truth
     sev_exact: int = 0                                     # of TP, severity matched exactly
     n_findings: int = 0
+    # Calibration pairs: (predicted_confidence, correct). predicted_confidence = the SAME
+    # agreement signal the review surfaces (n_models / total_reviewers → single/majority/consensus);
+    # correct = the finding matched a planted bug (TP) vs hit a decoy/other (FP). Ground truth,
+    # not self-declared — that's what makes this calibration honest (cf. duh's self-reported ECE).
+    calib: list[tuple[float, bool]] = field(default_factory=list)
 
 
 def score_fixture(findings_list: list[dict], fixture: Fixture, *,
-                  include_prechecks: bool = False) -> FixtureScore:
+                  include_prechecks: bool = False, total_reviewers: int = 0) -> FixtureScore:
     cands = [f for f in findings_list
              if include_prechecks or f.get("models") != [_findings.STATIC_SOURCE]]
     used = [False] * len(cands)
@@ -218,6 +223,14 @@ def score_fixture(findings_list: list[dict], fixture: Fixture, *,
             sc.fp_decoy += 1
         else:
             sc.fp_other += 1
+    # Calibration pairs (only when we know the reviewer count, i.e. >1 — confidence is meaningless
+    # for a single reviewer). `correct` is anchored to the SAME greedy 1:1 matcher above (used[i]),
+    # never a re-derived ad-hoc threshold.
+    if total_reviewers > 1:
+        for i, f in enumerate(cands):
+            n_models = len(f.get("models") or [])
+            pred = min(1.0, n_models / total_reviewers) if n_models else 0.0
+            sc.calib.append((pred, used[i]))
     return sc
 
 
@@ -234,6 +247,7 @@ class ArmRun:
     n_findings: int = 0
     failed_fixtures: int = 0          # fixtures where the arm's review failed outright (throttled)
     per_fixture: dict[str, FixtureScore] = field(default_factory=dict)
+    calib: list[tuple[float, bool]] = field(default_factory=list)   # all (pred_conf, correct) pairs
 
     @property
     def recall(self) -> float:
@@ -260,6 +274,7 @@ def aggregate(scores: list[FixtureScore], failed: int = 0) -> ArmRun:
         a.sev_exact += s.sev_exact
         a.n_findings += s.n_findings
         a.per_fixture[s.fixture_id] = s
+        a.calib.extend(s.calib)
     return a
 
 
@@ -312,8 +327,10 @@ async def evaluate(fixtures: list[Fixture], council: list[LaneSpec], single: Lan
         for fx in fixtures:
             c, c_ok = await run_arm(council, fx.diff, run_lane, timeout_s=timeout_s)
             s, s_ok = await run_arm(single_arm, fx.diff, run_lane, timeout_s=timeout_s)
-            c_scores.append(score_fixture(c, fx, include_prechecks=include_prechecks))
-            s_scores.append(score_fixture(s, fx, include_prechecks=include_prechecks))
+            c_scores.append(score_fixture(c, fx, include_prechecks=include_prechecks,
+                                          total_reviewers=len(council)))
+            s_scores.append(score_fixture(s, fx, include_prechecks=include_prechecks,
+                                          total_reviewers=len(single_arm)))
             c_fail += 0 if c_ok else 1
             s_fail += 0 if s_ok else 1
         council_runs.append(aggregate(c_scores, c_fail))
@@ -360,6 +377,44 @@ def _permutation_test(a: list[float], b: list[float], *, n: int = 10000, seed: i
         if abs(statistics.fmean(pool[:na]) - statistics.fmean(pool[na:])) >= obs - 1e-12:
             hits += 1
     return (hits + 1) / (n + 1)
+
+
+def calibration(pairs: list[tuple[float, bool]], *, min_n: int = 50) -> dict:
+    """Confidence calibration over (predicted_confidence, correct) pairs from planted-bug ground
+    truth (not self-declared outcomes). predicted_confidence = the review's own agreement signal
+    n_models/total_reviewers; correct = the finding matched a planted bug.
+
+    Bins on the DISTINCT observed pred_conf values (= the discrete single/majority/consensus
+    agreement levels), NOT 10 equal-width bins: with 3-5 reviewers pred_conf takes only a handful
+    of values, so equal-width bins would mostly be EMPTY and ECE would degenerate into noise. One
+    bin per distinct value ⇒ never an empty bin.
+
+    Returns {n, ece, brier, signed_gap, bins, ece_reliable}. Brier and signed_gap are always
+    well-defined; ECE only means something with enough points, so it's None (ece_reliable=False)
+    when n < min_n — report Brier + signed_gap in that case, not a noisy ECE.
+    """
+    clean = [(float(p), bool(c)) for p, c in pairs]
+    n = len(clean)
+    if n == 0:
+        return {"n": 0, "ece": None, "brier": None, "signed_gap": None,
+                "bins": [], "ece_reliable": False}
+    groups: dict[float, list[bool]] = {}
+    for pred, correct in clean:
+        groups.setdefault(round(pred, 6), []).append(correct)   # round kills k/n float noise
+    bins = []
+    ece = 0.0
+    for pred_val in sorted(groups):
+        outcomes = groups[pred_val]
+        n_b = len(outcomes)
+        acc_b = sum(outcomes) / n_b
+        bins.append({"pred": pred_val, "n": n_b, "acc": acc_b, "gap": pred_val - acc_b})
+        ece += (n_b / n) * abs(acc_b - pred_val)                 # |confidence − accuracy|, weighted
+    brier = statistics.fmean((pred - (1.0 if correct else 0.0)) ** 2 for pred, correct in clean)
+    mean_pred = statistics.fmean(pred for pred, _ in clean)
+    mean_acc = statistics.fmean(1.0 if c else 0.0 for _, c in clean)
+    reliable = n >= min_n
+    return {"n": n, "ece": (ece if reliable else None), "brier": brier,
+            "signed_gap": mean_pred - mean_acc, "bins": bins, "ece_reliable": reliable}
 
 
 def corpus_summary(fixtures: list[Fixture]) -> dict:
@@ -435,6 +490,9 @@ def render_markdown(res: EvalResult) -> str:
             "(the single arm fires K calls at ONE lane per fixture, so on free tiers it gets "
             "throttled). A 0% here is an ARTIFACT, not a quality result. Re-run with a lane that "
             "has quota headroom (paid tier or local model) for `--single-lane`.\n")
+    calib_md = _calibration_section(res)
+    if calib_md:
+        lines += [calib_md, ""]
     lines += [
         _winloss_table(res),
         "",
@@ -442,6 +500,56 @@ def render_markdown(res: EvalResult) -> str:
         f"--council-lanes {','.join(res.council_lanes)} --single-lane {res.single_lane} "
         f"--k {res.k} --repeats 5`. Numbers depend on your installed CLIs and their current models.",
     ]
+    return "\n".join(lines)
+
+
+def _calibration_section(res: EvalResult) -> str:
+    """Calibration table (council vs single) from the pooled (pred_conf, correct) pairs. Empty
+    string when there's nothing to report (e.g. single-reviewer arms produce no pairs)."""
+    c = calibration([p for run in res.council for p in run.calib])
+    s = calibration([p for run in res.single for p in run.calib])
+    if not c["n"] and not s["n"]:
+        return ""
+
+    def num(v, pct=False):
+        if v is None:
+            return "—"
+        return f"{v:+.0%}" if pct else f"{v:.3f}"
+
+    def ece_cell(d):
+        return num(d["ece"]) if d["ece_reliable"] else f"n/a (N={d['n']}<50)"
+
+    lines = [
+        "### Confidence calibration — does agreement actually predict correctness?",
+        "",
+        "_Predicted confidence = the review's OWN agreement signal "
+        "(single/majority/consensus = n_models/total_reviewers); `correct` = the finding matched a "
+        "planted bug under the same greedy scorer. This is calibrated against **real ground truth**, "
+        "not self-declared outcomes — so it's more reliable than harnesses that score a model's own "
+        "reported confidence._",
+        "",
+        "| metric | council | single+SC |",
+        "|--------|---------|-----------|",
+        f"| Brier score (↓ better) | {num(c['brier'])} | {num(s['brier'])} |",
+        f"| signed gap (pred − acc; + = overconfident) | {num(c['signed_gap'], pct=True)} "
+        f"| {num(s['signed_gap'], pct=True)} |",
+        f"| ECE (↓ better) | {ece_cell(c)} | {ece_cell(s)} |",
+        "",
+        "_ECE band: <0.05 excellent · <0.10 good · <0.20 fair · else weak. ECE is shown only with "
+        "N≥50 pairs (below that it's noise); Brier + signed gap are well-defined at any N._",
+    ]
+    # Per-bin reliability for the council arm — one bin per distinct agreement level, so it's never
+    # empty. Reporting n_b makes the sparsity visible to the reader.
+    if c["bins"]:
+        lines += [
+            "",
+            "Council reliability by agreement level (pred vs observed accuracy):",
+            "",
+            "| pred confidence | observed accuracy | n |",
+            "|---:|---:|---:|",
+        ]
+        for b in c["bins"]:
+            lines.append(f"| {b['pred']:.0%} | {b['acc']:.0%} | {b['n']} |")
     return "\n".join(lines)
 
 
