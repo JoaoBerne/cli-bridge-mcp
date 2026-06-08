@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/banner.png" width="860" alt="cli-bridge — your assistant borrows the powers of every AI CLI you already have: huge-context reads, vision, parallel builds, cross-vendor checks">
+<img src="assets/banner.gif" width="860" alt="cli-bridge — your assistant borrows the powers of every AI CLI you already have: huge-context reads, vision, parallel builds, cross-vendor checks">
 
 **English** · [Français](docs/i18n/README.fr.md) · [简体中文](docs/i18n/README.zh-CN.md) · [Español](docs/i18n/README.es.md) · [Português (BR)](docs/i18n/README.pt-BR.md) · [日本語](docs/i18n/README.ja.md) · [Deutsch](docs/i18n/README.de.md)
 
@@ -66,13 +66,27 @@ cli-bridge isn't one feature, it's **four levers**. Get these and every tool bel
 Each block: one sentence of *when you reach for it*, the exact call, and *what you get back*.
 
 ### Borrow abilities your assistant doesn't have
-When a different CLI can do something your host can't — read a giant file, see an image, generate a file.
+Every CLI has a different superpower, and each runs non-interactively — so cli-bridge can spawn it.
+Borrow the one your host lacks (it must be installed + logged in):
+
+| Superpower | Which CLI has it | Borrow it when |
+|------------|------------------|----------------|
+| **Images** | Codex (`gpt-image-2`, **no API key** — via your ChatGPT plan) | your host can't draw |
+| **Huge context** | Gemini (1M-token window) | a file/repo won't fit your host's context |
+| **Fresh knowledge** | Gemini (Google-Search grounding) · Grok (live web/X) ⚗️ | beat a stale cutoff: *"what's the current API of `<lib>`?"* |
+| **Vision** | Gemini (`images=[…]`) ⚗️ | analyse a screenshot or diagram |
+| **A free second opinion** | Gemini (free daily tier) · opencode · Ollama (local, $0) | a $0 cross-check |
+| **Generated files** | any build lane → artifact-return | get a chart / PDF / diagram back **by path** |
+| **Video** ⚗️ | Gemini (Veo) · Grok (Imagine) — *if your installed CLI exposes it* | you need a generated clip |
 
 ```
-ask_gemini(task="find the bug across ./src — read the files you need", cwd="path/to/repo")   # 1M-token context
-ask_gemini(task="what's wrong in this UI?", images=["screenshot.png"])                        # ban-safe vision (experimental)
-ask_build(lane="gpt", task="render the dependency graph to assets/deps.svg and run it", zone="assets")  # file back by path
+ask_build(lane="gpt", task="generate a 1200×630 social card to assets/card.png", zone="assets")   # Codex image → file by path, no API key
+ask_gemini(task="find the bug across ./src — read the files you need", cwd="path/to/repo")         # 1M-token context
+ask_gemini(task="what's the current recommended API for <lib>? check the latest docs")            # fresh knowledge (Search grounding)
+ask_gemini(task="what's wrong in this UI?", images=["screenshot.png"])                             # vision (experimental)
 ```
+
+⚗️ = experimental / depends on the installed CLI's current build (e.g. Grok Build is beta) — verify with `doctor deep`.
 
 ### Never stop working when you hit a limit
 When your main subscription caps out mid-task. `ask_cascade` falls through to another lane you already
