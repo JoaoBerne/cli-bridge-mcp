@@ -555,15 +555,36 @@ def debate_revise_prompt(question: str, transcript: str) -> str:
 
 def debate_judge_prompt(question: str, transcript: str) -> str:
     return (
-        "Several AIs debated the question below. Produce the best FINAL answer: state the "
-        "consensus, flag any remaining disagreement (name who held what), and give the most "
-        "reliable conclusion. Be precise. Start your reply with EXACTLY one line — "
-        "'UNANIMOUS: yes' if every debater reached the same conclusion, else 'UNANIMOUS: no' — "
-        f"then the answer.\n\nQUESTION:\n{question}\n\nDEBATE:\n{transcript}")
+        "Several AIs debated the question below, shown under neutral labels. Produce the best FINAL "
+        "answer: state the consensus, flag any remaining disagreement (say which DEBATER by label), "
+        "and give the most reliable conclusion. Refer to debaters ONLY by their labels; do NOT "
+        "guess or name the underlying vendor/model. Be precise. Start your reply with EXACTLY one "
+        "line — 'UNANIMOUS: yes' if every debater reached the same conclusion, else 'UNANIMOUS: no' "
+        f"— then the answer.\n\nQUESTION:\n{question}\n\nDEBATE:\n{transcript}")
+
+
+# Anti prestige-bias: a peer/judge that sees a vendor's NAME can favour the brand over the argument.
+# So the transcript SENT to models uses neutral labels and this rule; the human-facing report keeps
+# real names + a legend. Residual limit: a model may still self-identify in its own prose — the rule
+# discourages it but can't guarantee it (documented, not sold as perfect blinding).
+_ANON_RULE = ("Do not reveal, claim, or guess any participant's identity or vendor — yours or "
+              "anyone else's. Refer to other answers ONLY by their labels (Debater A, B, …).")
 
 
 def _debate_transcript(positions: list[tuple[str, str]]) -> str:
     return "\n\n".join(f"### {display}\n{text}" for display, text in positions)
+
+
+def _debate_labels(debaters: list[LaneSpec]) -> dict[str, str]:
+    """display name -> neutral label (Debater A, B, …). The transcript sent to models uses labels;
+    the report keeps real names and a legend ties the two."""
+    return {ln.display: f"Debater {chr(65 + i)}" for i, ln in enumerate(debaters)}
+
+
+def _anon_transcript(positions: list[tuple[str, str]], labels: dict[str, str]) -> str:
+    """Render the transcript with each display swapped for its neutral label (anti prestige-bias).
+    Unknown displays fall back to themselves rather than leaking under a wrong label."""
+    return _debate_transcript([(labels.get(display, display), text) for display, text in positions])
 
 
 def _pick_judge(targets: list[LaneSpec], fallback: LaneSpec) -> LaneSpec:
@@ -677,12 +698,14 @@ async def debate(targets: list[LaneSpec], args: dict, run_lane, progress=None) -
         judge = _pick_judge(targets, debaters[0])
         self_judged = judge.key in {ln.key for ln in debaters}
 
+    labels = _debate_labels(debaters)        # display -> neutral label, for anonymized transcripts
+
     async def _ask(lane: LaneSpec, prompt: str):
         res = await run_lane(lane, {"task": prompt, "timeout_s": timeout}, tool="debate")
         return lane, res
 
     def _ground(prompt: str) -> str:
-        parts = ([pack] if pack else []) + [prompt, _PROVENANCE_RULE, _VOTE_RULE]
+        parts = ([pack] if pack else []) + [prompt, _PROVENANCE_RULE, _ANON_RULE, _VOTE_RULE]
         return "\n\n".join(parts)
 
     def _open(i: int) -> str:
@@ -714,7 +737,7 @@ async def debate(targets: list[LaneSpec], args: dict, run_lane, progress=None) -
         if len(positions) < 2:
             break                         # nothing to debate against
         prev = dict(positions)
-        transcript = _debate_transcript(list(positions.values()))
+        transcript = _anon_transcript(list(positions.values()), labels)   # peers see labels, not names
         live = [ln for ln in debaters if ln.key in positions]
         raw = await asyncio.gather(
             *[_ask(ln, _ground(debate_revise_prompt(question, transcript))) for ln in live],
@@ -737,7 +760,7 @@ async def debate(targets: list[LaneSpec], args: dict, run_lane, progress=None) -
 
     final_positions = list(positions.values())
     clean_positions = [(d, _strip_vote(t)) for d, t in final_positions]
-    transcript = _debate_transcript(clean_positions)
+    transcript = _anon_transcript(clean_positions, labels)   # the judge sees labels, not vendor names
     tally = _vote_tally(positions)
     meta: dict[str, Any] = {
         "question": question[:200],
@@ -779,7 +802,8 @@ async def debate(targets: list[LaneSpec], args: dict, run_lane, progress=None) -
             "task": steelman_prompt(question, transcript, final), "timeout_s": timeout},
             tool="debate")
         if sr.ok:
-            transcript += f"\n\n### STEELMAN — {contrarian.display} (bonus round)\n{sr.output}"
+            sm_label = labels.get(contrarian.display, contrarian.display)
+            transcript += f"\n\n### STEELMAN — {sm_label} (bonus round)\n{sr.output}"
             jr2 = await run_lane(judge, {"task": debate_judge_prompt(question, transcript),
                                          "timeout_s": timeout}, tool="debate")
             if jr2.ok:
@@ -814,6 +838,12 @@ async def debate(targets: list[LaneSpec], args: dict, run_lane, progress=None) -
         lines.append("> ⚠️ _Thin brief → thin consensus:_ " + "; ".join(lint) + "\n")
     lines.append(f"_Debaters: {', '.join(meta['debaters'])} · rounds: {rounds_run} · "
                  f"judge: {meta['judge']}_\n")
+    # The judge/peers saw neutral labels (anti prestige-bias); the legend lets the reader decode any
+    # "Debater A/B" the verdict references back to the real lane.
+    if len(final_positions) >= 2:
+        legend = ", ".join(f"{labels[d]} = {d}" for d, _ in final_positions if d in labels)
+        if legend:
+            lines.append(f"_Labels (judge saw these, not vendor names): {legend}_\n")
     if "votes" in meta or early_stop:
         bits = ([f"vote: {meta['votes']}"] if "votes" in meta else []) \
             + ([f"mean confidence {meta['mean_confidence']}"] if "mean_confidence" in meta else []) \

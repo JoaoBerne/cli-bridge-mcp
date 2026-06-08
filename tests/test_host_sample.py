@@ -45,3 +45,19 @@ def test_synthesize_falls_back_to_lane():
 
     out = asyncio.run(council.synthesize("q", answered, [a, b], run_lane=fake_run_lane, host_sample=no_host))
     assert "LANE SYNTHESIS" in out
+
+
+def test_synthesize_anonymizes_peers_to_the_judge():
+    a = LaneSpec("a", "Claude", "echo", lambda *x: [])
+    b = LaneSpec("b", "Gemini", "echo", lambda *x: [])
+    answered = [(a, RunResult(True, "first take", "ok")), (b, RunResult(True, "second take", "ok"))]
+    captured = {}
+
+    async def fake_host(prompt, max_tokens=1024):
+        captured["prompt"] = prompt
+        return "SYNTH"
+
+    out = asyncio.run(council.synthesize("q", answered, [a, b], run_lane=None, host_sample=fake_host))
+    assert "Reviewer A" in captured["prompt"] and "Reviewer B" in captured["prompt"]
+    assert "Claude" not in captured["prompt"] and "Gemini" not in captured["prompt"]   # no vendor names
+    assert "Reviewer A = Claude" in out and "Reviewer B = Gemini" in out               # legend for human
