@@ -183,6 +183,22 @@ def test_debate_anonymizes_peers_to_judge_and_legends_in_report():
     assert "Labels (judge saw these" in report and "Debater A = " in report
 
 
+# ── T2.3 convergence ladder (cosmetic 3-state label) ─────────────────────────────────────
+
+def test_convergence_state_ladder_thresholds():
+    assert workflows._convergence_state(0.95) == "converged"
+    assert workflows._convergence_state(0.85) == "converged"     # boundary inclusive
+    assert workflows._convergence_state(0.6) == "refining"
+    assert workflows._convergence_state(0.39) == "diverging"
+    assert workflows._convergence_state(None) == "n/a"           # no comparable prior round
+
+
+def test_debate_report_shows_convergence_state():
+    rec = []
+    report = asyncio.run(workflows.debate(_panel(3), {"task": "q?", "rounds": 1}, _recorder(rec)))
+    assert "convergence:" in report                              # ladder label surfaced in the header
+
+
 # ── FR-5 brief linter (pure) ─────────────────────────────────────────────────────────────
 
 def test_brief_lint_flags_thin_brief():
