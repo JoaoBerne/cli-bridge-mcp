@@ -414,6 +414,38 @@ def test_jury_mono_family_degrades():
     assert "DEGRADED" in report                                  # degraded, never an undefined verdict
 
 
+def test_jury_logs_seat_signal_as_conformity(tmp_path, monkeypatch):
+    # Two verifiers split PASS/FAIL → fail-closed REJECTED. The seat signal records each vote's
+    # CONFORMITY with the final verdict (live, no ground truth): the FAIL voter agrees with REJECTED,
+    # the PASS voter does not. It is conformity, NOT accuracy — that's the whole labelling point.
+    monkeypatch.setenv("CLI_BRIDGE_STATE_DB", str(tmp_path / "t.sqlite"))
+    telemetry._reset_for_tests()
+    lanes = {k: _lane(k) for k in ("gpt", "gemini", "claude")}    # openai / google / anthropic
+    for _ in range(2):                                            # two runs accumulate votes
+        rl, _seen = _jury_rl(["PASS", "FAIL"])
+        asyncio.run(orchestrate.jury(
+            run_lane=rl, resolve_lane=lanes.get, default_lanes=list(lanes.values()),
+            telemetry=telemetry, task="q", author_lane="gpt"))   # the REAL telemetry
+    seat = telemetry.seat_report()
+    assert seat["gemini"]["n_votes"] == 2 and seat["gemini"]["conformity_rate"] == 0.0  # PASS vs REJECTED
+    assert seat["claude"]["n_votes"] == 2 and seat["claude"]["conformity_rate"] == 1.0  # FAIL vs REJECTED
+    assert seat["gemini"]["accuracy_rate"] is None               # no eval ground truth in live runs
+    telemetry._reset_for_tests()
+
+
+def test_seat_report_separates_eval_accuracy_from_live_conformity(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLI_BRIDGE_STATE_DB", str(tmp_path / "t.sqlite"))
+    telemetry._reset_for_tests()
+    telemetry.jury_put("r1", [("gpt", "fail", "REJECTED", 1)], source="live")     # conformity
+    telemetry.jury_put("r2", [("gpt", "fail", "REJECTED", 1)], source="eval")     # vs ground truth
+    telemetry.jury_put("r3", [("gpt", "pass", "REJECTED", None)], source="live")  # abstain-like, undecided
+    seat = telemetry.seat_report()
+    assert seat["gpt"]["conformity_rate"] == 1.0                 # 1 decided live vote agreed
+    assert seat["gpt"]["accuracy_rate"] == 1.0                   # separate eval lens
+    assert seat["gpt"]["n_votes"] == 3                           # all rows counted
+    telemetry._reset_for_tests()
+
+
 def test_fanout_compare_judge_recommends_one():
     tel = FakeTelemetry()
     lanes = {"a": _lane("a"), "b": _lane("b"), "j": _lane("j")}
