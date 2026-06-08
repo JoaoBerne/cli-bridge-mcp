@@ -46,6 +46,15 @@ _(The lane renders the image **via code** — charts, diagrams, SVGs, procedural
 the file; it's not a text-to-photo model unless you point one at it. That's why the result comes back
 as a path, not a blob.)_
 
+### …and it delegates real work, safely
+
+`cli-bridge build <lane> "<task>"` hands the job to another model running in a **throwaway git
+worktree**, then gives you back a **diff** — your repo is never touched until you apply it yourself.
+
+<p align="center">
+<img src="assets/demo-borrow.gif" width="860" alt="cli-bridge build: opencode adds a function in a throwaway worktree and returns a reviewable diff; the real repo stays clean">
+</p>
+
 ---
 
 ## How to think about it (the mental model)
@@ -239,10 +248,11 @@ working directory, and hands the answer back.
 
 <div align="center">
 
-<img src="assets/demo.gif" width="860" alt="cli-bridge security-review demo: a committed auth bypass is caught independently by two models, merged into one severity-ranked report, $0 on free lanes">
+<img src="assets/demo.gif" width="860" alt="cli-bridge security-review demo: a committed auth bypass is caught by a cross-vendor council, merged into one severity-ranked report, $0 on free lanes">
 
-_Real run (2.5× speed): the Verify lever — `security-review` fans OWASP roles across free models in
-parallel; two flag a committed auth bypass **blocker** independently, and `usage` shows the receipts._
+_Real run (2.2× speed): the Verify lever — `security-review` fans OWASP roles across free models in
+parallel (claude/gpt/opencode/ollama here); they flag a committed auth bypass **blocker**, and
+`usage` shows the receipts._
 
 </div>
 

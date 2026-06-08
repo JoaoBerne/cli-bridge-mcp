@@ -1,7 +1,20 @@
 #!/bin/sh
-# Builds the demo repo used by demo.tape: a tiny project with an authorization
-# bypass committed on top of a correct auth check — the case the GIF reviews.
+# Builds the two demo repos:
+#   /tmp/demo-authz  — demo.tape:   an authorization bypass committed on top of a correct check
+#                                   (the case the council security-review GIF catches)
+#   /tmp/demo-build  — borrow.tape: a tiny module the `cli-bridge build` GIF extends in a worktree
 set -e
+
+# ── build-borrow repo: a trivial module to extend safely ──────────────────────
+B=/tmp/demo-build
+rm -rf "$B"; mkdir -p "$B"; cd "$B"
+git init -q
+git config user.email demo@demo && git config user.name demo
+printf 'def add(a, b):\n    return a + b\n' > calc.py
+git add -A && git commit -qm "calc: add"
+echo "build-borrow repo ready: $B"
+
+# ── security-review repo: a committed authz bypass ────────────────────────────
 D=/tmp/demo-authz
 rm -rf "$D"; mkdir -p "$D"; cd "$D"
 git init -q
