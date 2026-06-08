@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/banner.png" width="860" alt="cli-bridge — your assistant borrows the powers of every AI CLI you already have: huge-context reads, vision, parallel builds, cross-vendor checks">
+<img src="assets/banner.gif" width="860" alt="cli-bridge — your assistant borrows the powers of every AI CLI you already have: huge-context reads, vision, parallel builds, cross-vendor checks">
 
 **English** · [Français](docs/i18n/README.fr.md) · [简体中文](docs/i18n/README.zh-CN.md) · [Español](docs/i18n/README.es.md) · [Português (BR)](docs/i18n/README.pt-BR.md) · [日本語](docs/i18n/README.ja.md) · [Deutsch](docs/i18n/README.de.md)
 
@@ -365,7 +365,7 @@ MIT
 
 <div align="center">
 
-<img src="assets/mark.png" width="84" alt="cli-bridge">
+<img src="assets/mark.gif" width="84" alt="cli-bridge">
 
 <sub>one side · bridged to a council</sub>
 
