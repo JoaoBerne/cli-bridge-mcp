@@ -3,7 +3,8 @@
   "mcpServers": {
     "cli-bridge": {
       "command": "uvx",
-      "args": ["cli-bridge-mcp"],
+      "//args": "Not on PyPI yet — install from git. Switch to [\"cli-bridge-mcp\"] once a registry release ships.",
+      "args": ["--from", "git+https://github.com/JoaoBerne/cli-bridge-mcp", "cli-bridge-mcp"],
       "env": {
         "//": "All optional. Examples:",
         "CLI_BRIDGE_GEMINI_BIN": "agy",
