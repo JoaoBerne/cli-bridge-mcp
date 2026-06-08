@@ -1,521 +1,233 @@
 <div align="center">
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../../assets/banner-dark.svg">
-  <img src="../../assets/banner-light.svg" width="860" alt="あなた → cli-bridge → 並列で動く AI CLI の評議会 → 統合された1つのレビュー">
-</picture>
+<img src="../../assets/banner.gif" width="860" alt="cli-bridge — あなたのアシスタントが、すでに持っているあらゆる AI CLI の能力を借りる：巨大コンテキストの読み込み、ビジョン、並列ビルド、ベンダー横断のチェック">
 
 [English](../../README.md) · [Français](README.fr.md) · [简体中文](README.zh-CN.md) · [Español](README.es.md) · [Português (BR)](README.pt-BR.md) · **日本語** · [Deutsch](README.de.md)
 
 </div>
 
-_英語版の README が正典です。この翻訳は内容が古くなっている場合があります。_
+_英語版 README が正本です。この翻訳は遅れている場合があります。コミュニティによるレビューを歓迎します。_
 
 # cli-bridge
 
+<!-- 公開時に再有効化（リポジトリが非公開／未公開の間はどちらも壊れます）：
 ![CI](https://github.com/JoaoBerne/cli-bridge-mcp/actions/workflows/tests.yml/badge.svg)
-![PyPI](https://img.shields.io/pypi/v/cli-bridge-mcp)
+![PyPI](https://img.shields.io/pypi/v/cli-bridge-mcp) -->
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 ![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-server-purple)
 ![ban--safe](https://img.shields.io/badge/ban--safe-no%20token%20extraction-orange)
 
-**あなたの AI アシスタントに、いざというとき仲間へ電話をかける力を。**
+**あなたのアシスタントに、すでに持っているあらゆる CLI の力を。**
 
-`cli-bridge` は [Model Context Protocol](https://modelcontextprotocol.io) サーバーで、
-**すでにインストール・ログイン済みの AI CLI を束ねて動かします** — Claude Code、Codex、
-Gemini CLI、opencode、… を、いま対話しているアシスタントから操作します。API キー不要、トークン
-抽出なし、ログはローカル限定、コストには厳格な上限、書き込みは使い捨て worktree の diff のみ。
-ここまでは議論の余地のない単なる配管です。その先に開ける世界がこちらです。
+> **API キー不要 · トークン抽出なし · Node 不要 · デーモン不要 · stdlib + `mcp` のみ。**
 
-厄介なバグで詰まっていますか？アシスタントに GPT *と* Gemini を並列で尋ねさせて比較しましょう。
-巨大なファイルを 100 万トークンで読ませたい？ Gemini に渡しましょう。安価なセカンドオピニオンが
-欲しい？ 無料モデルに投げましょう。1つの質問を、あらゆるモデルに、横並びで — ターミナルから
-離れることなく。
-
-```
-You → Claude:  "ask the council whether this auth logic is safe"
-Claude → cli-bridge → [ Gemini ] [ GPT ] [ Mistral ] [ Qwen ] … in parallel
-            ← three independent reviews + a synthesis of where they agree & disagree
-```
-
-<div align="center">
-
-<img src="../../assets/demo.gif" width="860" alt="cli-bridge security-review のデモ: コミット済みの認証バイパスを2つのモデルが独立に検出し、深刻度順の1つのレポートに統合、無料レーンなので $0">
-
-_実際の実行（2.5倍速）: コミットされた認証バイパス — `security-review` が OWASP の役割を無料モデル群へ
-並列にファンアウトし、2つのモデルが独立に **blocker** と判定、そして `usage` が証拠を示します。_
-_[vhs](https://github.com/charmbracelet/vhs) で生成 — [ソースを見る](../demo/)。_
-
-</div>
-
-> **何が違うのかを一息で:** API キーを一切保持せず、トークンを一切抽出しません — **すでに
-> インストール・ログイン済み**の公式 CLI を動かすだけです。無料レーンの評議会のコストは
-> **$0.00**（証拠は `usage_report` にあります）。有料レーンは *あなた* が設定した厳格な日次上限の
-> 内側でしか動きません。そして実際に作業を *させる* ときは、使い捨ての git worktree で編集し、
-> **diff** を返します — あなたの本番リポジトリには一切触れません。
-
-> **そして正直なところ:** 「モデルが多いほど良い」は *脆い* — 大型モデルは学習データを共有しており、
-> 誤りが相関するからです。私たちは自分たちの中心的主張を計測しました（`cli-bridge eval`、出荷済み、
-> LLM ジャッジなし）: 多様な評議会は、1つの強力なモデルより多くのバグを捕まえることは **ありませんでした** —
-> 偽陽性を **約2倍** 減らしただけです。どちらに転んでも数値は公開しています（[BENCHMARKS.md](../BENCHMARKS.md)）。
-> ハーネスも同梱しているので、*あなたの* CLI で自分で実行できます。
+あなたが話しているアシスタントは、200 万トークンのリポジトリを一度に読むことも、スクリーンショットを見ることも、
+生成した画像を渡すことも、自分の作業をバイアスなく検証することもできません。**すでにインストールしてログイン済み**の
+他の AI CLI ——Claude Code、Codex、Gemini、opencode、さらに Ollama 経由のローカルモデル——は、それぞれあなたの
+ものにはできないことができます。`cli-bridge` は [Model Context Protocol](https://modelcontextprotocol.io)
+サーバーで、アシスタントがそれらを**借りる**ことを可能にします。公式 CLI をサブプロセスとして起動し（手で実行する
+のとまったく同じ——鍵なし、トークン抽出なし）、結果を返します。
 
 ---
 
-## なぜこれを選ぶのか
+## 10 秒デモ
 
-「他のモデルを呼ぶ」MCP は他にもあります。cli-bridge を際立たせているのは次の点です。
+あなたは Claude の中にいます。Claude は画像を渡せません。Codex はできます——画像を描くコードを書いて実行する
+からです。だから頼みましょう：
 
-- 🛡️ **設計からして ban-safe。** 各モデルの**公式 CLI** を起動します — あなたが手で実行するのと
-  まったく同じです。OAuth トークンの抽出も、API キーの使い回しも、アカウントがフラグ付けされる
-  ような行為も一切ありません。各 CLI が自身の認証と課金を処理します。
-- 💸 **出典付きのコスト初期値、そこから *あなた* がプランに合わせて調整。** 初期状態では `ask_all` は
-  無料の評議会を組み、頼まない限りサブスク枠（Claude、GPT）や有料クレジットには一切触れません。
-  各レーンには、ベンダー公開プランから出典を取ったティアが付いています
-  （[docs/COSTS.md](../COSTS.md)、日付入り） — **あなたのアカウントから検出することは決してなく、
-  その旨も明示されています** — それを自分のサブスクに合わせて上書きします
-  （`CLI_BRIDGE_<LANE>_COST=free|limited|paid`）。大型プランならすべてを `free` にするか、
-  `CLI_BRIDGE_PROFILE=max` を設定しましょう。
-- 🔌 **どのホストからでも動く。** Claude Code から操作中？ Claude レーンを隠し（自分自身に尋ねない
-  ように）、残りを公開します。代わりに Codex や opencode から操作中？ 同じ要領で、MCP ハンドシェイク
-  から自動検出します。
-- 🧩 **どんな CLI でも — 自前の API でも — フォークなしで追加。** Claude、GPT、Gemini、Mistral、
-  Qwen、Copilot、Grok、opencode の組み込みレーンがあります。**JSON ファイルから自分の CLI を登録** したり、
-  `curl` を起動して **自分の API をラップ** したりできます。コード不要。
-- 🧠 **評議会の統合。** `ask_all` は無料モデルに、他のモデルがどこで *一致* し *相違* するかを要約させる
-  ことができます — 3つの意見を1つの判断に変えます。
-- 🔬 **マルチモデルのワークフロー。** `review_diff` と `security_review` は **役割の異なる** レビュアーを
-  評議会全体にファンアウトし、深刻度順の1つのレポートにマージ＋重複排除します。`debate` はモデル同士を、
-  限られたラウンドの中で互いに批評・修正させ、最後にジャッジが結論を出します。
-- ✍️ **既定では読み取り専用、必要なときだけ書き込み。** `agent: build` を選べば、対応可能な任意の
-  レーンに実際に **ファイルを編集** させられます — あるいは呼び出しごとに特定の `model` を選べます。
-  **自分と同じ系統の兄弟モデル** も含めて（Claude Code 4.8 から Opus 4.6 に尋ねる）。
-- 🪶 **サブエージェント風の返答。** 委任先は自身のコンテキストで作業し、ダイジェストを返します。巨大な
-  出力はファイルに退避され、プレビューだけが戻るので、アシスタントのコンテキストは軽量なまま保たれます。
-- 🔁 **自動フォールバック。** `ask_cascade` はレーンを安い順→強い順に試し、あるレーンが
-  クォータ/認証/タイムアウトに当たると次へ進みます — 死んだレーンは、あなたを失敗させる代わりに
-  優雅にデグレードします。
-- 🩺 **自己認識。** ローカルのテレメトリが各レーンの健全性を追跡し、クォータ/認証/タイムアウトの失敗が
-  繰り返されたレーンをクールダウンに入れます。これにより `ask_all`/`ask_cascade` はそれを迂回します。
-- 🎯 **あなたのスタックを学習。** `rate_lane` でレーンの回答を1〜5で採点すると、`ask_best` は
-  **あなたのマシン上で** 各タスク種別を実際に制したモデルを優先します — sqlite に保存されるローカルの
-  品質シグナルで、`/compact` や再起動を生き延びます。公開ランキングではなく、*あなたの* 結果です。
-- 🧱 **堅牢化済み。** タイムアウトはプロセスツリー全体を停止し（孤児プロセスがクォータを焼かない）、
-  ホストのキャンセルは委任先を停止し、シークレットは伏字化され、エラーは分類されます
-  （`quota` / `auth` / `timeout`）。これによりアシスタントは次に何をすべきか分かります。
-  macOS / Linux / Windows で動作します。
-- 📐 **主張ではなく計測。** 「モデルが多いほどバグを多く見つける」は *反証可能* なので、cli-bridge は
-  そのテストを同梱しています: `cli-bridge eval` は、種まきされた推論バグのコーパス上で、評議会と
-  「1つの強力なモデル＋自己一貫性」を **同等の呼び出し予算** で対決させ、決定論的に採点します
-  （LLM ジャッジなし）。平均 ± 標準偏差を、「有意な差なし」ガードとバグごとの勝敗表とともに報告し —
-  評議会が負けたときでも結果を公開します。
-  [BENCHMARKS.md § Quality](../BENCHMARKS.md#quality--does-a-council-actually-beat-one-strong-model) を参照。
+```
+ask_build(lane="gpt", task="generate a 1200×630 social card to assets/card.png — write a script that renders it, then run it", zone="assets")
+→ Codex writes assets/card.png · you get the path back, never a binary blob (artifact-return)
+```
 
-### 他のマルチモデル MCP との比較
+あなたのアシスタントは、持っていなかった能力を今得ました。それが全体のアイデアです——これを巨大コンテキストの
+読み込み、ビジョン、並列の力仕事、独立したベンダー横断の検証へと拡張するのです。
 
-| | cli-bridge | API キーゲートウェイ | トークン再利用ブリッジ |
-|---|:---:|:---:|:---:|
-| Ban-safe（公式 CLI を起動） | ✅ | ➖（あなたのキー） | ❌（ToS リスク） |
-| 管理する API キーなし | ✅ | ❌ | ✅ |
-| 既存のサブスクを利用（$0.00 の無料評議会） | ✅ | ❌ | ✅ |
-| プラン別コストティア＋厳格な日次上限＋クールダウン | ✅ | ➖ | ❌ |
-| 自動フォールバック（cascade） | ✅ | 一部 | ❌ |
-| **あなたの結果から学習する**ルーティング | ✅ | ❌ | ❌ |
-| 任意の CLI / 自前 API を追加、フォーク不要 | ✅ | ➖ | ❌ |
-| 呼び出し元ホストを自己的に隠す | ✅ | 該当なし | ➖ |
-| 再起動を生き延びる円卓メモリ | ✅ | ➖（インメモリ） | ➖ |
-| 安全なエージェント書き込み（worktree → diff） | ✅ | ➖ | ❌ |
-| 決定論的な品質評価を同梱（評議会 対 単体） | ✅ | ❌ | ❌ |
+_（レーンは画像を**コードで**レンダリングします——チャート、図、SVG、プロシージャルアート——そしてファイルを
+返します。対象を指定しない限りテキスト→写真モデルではありません。だから結果は blob ではなくパスで返ります。）_
+
+### …そして本物の作業を、安全に委譲する
+
+`cli-bridge build <lane> "<タスク>"` は、**使い捨ての git ワークツリー**で動く別のモデルに作業を渡し、
+**diff** を返します——あなたが自分で適用するまで、リポジトリは決して触られません。
+
+<p align="center">
+<img src="../../assets/demo-borrow.gif" width="860" alt="cli-bridge build：opencode が使い捨てワークツリーで関数を追加し、レビュー可能な diff を返す。実リポジトリはクリーンなまま">
+</p>
 
 ---
 
-## クイックスタート
+## 考え方（メンタルモデル）
 
-### 1. インストール
+cli-bridge は単一機能ではなく、**4 つのレバー**です。これを掴めば、以下のすべてのツールが収まる場所を見つけます：
 
-```bash
-# zero-install run (recommended)
-uvx cli-bridge-mcp
-
-# or install it
-uv tool install cli-bridge-mcp     # or: pipx install cli-bridge-mcp
-```
-
-レーンが使えるのは、**すでにインストール・ログイン済み**の CLI に対してだけです。cli-bridge は
-あなたの `PATH` にあるものを自動検出します。`doctor` ツールをいつでも実行すれば、何が結線されて
-いるか確認できます（`doctor deep` は各ログインをライブでチェックまでします）。
-
-| Lane | CLI | コスト（典型） |
-|------|-----|------|
-| `ask_claude`   | [Claude Code](https://docs.claude.com/claude-code) | サブスク |
-| `ask_gpt`      | [OpenAI Codex](https://github.com/openai/codex) | サブスク |
-| `ask_gemini`   | Gemini CLI（または `agy` / Antigravity） | 無料 / サブスク |
-| `ask_mistral`  | Mistral Vibe | 無料ティア |
-| `ask_qwen` ⚗️  | Qwen Code | 従量制 API キー（無料 OAuth ティアは 2026年4月終了） |
-| `ask_copilot` ⚗️ | GitHub Copilot CLI | サブスク（2026年6月以降は利用量ベースのクレジット） |
-| `ask_grok` ⚗️  | xAI Grok CLI | サブスク（SuperGrok / X Premium+） |
-| `ask_opencode` | [opencode](https://opencode.ai) ゲートウェイ（deepseek、qwen、glm、kimi…） | 既定で無料；一部モデルはクレジットを消費 |
-
-⚗️ = 実験的（フラグはライブで未検証 — 不具合があれば報告してください）。
-コスト列 = 2026年6月時点でのベンダーの *典型的な公開プラン*（[docs/COSTS.md](../COSTS.md) に
-上限・終了予定・出典あり） — cli-bridge はレーンが *あなたに* いくらかかるかを決して検出しません。
-自分のプランは `CLI_BRIDGE_<LANE>_COST` で宣言してください。
-
-### $0 の評議会（サブスクは一切なし）
-
-有料プランもカードもない？ それでも、**真に無料でハードストップ式のティア** を持つプロバイダーから、
-約5分で本物のマルチモデル評議会を組めます（枯渇 = HTTP 429、請求は構造的に不可能 —
-2026年6月検証、出典は [docs/COSTS.md](../COSTS.md)）:
-
-```bash
-# 1. Get free API keys (no card): console.groq.com · cloud.cerebras.ai ·
-#    a GitHub PAT (models scope) · openrouter.ai/keys
-export GROQ_API_KEY=... CEREBRAS_API_KEY=... GITHUB_MODELS_TOKEN=... OPENROUTER_API_KEY=...
-# 2. Point cli-bridge at the ready-made lanes
-export CLI_BRIDGE_LANES_FILE=/path/to/examples/free-apis.json
-```
-
-これで **Groq**（llama-3.3-70b、1日1,000リクエスト）＋ **Cerebras**（gpt-oss-120b）＋
-**GitHub Models**（すべての GitHub アカウントが無料アクセス可能）＋ **OpenRouter `:free`** の幅広さ —
-`ask_all`/`consensus`/`debate` のための4つの独立した声に加え、インストール済みなら opencode の
-組み込み無料モデルも使えます。注意: Gemini CLI の無料ティアは **2026-06-18 に終了**。無料ティアは
-数週間で入れ替わります — 検証時点で何が真だったかは [docs/COSTS.md](../COSTS.md) を確認してください。
-
-### 2. ホストに登録する
-
-これはただの stdio MCP サーバー（`uvx cli-bridge-mcp`）です — あらゆる MCP クライアントで動き、
-呼び出し元ホストのレーンを自動的に隠します（自分自身に尋ねないように）。
-
-**Claude Code** — コマンド1つ:
-
-```bash
-claude mcp add cli-bridge -- uvx cli-bridge-mcp
-```
-
-[![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_cli--bridge-0098FF?logo=githubcopilot&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=cli-bridge&config=%7B%22name%22%3A%22cli-bridge%22%2C%22command%22%3A%22uvx%22%2C%22args%22%3A%5B%22cli-bridge-mcp%22%5D%7D)
-[![Install in Cursor](https://img.shields.io/badge/Cursor-Install_cli--bridge-111111?logo=cursor&logoColor=white)](https://cursor.com/en/install-mcp?name=cli-bridge&config=eyJjb21tYW5kIjoidXZ4IiwiYXJncyI6WyJjbGktYnJpZGdlLW1jcCJdfQ==)
-
-<details>
-<summary><b>Claude Desktop</b> (<code>claude_desktop_config.json</code>)</summary>
-
-```json
-{ "mcpServers": { "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } } }
-```
-</details>
-
-<details>
-<summary><b>Codex</b> (<code>~/.codex/config.toml</code>)</summary>
-
-```toml
-[mcp_servers.cli-bridge]
-command = "uvx"
-args = ["cli-bridge-mcp"]
-```
-</details>
-
-<details>
-<summary><b>Cursor</b> (<code>~/.cursor/mcp.json</code>)</summary>
-
-```json
-{ "mcpServers": { "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } } }
-```
-</details>
-
-<details>
-<summary><b>VS Code</b> (<code>.vscode/mcp.json</code> またはユーザー設定)</summary>
-
-```json
-{ "servers": { "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } } }
-```
-</details>
-
-<details>
-<summary><b>Gemini CLI</b> (<code>~/.gemini/settings.json</code>)</summary>
-
-```json
-{ "mcpServers": { "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } } }
-```
-</details>
-
-<details>
-<summary><b>opencode</b> (<code>opencode.json</code>)</summary>
-
-```json
-{ "mcp": { "cli-bridge": { "type": "local", "command": ["uvx", "cli-bridge-mcp"] } } }
-```
-</details>
-
-<details>
-<summary><b>Windsurf</b> (<code>~/.codeium/windsurf/mcp_config.json</code>)</summary>
-
-```json
-{ "mcpServers": { "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } } }
-```
-</details>
-
-<details>
-<summary><b>Warp</b> (Settings → AI → MCP servers)</summary>
-
-```json
-{ "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } }
-```
-</details>
-
-### 3. 使う
-
-アシスタントに話しかけるだけ:
-
-> *"Ask Gemini for a second opinion on this function."*
-> *"Have the whole council review my diff and synthesize where they disagree."*（→ `review_diff`）
-> *"Get GPT to think hard about this race condition."*（→ `effort: high`）
-> *"Run a security review on my staged changes."*（→ `security_review`）
-> *"Make the models debate whether we need this abstraction."*（→ `debate`）
-> *"Ask gpt to implement this function."*（→ `agent: build`、ファイルを編集）
-> *"Ask Opus 4.6 to double-check my reasoning."*（兄弟モデル、Claude Code から）
-> *"Pick the best lane for a deep review — and remember that one nailed it."*（→ `ask_best` + `rate_lane`；次回はそこへ最初にルーティング）
-
-MCP プロンプトに対応するホストでは、`review_diff`、`security_review`、`debate`、`premortem`、
-`test_plan`、`apilookup`、`cost_setup` がネイティブのスラッシュコマンドとしても表示されます。
+1. **借りる（Borrow）** — アシスタントに欠けた能力に手を伸ばす（ビジョン、100 万トークンのコンテキスト窓、
+   コーディングエージェントが生成するファイル、単に*これ*が得意なモデル）。
+2. **分散する（Spread）** — あるサブスクが上限に達したら、すでに支払っている別のレーンで続行する。
+3. **オフロードする（Offload）** — 退屈で並列化可能な力仕事を、安価／無料のレーンに振り分け、自分は別の所で作る。
+4. **検証する（Verify）** — *別のベンダーファミリー*に作業をチェックさせる。モデルは自分の盲点を捉えられない
+   から。これは単一ベンダーのツールが構造的にできない唯一のことです。
 
 ---
 
-## ツール
+## これで何が可能になるか
 
-| ツール | 何をするか |
-|------|--------------|
-| `ask_<lane>` | 1つのモデルに尋ねます。パラメータ: `task`、任意の `model`、`effort`、`agent`、`cwd`、`timeout_s`、**`conversation`**（円卓スレッドを開始/継続 — 下記参照）。 |
-| `ask_all` | 同じ質問を、無料かつ非 limited のすべてのレーンへ並列にファンアウトします。`synthesize: true` で一致/相違の要約を追加。`include_paid: true` で limited/paid レーンにも問い合わせます。 |
-| `ask_cascade` | **自動フォールバック付き** で1つのモデルに尋ねます — レーンを安い順→強い順に試し、クールダウン中のものを飛ばし、クォータ/認証/タイムアウトで次へ進みます。最初の成功と、試行の軌跡（コストティア、レイテンシ、なぜスキップしたか）を返します。 |
-| `ask_best` | コスト・健全性・実測レイテンシ **そしてあなた自身の `rate_lane` スコア** から、**モード別に1つのレーンを選び**（`fast`/`cheap`/`deep`/`code`/`review`/`security`）、フォールバック付きで実行します。「ちょうどいいモデルを使って」用 — `ask_all` は比較、`ask_cascade` は素朴な安い順優先です。 |
-| `rate_lane` | **ルーターを教育。** タスク種別（`mode`）に対するレーンの回答を1〜5で採点 → `ask_best` は以後、**あなたのマシン上で** そのモードを制するレーンを優先します。sqlite に保存（`/compact`/再起動を生き延びる）。レーンが舵取りを始める前に2件の評価という下限があるので、フィードバックは正直でノイズになりません。`ask_best` の回答はすべて、実際の呼び出しを表示します。 |
-| `route_plan` | あなたのプロファイル＋現在のクールダウンを踏まえ、`ask_cascade` が試す順序を表示します（読み取り専用、何も実行しません）。`mode` を渡すと `ask_best` をプレビューできます — 各レーンの現行レーティングも含めて。 |
-| `ask_all_async` / `job_status` / `job_result` / `job_cancel` / `jobs_list` | ファンアウトを **バックグラウンドジョブ** として実行し、1秒未満でジョブ ID を返します。これにより、遅い評議会の実行がホストのツール呼び出し締切に当たらずに済みます。キャンセルは委任先のプロセスグループを停止します。 |
-| `review_diff` | git diff のマルチモデルコードレビュー: レーンが **異なる観点**（正確性 / セキュリティ / テスト / 保守性）で並列にレビューし、それぞれが JSON の指摘を返します。決定論的な事前チェック（シークレット、危険なシェル）が下地を作り、指摘は **ファイル/行/タイトルでマージ** され、一致度ベースの確信度（single/majority/consensus）が付きます。`output_format: markdown`（既定）または `json`。パラメータ: `cwd`、`base`（既定 HEAD）、`diff`、`include_paid`、`timeout_s`。 |
-| `security_review` | git diff の OWASP を踏まえた **セキュリティ専用** レビュー（インジェクション / 認証＆アクセス制御 / シークレット＆暗号 / データ露出＆SSRF）→ 深刻度順の指摘＋ `residual_risk` セクション。 |
-| `debate` | 複数のモデルが質問に答え、**互いの回答を見て修正** を、限られたラウンド（既定1、最大3）にわたって行い、その後 **独立したジャッジ**（3レーン以上のときは議論から除外）が最終的なコンセンサス＋残る相違を書きます。本番運用で堅牢化済み: `context_files` は主要ファイルをすべての議論者プロンプトに注入し（**グラウンディング** — これがないと評議会はあなたのブリーフを言い換えるだけ）、**ファクトチェックパス**（無料レーン、既定でオン）が評決の検証不能なコマンド/タグ/バージョンにフラグを立て、主張には出所タグ（`[brief]`/`[own-knowledge]`/`[verified]`）が付き、薄いブリーフには linter 警告が出て、`steelman: true` は満場一致の評決に対し、ジャッジが再結論する前に1つのレーンに *反論* させます。`summary_only` は完全な立場を落とします（トークン約60〜80%削減）。`dry_run` は何かが送られる前に、プリフライトのデータマニフェスト（どのファイル/文字がどのベンダーに渡るか）を返します。パラメータ: `task`、`rounds`、`adversarial`、`context_files`、`fact_check`、`summary_only`、`allow_self_judge`、`steelman`、`dry_run`、`include_paid`、`cwd`、`timeout_s`。 |
-| `consensus` | 「LLM 評議会」をより良く: 各レーンがブラインドで回答し、その後 **匿名化された回答をランク付け**（自分びいきなし）、票は **決定論的に**（Borda カウント）集計され、**ピア投票で1位の回答が逐語的に返されます** — *最良の回答を選ぶ* ことは、それらを *混ぜ合わせる* ことに勝るからです（arXiv 2603.20324: 統合は42タスク中0で選好、選択が勝つ、Glass's Δ≈2.07）。`synthesize: true` は議長によるブレンド（より弱いモード）を選びます。最終回答＋ピア投票のランキング表を返します。`dry_run` は起動せずにプリフライトのデータマニフェスト（どのファイル/文字がどのベンダーに渡るか）を返します。`context_files` グラウンディングと `summary_only` に対応。パラメータ: `task`、`context_files`、`synthesize`、`summary_only`、`dry_run`、`include_paid`、`cwd`、`timeout_s`。 |
-| `challenge` | ある主張を **1つの外部レーン** に批判的再評価プロンプトとともに渡します → 独立した懐疑的レビュー（誠実性ガードレール付き — 相違を捏造しません）。行動する前に、自分の結論を圧力テストしましょう。任意の `lane`。 |
-| `premortem` | 各レーンが計画が **すでに失敗した** と想像し、起こりうる失敗モード＋緩和策を列挙します。優先順位付きのリスクリストにマージされます。構築する前に実行しましょう。 |
-| `test_plan` | git diff または説明から、優先順位付きの **テストプラン**（挙動、エッジケース、具体的なケース）を導出します。 |
-| `commit_msg` | ステージ済みの diff から **Conventional Commit** メッセージを生成します（ワーキングツリーにフォールバック）。読み取り専用 — テキストを出すだけで、コミットはしません。任意の `lane`、`cwd`。 |
-| `pr_describe` | ブランチの diff ＋ベース（既定 origin/main → main）に対するコミットログから、**PR タイトル＋説明**（Summary / Changes / Testing）を生成します。読み取り専用。任意の `base`、`lane`、`cwd`。 |
-| `ask_build` | **本物のビルドを発注。** `mode=isolated`（既定）は使い捨て worktree を編集し **diff** を返します — リポジトリは無傷。`mode=direct` は対象ディレクトリへ直接ビルドし、git + **ゾーン契約**で防御します（委譲先は `zone` 内にのみ書き込み；ゾーン外への書き込みは検出され巻き戻され；取り消しはゾーン単位で、全体 reset は決して行いません）— よってホストは**同じリポジトリ内で並行に**他の部分をビルドできます。`async=true` で**操縦可能**に。`dry_run` は brief をプレビュー。（`ask_build_isolated` はレガシー別名。） |
-| `job_tail` / `build_steer` | **人間のようにビルドを追って操縦。** `job_tail(job_id, offset)` は進捗ログをストリーム（バイトオフセット指定）。`build_steer(job_id, instruction, interrupt)` は次のターンへ修正をキュー、または `interrupt=true` で現在のターンを中断（すでに書かれたファイルは保持）。任意の実行可能な **Definition of Done**（`dod_cmd`、argv リスト）が各ターン後に走ります — 成功 = 完了、失敗 = エラーを差し戻してもう一ターン。 |
-| `batch_run` | **永続的なファンアウト**: N 回ではなく**一度の呼び出し**で多数の独立リクエストを並行実行（ホストのコンテキスト + クォータを節約）。各結果が記録されるため、`resume_id` は完了済みタスクを再生し残りだけを実行 — **サーバー再起動を生き延びます**。`async` 可。 |
-| `workflow` | バッチ基盤の上に載る**すぐ使えるマルチモデルワークフロー**。**`refine_plan`** — 評議会に、異なる観点からあなたの計画を **解体** させます（`plan_file` を渡せば各レーンが自分で読み、決して再コピーしません）。`council_review`（N レーンが一つの問いに回答 + 任意の審判）、`map_review`（多数のファイルを並行レビュー）、`research_verify`（回答してから敵対的にクロスチェック）。すべて再開可能 + `async` 可。 |
-| `list_models` | CLI が公開している場合に、レーンの利用可能なモデルを一覧します（`lane` パラメータ）。そうでない場合は、解決された既定モデル＋選び方を表示します。（ネイティブの list コマンドを持つレーンには `list_<lane>_models` も存在します。） |
-| `conversations_list` / `conversation_show` | 最近の **円卓スレッド** を一覧（コンテキストリセット後に ID を回復）／ あるスレッドの完全なトランスクリプトをレーン別の帰属付きで表示します。 |
-| `doctor` | ヘルスチェック: インストール済みの CLI、検出されたホスト、コスト/クォータの方針、クールダウン、既定値。`deep: true` は各無料レーンの認証をライブで探り、**各レーンのフラグをその `--help` と照合** します — CLI がフラグを改名/削除して cli-bridge が依存しているものがずれた場合（ドリフト）、レーンが静かに失敗する前に警告します。 |
-| `usage_report` | ローカル限定の統計: 実行回数、レーン別の成功/レイテンシ、**推定** トークン数（chars/4）＋クレジット（レーン別 `CREDITS_PER_1K`）。`since`、`format=text\|json`。 |
-| `usage_budget` | 今日のレーン別実行回数 対 `CLI_BRIDGE_<LANE>_DAILY_LIMIT` ＋推定支出。上限を超えたレーンにフラグを立てます。 |
-| `lane_stats` | レーン別の健全性: 実行回数、失敗、連続失敗/タイムアウト、有効なクールダウン。 |
-| `reset_lane_state` | レーンのクールダウン/失敗カウンタをクリアします（再ログインやクォータリセット後に）。 |
-| `setup` | インストール済みレーンを、その *出典付きの* 典型プランコスト（free/limited/paid — あなたのアカウントから検出することは決してない）とともに一覧し、実際にどれを支払っているか尋ね、確認用に **プロファイル＋日次上限を推奨** します — そしてユーザーをそのプロセスに沿って案内します。 |
+各ブロック：*いつ使うか*の一文、正確な呼び出し、そして*何が返るか*。
 
-**人間向けの CLI** もあります — ターミナルや CI から使う同じエンジン:
-`cli-bridge init`（CLI を検出＋MCP の結線を表示）、`doctor`、`ask <lane> <task>`、`ask-all`、
-`ask-best --mode`、`review-diff --base origin/main --json`、`bench --lane gemini --prompt … `
-（レイテンシ p50/p95/p99）、`usage`、`budget`、`jobs`、`setup --write`。PR レビュー用の
-GitHub Action（セルフホストランナー）は `../../examples/github-action-pr-review.yml` を参照。
+### アシスタントが持たない能力を借りる
+各 CLI には異なるスーパーパワーがあり、それぞれ非対話モードで動く——だから cli-bridge は起動できます。ホストに
+欠けたものを借りましょう（インストール済み＋ログイン済みである必要があります）：
 
-**既定では読み取り専用、書き込みはオプトイン。** 委任先は通常、分析して回答します — 編集はホストが
-適用します。`agent: "build"` を渡すと **直接ファイルを編集** させられます（例: *"ask gpt to
-implement this function"*）: claude → `--permission-mode acceptEdits`、gpt → `--sandbox
-workspace-write`、mistral → `--agent accept-edits`、gemini → `--yolo`（または `agy`
-`--dangerously-skip-permissions`）、opencode → `--agent build`。ビルド可能なレーンは
-非・読み取り専用として注記され、`build` の実行がキャッシュから返されることは決してありません。
+| スーパーパワー | どの CLI が持つか | こんなとき借りる |
+|------------|------------------|----------------|
+| **画像** | Codex（`gpt-image-2`、**API キー不要**——ChatGPT プラン経由） | ホストが描けないとき |
+| **巨大コンテキスト** | Gemini（100 万トークンの窓） | ファイル／リポジトリがホストのコンテキストに収まらないとき |
+| **新鮮な知識** | Gemini（Google 検索グラウンディング）· Grok（ライブ web/X）⚗️ | 学習打ち切りを越える：*「`<lib>` の現在の API は？」* |
+| **ビジョン** | Gemini（`images=[…]`）⚗️ | スクリーンショットや図を解析する |
+| **無料のセカンドオピニオン** | Gemini（無料の日次枠）· opencode · Ollama（ローカル、0 $） | 0 $ のクロスチェック |
+| **生成ファイル** | 任意のビルドレーン → artifact-return | チャート／PDF／図を**パスで**受け取る |
+| **動画** ⚗️ | Gemini（Veo）· Grok（Imagine）——*インストール済み CLI が公開していれば* | 生成クリップが必要なとき |
 
-### 本物のビルドを委譲する — あなたのリポジトリ内で、監督つきで
-
-`ask_build` は委譲先を、コピー用の diff だけでなく **完全で本物の** 成果を出すチームメイトに変えます。2 つのモード:
-
-- **`mode=isolated`**（既定、最も安全）— 委譲先は HEAD 地点の使い捨て git worktree を編集し、あなたは
-  diff を受け取って自分で適用します。あなたのリポジトリは一切動きません。
-- **`mode=direct`** — 委譲先が `target_dir` に **本物のファイル** を書くので、あなた（ホスト）は
-  **同じリポジトリ内で並行に** 他の部分をビルドできます（例: *「私はバックエンド、codex は `frontend/`」*）。
-  安全は隔離ではなく git + **ゾーン契約** によります:
-  - brief は委譲先に、**`zone` 内**（`target_dir` 配下のパス）にしか書けないと伝えます;
-  - 取り消しはすべて **ゾーン単位**（`git checkout -- <zone>` + `git clean -fd <zone>`、全体
-    `git reset --hard` は決して行わない）なので、ゾーン外の未コミット作業は決して触られません;
-  - **ゾーン単位のロック** は互いに素なゾーンの同時ビルドを許しつつ、同一ゾーンへの 2 つのビルドは拒否します;
-  - 各ターン後の **グローバルな `git status`** が、ゾーン外への書き込み（`../`・絶対パス・シンボリックリンク
-    による脱出）をすべて検出して **ビルドを巻き戻します** — git のスコープ指定は git 操作を守りますが
-    サブプロセスをサンドボックス化はできないため、このチェックは必須です。欠落/空の `target_dir` は作成され
-    `git init` されます。
-
-**追って操縦する。** `async=true` で起動して `job_id` を得たら:
-
-- `job_tail(job_id, offset)` がビルドの進捗をストリームし、ステップ要約を投稿できます;
-- `build_steer(job_id, "インライン CSS ではなく Tailwind を使って")` が次のターンへ修正をキュー;
-  `build_steer(job_id, interrupt=true)` は現在のターンを中断（書かれたファイルは保持）;
-- `dod_cmd`（**argv リスト**、例: `["npm","run","build"]`、shell 文字列は不可）を渡せば、各ターン後に
-  Definition of Done を **本当にテスト** します — 成功 = 完了、失敗 = エラーを差し戻してもう一ターン、
-  `max_fail_retries`（既定 3）と `max_turns`（12）で上限。
-
-連続性はファイルシステムです（委譲先は毎ターン自分のファイルを読み直す）; 生のトランスクリプトは委譲先 CLI
-自身のセッションに残り、cli-bridge は `job_tail` 用のステップログを保持します。
-
-### ビルド前に計画を圧力テストする（`workflow refine_plan`）
-
-cli-bridge はコードを書く前に *計画を解体する* のが得意です。`workflow preset=refine_plan` は計画を
-複数のレーンへファンアウトし、各レーンが **異なる観点**（技術的欠陥と失敗モード / 抜け / 過剰設計 / 順序付け）
-から批判し、所見をまとめてあなたが統合できるようにします — または `judge_lane` を渡せば、重複排除して
-重大度順に並べた単一のパッチ一覧が得られます。
-
-```jsonc
-// 一度の呼び出し → N 個の CLI がそれぞれ別の観点から計画を切り刻む
-{ "preset": "refine_plan", "plan_file": "docs/plan.md", "judge_lane": "gpt" }
+```
+ask_build(lane="gpt", task="generate a 1200×630 social card to assets/card.png", zone="assets")   # Codex image → file by path, no API key
+ask_gemini(task="find the bug across ./src — read the files you need", cwd="path/to/repo")         # 1M-token context
+ask_gemini(task="what's the current recommended API for <lib>? check the latest docs")            # fresh knowledge (Search grounding)
+ask_gemini(task="what's wrong in this UI?", images=["screenshot.png"])                             # vision (experimental)
 ```
 
-本文ではなく **`plan_file`**（パス）を渡してください: 各レーンが自分の作業ディレクトリからファイルを読むので、
-計画が **N 個のプロンプトに再コピーされることは決してありません** — これがあらゆる成果物レビュー
-（`map_review`・`review_diff`・`debate context_files` も同じ）でのトークン節約な既定です。すべての
-`workflow`/`batch_run` と同様、**再開可能**（`resume_id` が再起動後に完了済みタスクを再生）で `async` 実行も可。
+⚗️ = 実験的／インストール済み CLI の現在のビルドに依存（例：Grok Build はベータ）——`doctor deep` で確認。
 
-**呼び出しごとにモデルを選ぶ** には `model` を使います（例: `model: "claude-opus-4-6"`）。ホストの
-内側からは、**自分と同じ系統の兄弟モデル** を相談することすらできます — `ask_<your-host>` は
-明示的な `model` を必要とする別ツールとして現れるので、Claude Code から 4.8 を動かしながら
-Opus 4.6 に尋ねられます。（Antigravity の `agy` には呼び出しごとのモデルフラグがありません —
-自身の設定が選ぶものを使います。）
+### 上限に達しても作業を止めない
+メインのサブスクがタスク途中で枯渇したとき。`ask_cascade` は、すでに支払っている別のレーンへフォールバックし、
+クォータ／認証／タイムアウトのエラー後にクールダウン中のレーンをスキップします。
 
-**円卓の会話。** 任意の `ask_<lane>` に `conversation: "new"` を渡すとマルチターンのスレッドを
-開始できます。返された ID を再利用すれば — **別のレーンでも** — 継続できます。各レーンは共有
-トランスクリプトを見ます。あなた自身のターンは「You」と印が付き、他は名前付きなので、評議会は
-毎回ゼロから始める代わりに互いの上に積み上げられます。トランスクリプトはローカル（sqlite）に
-保存されるので、スレッドは **ホストのコンテキストリセット（`/compact`）とサーバー再起動を生き延びます** —
-`conversations_list` で回復し、`conversation_show` で読みます。スライディングウィンドウ
-（`CLI_BRIDGE_CONVO_MAX_CHARS`、既定 32000）が最新のターンを保ち最古を落とすので、スレッドが
-どれだけ長く続いても、ターンあたりのコストは一定に抑えられます。
+```
+ask_cascade(task="finish wiring this endpoint")   # cheapest→strongest; a cooled-down lane is skipped
+ask_best(task="…", mode="deep")                   # let the router pick the most suitable available lane
+```
 
-opencode の場合、空の `model` は `opencode models` に現在の `opencode/*-free` リストを尋ね、
-その1つを使います（$0 のレート制限ティア）。パターン＋ソートで選ばれ — 固定名は決して使わないので、
-廃止された無料モデルは自動的に置き換えられます。これは **コスト安全** です: 素の `opencode/*` Zen
-モデルはトークン単位で課金され（API コスト）、`opencode-go/*` はプリペイドクレジットを使うので、
-既定が静かに有料モデルを選ぶことはありません — 必要なときは明示的に渡してください。ルックアップが
-失敗した場合は無料のシードにフォールバックします。自分の既定を固定するには
-`CLI_BRIDGE_OPENCODE_MODEL` を設定してください。
+### 力仕事をオフロード——並列で、安く
+作業が退屈だが難しくないとき（リファクタ、マイグレーション、テストカバレッジ）。ジャーナル付きで分散させ、
+サーバー再起動時に最初からやり直すのではなく再開できるように。ビルドを委譲して作業を続けましょう。
 
-`ask_all` はレーン別の呼び出しを短く保ちます（既定45秒、最大60秒）。これにより MCP ホストは、
-自身のツール呼び出し締切より前に応答を得られます。遅い/深い回答が欲しい場合は、そのレーンを
-より長い `timeout_s` で直接呼び出してください。
+```
+batch_run(tasks=[...], dry_run=true)                       # cost envelope first — nothing is spawned
+batch_run(tasks=[...], max_calls=20, max_credits=2.0)      # then run under a hard budget (resumable)
+ask_build(lane="opencode", task="add the landing page", zone="frontend", mode="direct", async=true)   # delegate, keep building
+job_tail(job_id="…")  ·  build_steer(job_id="…", instruction="use Tailwind, not inline CSS")
+```
+
+### 自己確認を打破する——単一ベンダーには解けない 2026 年の問題
+結果を*信頼*する必要があるとき。自分の作業（または兄弟の作業）をレビューするモデルは、自分の盲点を確認する
+だけです。cli-bridge は**別のモデルファミリー**をレビュアー席に座らせます。
+
+```
+workflow(preset="jury", task="is this migration safe?", author_lane="gpt")            # cross-family vote, fail-closed
+workflow(preset="verify_repair", task="add retry with backoff",
+         builder_lane="gpt", verifier_lane="gemini")                                   # A builds, B reviews, loop to green
+security_review(base="origin/main")   ·   review_diff(base="origin/main")              # OWASP, severity-ranked
+```
+
+### 本物のセカンドオピニオンを得る
+結論に達して、それを圧力テストしたいとき、または複数のモデルを並べて見たいとき。
+
+```
+challenge(task="I'm dropping the cache layer — here's why: …")                         # one skeptic attacks it
+consensus(task="which migration strategy is safest here?")                             # N answer, peer-rank the best
+workflow(preset="fanout_compare", task="fix this failing test", lanes=["gpt","gemini","opencode"])
+```
 
 ---
 
-## 設定
+## ツールボックス全体
 
-すべて環境変数です — コード編集なし。**あなたの** サブスクに合わせて調整してください:
+すべてのツールを、目的別にグループ化。`CLI_BRIDGE_LEAN=1` で厳選された約 12 ツールの面に；
+`CLI_BRIDGE_DISABLED_TOOLS` / `CLI_BRIDGE_ENABLED_TOOLS` で任意のものを隠す／表示する。
 
-| 変数 | 効果 |
-|----------|--------|
-| `CLI_BRIDGE_<LANE>_COST` | `free`、`limited`、または `paid`。`free` は `ask_all` に参加；`limited` はクォータに敏感で広域ファンアウトからは飛ばされる；`paid` はお金/クレジットを使い、既定で飛ばされる。 |
-| `CLI_BRIDGE_<LANE>_ENABLED` | `false` で、CLI がインストール済みでもレーンを隠す。 |
-| `CLI_BRIDGE_<LANE>_BIN` | レーンを別のバイナリに向ける（例: `CLI_BRIDGE_GEMINI_BIN=agy`）。 |
-| `CLI_BRIDGE_<LANE>_MODEL` | 呼び出し元がモデルを渡さない場合の、レーンの既定モデル。 |
-| `CLI_BRIDGE_PROFILE` | `saver`、`balanced`、または `max`。`max` は、呼び出し元が `include_paid` を上書きしない限り、`ask_all` に limited/paid レーンを含める。 |
-| `CLI_BRIDGE_HOST` | ホストの識別を強制する（どのレーンを隠すか）。通常は自動検出。 |
-| `CLI_BRIDGE_LANES_FILE` | **自分の** CLI/API をレーンとして追加する JSON ファイルへのパス。 |
-| `CLI_BRIDGE_DISABLED_TOOLS` | 一覧から隠すツール名のカンマ区切り（例: `debate,premortem,test_plan`） — すべてのホストがリクエストごとに支払うスキーマのコンテキストを削ります。`doctor`/`setup` は隠せません。 |
-| `CLI_BRIDGE_ENABLED_TOOLS` | 環境変数1つの **lean モード** のための許可リスト: 設定すると、これらのツール（＋ `doctor`/`setup`）だけが公開されます（例: `ask_best,ask_all,review_diff`）。 |
-| `CLI_BRIDGE_<LANE>_PRIORITY` | 小さいほど `ask_cascade` で早く実行される（既定50）。好みの順序を固定。 |
-| `CLI_BRIDGE_INLINE_MAX_CHARS` | これを超えると、回答はコンテキストを溢れさせる代わりにファイルに退避します（既定12000）。 |
-| `CLI_BRIDGE_TERSE` | `off` / `lite`（既定）/ `full` / `ultra`。委任先プロンプトの先頭に簡潔な応答スタイルのプリアンブルを付けます（英語、内部で十分に推論し、簡潔に答え、コード/JSON はそのまま）。これによりあなたのコンテキストと委任先の出力トークンの両方を削ります。構造化ワークフローツールには決して適用されません。 |
-| `CLI_BRIDGE_TERSE_MIN_CHARS` | この文字数より短いタスクには terse プリアンブルを飛ばします（既定 `0` = 決して飛ばさない）。小さなタスクはプリアンブルの固定オーバーヘッドを取り返せません。 |
-| `CLI_BRIDGE_GUARD` | `off` / `warn`（既定）/ `strict`。**委任先の出力** をプロンプトインジェクション / ツールポイズニングについてスキャンします；`warn` はバナーを前置し、`strict` は本文を差し控えます。シークレット伏字化の後に実行されます。 |
-| `CLI_BRIDGE_MOCK` | `1` = ドライラン: レーンはインストール済みと報告し、どの CLI も起動せずに定型の回答を返します。**CLI を1つもインストールせずに** ツール全体を試せます。 |
-| `CLI_BRIDGE_RETRIES` | TRANSIENT な失敗時のリトライ回数（既定1）。不安定な CLI を初回で動かします；クォータ/認証/not-found/タイムアウトはリトライされません。 |
-| `CLI_BRIDGE_TRACE_DIR` | 設定すると、各委任は伏字化された JSON トレース（argv、タイミング、出力）をここに書きます — 再現可能なデバッグ / 監査。既定でオフ。 |
-| `CLI_BRIDGE_MAX_PARALLEL` | `ask_all` での同時委任起動数の上限（既定6）。幅広い評議会（多数のカスタムレーン）が小型マシンを OOM させたり、クォータをバーストさせたりするのを防ぎます。 |
-| `CLI_BRIDGE_DAILY_CREDIT_CAP` | UTC 日ごとの *推定* 有料支出のハード上限。>0 で、今日の推定がそれに達すると有料レーンを拒否します — 「コスト安全」を報告だけでなく強制可能にします。無料レーンは決してゲートされません。 |
-| `CLI_BRIDGE_ALLOW_LANES` | 許可リスト、例: `gemini,gpt`。空 = すべて。ロックダウン / チーム構成: これらのレーンだけが公開されます。 |
-| `CLI_BRIDGE_DISABLE_BUILD` | `1` で、呼び出し元が `agent: build` を求めても、すべての委任を読み取り専用（plan）に強制します。共有マシン向け。 |
-| `CLI_BRIDGE_OVERFLOW_MAX_FILES` | オーバーフローディレクトリのファイル数上限（既定200）；それを超える最古のものは刈り取られ、`/tmp` が無制限に増えないようにします。 |
-| `CLI_BRIDGE_CONFIG_FILE` | JSON 設定へのパス（既定 `~/.config/cli-bridge/config.json`）。環境変数よりも親切な代替手段 — **環境変数が常に勝ちます**。下記参照。 |
-| `CLI_BRIDGE_CACHE_TTL_S` | `0` = オフ（既定）。`>0` のとき、この秒数以内の同一呼び出しは、CLI を再起動する代わりにキャッシュされた回答を返します（繰り返しでクォータ/クレジットを節約；ビルド実行は決してキャッシュされません）。 |
-| `CLI_BRIDGE_<LANE>_CREDITS_PER_1K` | レーンの1kトークンあたりクレジット。`usage_report`/`usage_budget` が支出を **推定** するのに使います（chars/4）。 |
-| `CLI_BRIDGE_<LANE>_DAILY_LIMIT` | レーンの1日あたり最大実行回数；超過すると `usage_budget` がフラグを立てます。 |
-| `CLI_BRIDGE_<LANE>_MIN_INTERVAL_S` | バースト防止の起動ペーシング: このレーンの起動間の最小秒数（既定 `0` = オフ）。無料ティアが連続呼び出しでレート制限される場合に設定（例: `2`） — 同一レーンのバーストは均等に間隔が空き、他のレーンは並列のまま。`lane_stats` はレーンがレート制限のパターンを示したときにヒントを出します。 |
-| `CLI_BRIDGE_KEEP_WORKTREES` | `ask_build_isolated` の worktree を破棄せず保持します（検査用）。 |
-| `CLI_BRIDGE_REVIEW_TIMEOUT_S` | `review_diff` / `security_review` のレビュアー別タイムアウト（既定180；これらは `ask_all` より意図的に重い）。 |
-| `CLI_BRIDGE_OVERFLOW_TTL_H` | 退避したオーバーフローファイルが刈り取られるまでの時間（既定24）。 |
-| `CLI_BRIDGE_TELEMETRY` | `off` でローカルの実行ログ / クールダウン追跡を無効化（既定オン、マシンローカルのみ）。 |
-| `CLI_BRIDGE_TRACE_FOOTER` | `off` でワークフローレポートの `## Trace` JSON フッターを隠します — ターミナルで読む人間には見やすくなります；MCP ホストは通常それを求めます（既定オン）。 |
-| `CLI_BRIDGE_STATE_DB` | ローカルの sqlite 状態 DB へのパス（既定 `~/.local/share/cli-bridge/state.sqlite`）。 |
-| `CLI_BRIDGE_STORE_TRANSCRIPTS` | `true` で、テレメトリにより長いタスクプレビューを保持します（既定: ハッシュ＋60文字のプレビューのみ）。 |
-| `CLI_BRIDGE_LOG` / `_LOG_FILE` | `debug`/`info` で、何がどこで実行されたかをログします（既定: 無音）。 |
+### コンサルト（読み取り専用）
+| ツール | 何をするか | こんなとき使う |
+|------|--------------|-------------------|
+| `ask_<lane>` | 特定の CLI に尋ねる——`ask_claude`、`ask_gpt`（Codex）、`ask_gemini`、`ask_mistral`、`ask_opencode`、`ask_ollama`、インストール済みなら `ask_qwen`/`ask_grok`/`ask_copilot`。`role="reviewer\|security\|planner\|devil"`、`conversation`（ラウンドテーブルの記憶）、Gemini の `images=[…]` をサポート。 | 特定モデルの強み・ペルソナ・モダリティが欲しいとき。 |
+| `ask_all` | 同じ質問を各*無料*レーンに並列で；各回答**＋不一致スコア**を返す。`synthesize: true` で一致／不一致の要約を追加。 | 速く幅が欲しく、モデルが分かれる箇所（＝不確実性）の signal が欲しいとき。 |
+| `ask_cascade` | 決定論的順序でレーンを試し、最初の良い回答で停止、クールダウン中のレーンをスキップ；任意の確信度エスカレーション。 | 回復力が欲しい：上限／失敗したレーンは自動でスキップ。 |
+| `ask_best` | ルーターが `mode`（`fast/cheap/deep/code/review/security`）＋あなたの `rate_lane` スコアで最適レーンを選ぶ。 | 手でレーンを選びたくないとき。 |
+| `ask_all_async` + `job_status`/`job_result`/`job_cancel`/`jobs_list` | `ask_all` をバックグラウンドジョブとして発火（id は <1 秒）。 | ファンアウトが遅く、作業を続けたいとき。 |
+| `consensus` | N レーンが回答し、ピアがランク付けして最良を**選ぶ**（選択は統合に勝る）。 | 混ぜ合わせより、擁護できる単一の回答が重要なとき。 |
+| `challenge` | 1 レーンが、あなたが提供する結論に対して懐疑役を演じる。 | コミットする前に自分の論理を攻撃してほしいとき。 |
+| `conversations_list` / `conversation_show` | 永続的なラウンドテーブルのスレッドを一覧／読む（`/compact` や再起動を生き延びる）。 | マルチモデルのスレッドを復旧・閲覧したいとき。 |
 
-### 設定ファイル（環境変数の壁の代わりに）
+### ビルド（オプトイン書き込み）
+| ツール | 何をするか | こんなとき使う |
+|------|--------------|-------------------|
+| `ask_build` | 本物のビルドを委譲。`mode=isolated`（デフォルト）は使い捨てワークツリーを編集 → **diff**；`mode=direct` は宣言した `zone` に書き込む（ゾーン毎ロック＋ターン後のゾーン違反チェック）。`async=true` で操縦可能なジョブとして実行。非テキスト出力は**パスで**返る（artifact-return）。 | 提案ではなく作業を*完了*させたいとき——レビュー付きまたはハンズオフ。 |
+| `ask_build_isolated` | `ask_build` の `mode=isolated` の便利なエイリアス——常に diff を返し、あなたのツリーを決して触らない。 | `mode` を設定せず、安全な diff 経路を名前で使いたいとき。 |
+| `job_tail` | 実行中のビルドの進捗ログをストリーム（バイトオフセット単位）。 | 委譲先が働くのを見たいとき。 |
+| `build_steer` | 次ターン用の操縦指示をキューに入れる、または `interrupt=true` で現在のターンを切る（ファイルは保持）。 | 再起動せずビルド途中で軌道修正したいとき。 |
 
-ファイルの方が好み？ `~/.config/cli-bridge/config.json` を置く（または `CLI_BRIDGE_CONFIG_FILE` で
-指す）だけです。あなたが設定していない環境変数を補完します — **環境変数が常に勝ち**、ファイルが
-なくても既定値はそのまま機能します:
+非同期ビルドは実行可能な **Definition-of-Done** ゲート（`dod_cmd`）に対して走ります——委譲先の成功主張は、
+信じるのではなく*テスト*されます。
 
-```json
-{
-  "profile": "balanced",
-  "guard": "warn",
-  "daily_credit_cap": 5.0,
-  "lanes": {
-    "gemini":   { "cost": "free" },
-    "opencode": { "cost": "free", "model": "opencode/deepseek-v4-flash-free" },
-    "gpt":      { "cost": "limited", "daily_limit": 50 }
-  }
-}
-```
+### レビュー＆検証
+| ツール | 何をするか | こんなとき使う |
+|------|--------------|-------------------|
+| `review_diff` | diff の構造化レビュー → findings（重大度、ファイル、根拠）、single/majority/consensus の確信度でレーン横断に決定論的にマージ。 | 変更が着地する前に。 |
+| `security_review` | OWASP 志向、重大度順のセキュリティパス＋`residual_risk` セクション。 | 変更が認証・入力処理・シークレットに触れるとき。 |
+| `debate` | モデルが有限ラウンドで互いを批評し、`VOTE` フッター＋収束による早期停止で終わる；独立した審判が結論する。 | 本当に争点のある決定。 |
+| `premortem` / `test_plan` | 計画の故障モード分析 / diff または説明からの優先順位付きテスト計画。 | コードを書く前に。 |
+| `commit_msg` / `pr_describe` | ステージ済み diff からの Conventional-Commit メッセージ / ブランチからの PR タイトル＋本文。読み取り専用——テキストを出力。 | コミットや PR を開く直前。 |
+| `workflow(preset=…)` | 名前付きパイプライン：`jury`（ファミリー横断 k-of-N 投票、fail-closed）、`verify_repair`（モデル横断のビルド→レビュー→修復ループ）、`refine_plan`、`fanout_compare`、`council_review`、`map_review`、`research_verify`。 | 検証済みの多段パターンを 1 呼び出しで欲しいとき。 |
 
-### 自分の CLI を追加する（フォークなし）
+### オーケストレート
+| ツール | 何をするか | こんなとき使う |
+|------|--------------|-------------------|
+| `batch_run` | 多数タスクへの耐久性ある**ジャーナル付き**ファンアウト。`dry_run=true` はコスト見積り（何も起動しない）；`max_calls`/`max_credits` で支出を上限；`resume_id` は完了タスクを再生し、再起動後は残りだけ実行。 | 上限付き・クラッシュ安全にしたい大量作業。 |
 
-`my-lanes.json` を作り、`CLI_BRIDGE_LANES_FILE=/path/to/my-lanes.json`:
+### 運用
+| ツール | 何をするか | こんなとき使う |
+|------|--------------|-------------------|
+| `usage_report` / `usage_budget` | 推定トークン／クレジット会計（chars/4——正直に推定値とラベル付け）＋日次上限に対する予算管理。 | 請求を見たい／上限を設けたいとき。 |
+| `rate_lane` / `route_plan` | あるモードでレーンを 1〜5 で採点し `ask_best` にあなたのスタックを学ばせる / カスケードが試す順序をプレビュー。 | ルーターを時間とともに改善したいとき。 |
+| `lane_stats` / `reset_lane_state` | レーン毎の健全性、クールダウン、「席を勝ち取る」陪審シグナル / レーンのカウンタをリセット。 | レーンの挙動が悪い、または席レポートが欲しいとき。 |
+| `set_lane_cost` | レーンが*あなたに*いくらかを記録（「Codex は私のプランでは無料」）——永続化、`setup` 不要。 | ついでに価格の事実を伝えたとき。 |
+| `doctor` / `setup` | インストール済み CLI ＋解決済みパスを検出；`doctor deep` は各レーンを自身の `--help` に対してあなたのマシン上で検証。 | 初回、またはレーンが壊れたとき。 |
+| `list_models` / `list_<lane>_models` | CLI が公開している場合にレーンのモデルを一覧。 | 特定のモデルを選びたいとき。 |
 
-```json
-[
-  {
-    "key": "aider", "display": "Aider", "bin": "aider",
-    "ask": ["--message", "{task}"], "model_flag": "--model",
-    "client_ids": ["aider"], "note": "Aider one-shot via --message."
-  }
-]
-```
+**人間向け CLI**（`cli-bridge doctor|ask|ask-all|ask-best|build|review-diff|eval|…`）もあります——
+ターミナルや CI から同じエンジン（どこでも `--json`）。`cli-bridge build <lane> "<タスク>"` は使い捨て
+ワークツリーのレーンに本物のビルドを委譲し、**diff** を出力します——あなたのリポジトリは決して触られません。
 
-これで `ask_aider` ツールが手に入ります。（組み込みキー、例えば `grok` を持つカスタムレーンは
-組み込みを *上書き* します — インストール先のフラグが違うときに便利です。）
+---
 
-**プラグインできる広いエコシステム:** `examples/community-lanes.json` は **Aider、Goose、Plandex、
-Amp、Crush、Amazon Q Developer CLI、Droid（Factory）** のベストエフォートなレーンを同梱しています —
-すべて experimental かつ `limited` と印付け（*あなた* がコストを宣言するまで広域ファンアウトから外す）、
-そしてすべて `doctor deep` のフラグドリフトチェックの対象です。これは何かが静かに壊れる前に、
-*あなたの* マシン上で各レーンを CLI 自身の `--help` と照合します。Claude Code、Codex、
-Gemini ＋ Antigravity（`agy`）、opencode、Qwen Code、Copilot、Grok はすでに組み込み済みです。
-それ以外のもの（Cline、OpenHands、Continue、Roo/Kilo Code、Kimi K2 CLI、…）も、同じ3行 JSON で
-追加できます — そしてこれらの CLI で MCP を話せるものは、*反対側* に座って cli-bridge を自身の
-サーバーとして動かすこともできます。
+## 組み合わせると実際に何が得られるか
 
-### 自分の API を持ち込む（CLI 不要）
+**あらゆる軸で天井がエコシステムの最良**となる単一のアシスタント——今朝開いたツールではなく：最強のモデルで
+コーディング、自分のが短すぎるとき 1〜2M トークンを読む、学習打ち切りを越えて新鮮な知識で答える、画像／動画を
+生成、スクリーンショットを見る、上限のときは無料／ローカルのレーンにフォールバック——すべて、あなたがすでに
+支払っているサブスク群に分散して。
 
-`curl` を起動して、任意の OpenAI 互換エンドポイントをラップします。キーは環境変数の中に留まり、
-ファイルには決して入りません。`{task_json}` は JSON エスケープされたプロンプトです:
+**単一の CLI には無い創発的性質：真のベンダー横断の制御**——レビュアー席に*別のベンダー*を。同一ファミリーの
+サブエージェント（Claude Code の、Grok の）は自己確認しかできません。
 
-```json
-[
-  {
-    "key": "myapi", "display": "My API", "bin": "curl", "default_model": "gpt-4o-mini",
-    "paid": true,
-    "ask": [
-      "-sS",
-      "--variable", "%MY_API_KEY",
-      "--expand-header", "Authorization: Bearer {{MY_API_KEY}}",
-      "https://api.openai.com/v1/chat/completions",
-      "-d", "{\"model\":\"{model}\",\"messages\":[{\"role\":\"user\",\"content\":\"{task_json}\"}]}"
-    ]
-  }
-]
-```
+正直な継ぎ目：これは**能力を結合するもので、知性ではない**——ステートレスな spawn（共有メモリなし）、spawn の
+レイテンシ／コスト、不均一な品質、そしてホストが常に操縦します。**オーケストレーションであって融合ではない**：
+あなたは専門家を指揮するのであって、全能力を持つ単一の脳を得るのではありません。
 
-`--variable %MY_API_KEY` ＋ `--expand-header` のペア（curl ≥ 8.3）はキーを curl の *内側* に
-取り込みます — プロセスリストには決して現れません。カスタムレーンが代わりに `${ENV}` シークレットを
-argv に展開している場合、`doctor` が警告します。
+→ CLI 毎の強み＆限界（日付入り、速く変わる）：**[docs/COMPARISON.md](../COMPARISON.md)**。
 
-（両方とも `../../examples/` に、コピーできる形で用意してあります。）
+## なぜ cli-bridge か（別の「他モデルを呼ぶ」MCP ではなく）
+
+- 🛡️ **設計から ban-safe。** 各モデルの**公式 CLI** を、手で実行するのとまったく同じように起動します——OAuth
+  トークン抽出なし、API キー再利用なし。各 CLI が自身の認証と課金を扱います。
+- 💸 **プランに合わせて調整できる cost-safe デフォルト。** 標準で `ask_all` / `ask_cascade` は*無料*の
+  評議会を組み、頼まない限り有料クォータには決して触れません。各レーンはベンダー公開プラン由来のティアを同梱
+  （[docs/COSTS.md](../COSTS.md) に日付入り、**あなたのアカウントから検出しない**）；レーン毎に
+  `CLI_BRIDGE_<LANE>_COST=free|limited|paid` で上書き。
+- 🔌 **任意のホストから動く。** Claude Code、Codex、opencode、Cursor、VS Code（Cline/Continue）、Zed——
+  stdio 上で MCP を話すものなら何でも。ホスト自身のレーンはファンアウトから外され；`CLI_BRIDGE_HIDE_HOST=1`
+  で隠せます。**ローカルモデルさえホストになれます**——[`examples/local-first-host.md`](../../examples/local-first-host.md) を参照。
+- 🧭 **ベンダー横断の優位が堀。** 独立検証とはレビュアー席に*別のベンダー*を置くこと——AI がコードのより大きな
+  割合を書くにつれて希少になるもので、まさに単一ベンダーのツールが提供できないものです。
 
 ---
 
@@ -524,58 +236,132 @@ argv に展開している場合、`doctor` が警告します。
 ```
 host (Claude/Codex/…) ──MCP──> cli-bridge ──spawn──> official CLI ──> model
                                     │
-              hides the host's own lane · only shows installed, enabled CLIs
-              kills the whole process tree on timeout / cancellation
-              redacts secrets · classifies errors · spills huge output to a file
+       keeps the host's own lane out of fan-out · only shows installed, enabled CLIs
+       kills the whole process tree on timeout/cancellation · redacts secrets
+       classifies errors (auth/limit/failed) · spills huge output to a file
 ```
 
-自前のネットワーク呼び出しはありません。キーも保存しません。あなたがすでに信頼している同じバイナリを、
-あなたの作業ディレクトリで実行し、回答を返すだけです。
+自前のネットワーク呼び出しなし。鍵の保存なし。あなたがすでに信頼している同じバイナリを、あなたの作業ディレクトリ
+で実行し、答えを返します。
 
-### IDE の MCP ホストでも動く
+<div align="center">
 
-cli-bridge は stdio 上の純粋な MCP なので、MCP 対応のどのホストでも動きます — ターミナル CLI に
-限りません。Cursor / VS Code（Cline、Continue）/ Zed を **同じコマンド**（`uvx cli-bridge-mcp`、
-または `<python> -m cli_bridge`）に向けてください。ホスト自身のレーンは自動的に隠され、それ以外は
-すべて同一です。
+<img src="../../assets/demo.gif" width="860" alt="cli-bridge security-review デモ：コミットされた認可バイパスをベンダー横断の評議会が捕捉し、重大度順の 1 つのレポートにマージ、無料レーンで 0 $">
 
-### 既知の制限（正直なリスト）
+_実走（2.2 倍速）：検証レバー——`security-review` が OWASP の役割を無料モデルに並列で振り分け（ここでは
+claude/gpt/opencode/ollama）；コミットされた認可バイパスを **blocker** として指摘し、`usage` が証跡を示します。_
 
-- **Ban-safe は各プロバイダーの ToS に依存します。** cli-bridge は、あなたが手で実行する公式 CLI を
-  動かすだけです — しかし非対話/スクリプト的な利用が *保証されて* 認可されているわけではなく、変わり
-  うります。自分のアカウントを規約の範囲内で使ってください；「ban-safe」は「トークン/キーの抽出なし」と
-  捉え、包括的な保証とは捉えないでください。
-- **非同期ジョブはインプロセスです。** サーバー再起動は実行中のジョブを `interrupted` と印付けします。
-  `batch_run` と `workflow` は例外です — 各タスクを記録するので、`resume_id` が完了済みを再生し、
-  再起動後は残りだけを実行します。
-- **シェルラッパーの PATH の罠。** シェルが委譲先 CLI を関数やエイリアスで包んでいる場合（例: `.zshrc` の
-  `_opsec` ガード）、*そのシェルから* cli-bridge を起動すると壊れることがあります — しかし cli-bridge は
-  **バイナリを直接**（シェルを介さず）起動するため影響を受けません; `PATH` 上でバイナリを覆い隠すラッパー
-  だけが問題になります。`doctor` がレーンごとに解決されたパスを表示します。
-- **インジェクションガードはヒューリスティックです。** シグナルの強いパターンは捕まえますが、すべて
-  ではありません；`warn` モードではテキストは依然ホストに届きます（委任先の出力はデータとして扱って
-  ください）。
-- **トークン/クレジットの数値は推定です**（chars/4 ＋ あなたの `CREDITS_PER_1K`）、決して正確では
-  ありません。
-- **BYO-API（curl）レーン:** `${ENV}` キーは argv に代入されるので、呼び出しの実行中はこのマシンの
-  プロセスリストに現れることがあります（決してログされません — トレースは伏字化します）。可能なときは
-  プロバイダー自身の CLI を優先してください；curl では、ヘッダーファイル（`curl -H @file`）が argv
-  露出を避けます。
-- **実験的なレーン**（`qwen`、`copilot`、`grok`）: フラグはライブで未検証 — 不具合を報告してください。
-- **コストティアは出典付きの初期値で、検出ではありません** — ベンダープランの事実は2026年6月付け
-  （[docs/COSTS.md](../COSTS.md)）；プラン/クォータは入れ替わり、スナップショットが古いときは `doctor`
-  が警告します。
-- **サンドボックス化されたホスト:** ホストがサーバーを厳格なサンドボックス（読み取り専用 FS / ネット
-  ワークなし）で動かす場合、起動された CLI はそれを継承し、プロバイダーに到達できず失敗することがあり
-  ます。cli-bridge はこれをハングではなく `auth`/`failed` エラーとして表面化します。
+</div>
 
 ---
+
+## コードを安全に書く：2 つのモード
+
+書き込みは 2 通りで封じ込められます——**あなたが選ぶ** レビュー付きかハンズオフか：
+
+- **`isolated`（デフォルト）。** 使い捨ての git ワークツリーで編集し、**diff** を返す。あなたの作業ツリーは
+  決して触られません。
+- **`direct`。** 実ファイルを書きますが、**あなたが宣言した `zone` の内側だけ**、ゾーン毎ロック＋ターン後の
+  ゾーン違反チェックの背後で。あなたが `backend/`、委譲先が `frontend/` を同時に——どちらもリポジトリ全体に
+  落書きできません；取り消しはゾーン範囲で、グローバルリセットには決してなりません。
+
+委譲の再入は深さで上限（`CLI_BRIDGE_MAX_DEPTH`、デフォルト 1）——設定ミスの委譲先が評議会を fork-bomb
+できないように。
+
+---
+
+## クイックスタート（約 5 分）
+
+```bash
+# Run it (no install):
+uvx cli-bridge-mcp
+# or:  python -m cli_bridge
+
+# Point your MCP host at that same command, then:
+cli-bridge doctor        # see which CLIs are detected + their resolved paths
+```
+
+### レーン
+
+**内蔵：** Claude Code、Codex、Gemini（＋ Antigravity `agy`）、opencode、**Ollama（ローカルモデル、0 $、
+オフライン）**、Qwen Code、Copilot、Grok。
+
+**Ollama 以外のローカルランタイム**——**LM Studio · MLX · llama.cpp**——はコード不要のレシピで同梱：
+`CLI_BRIDGE_LANES_FILE` を [`examples/lmstudio.lane.json`](../../examples/lmstudio.lane.json)、
+[`mlx.lane.json`](../../examples/mlx.lane.json)、または [`llamacpp.lane.json`](../../examples/llamacpp.lane.json)
+に向けます。（*同じ*オープン重みの複数ローカルランタイムは相関した回答を返します——本当の評議会の多様性は
+別々のベンダーから来るのであって、2 つ目のローカルランタイムからではありません。）
+
+**コミュニティレーン**（`examples/community-lanes.json`、実験的＋コストを宣言するまで `limited`）：
+Aider、Goose、Plandex、Amp、Crush、Amazon Q Developer CLI、Droid。
+
+**それ以外は約 3 行の JSON。** カスタムレーンを追加するか、`curl` を起動して任意の OpenAI 互換エンドポイントを
+ラップ（鍵は curl の内側に留まり、argv には決して載りません）。レシピは [`examples/`](../../examples/) を参照。
+
+---
+
+## 正直なところ
+
+「モデルが多い＝良い」は*脆弱*です——大きなモデルは学習データを共有するため、誤りが相関します。私たちは自分の
+中心的主張を測定しました（`cli-bridge eval`、LLM 審判なし）：多様な評議会は単一の強いモデルより多くのバグを
+捕まえ**ませんでした**——誤検知を**約 2 倍**減らしました。同じ検出率、はるかに少ないノイズ——これこそ、
+レビュアーを黙殺されるのでなく信頼に値するものに保つものです。**精度こそが製品で、再現率ではありません。**
+ハーネスは同梱されるので、*あなたの* CLI で確認できます——どちらの数字も [docs/BENCHMARKS.md](../BENCHMARKS.md) に。
+
+---
+
+## 既知の制限
+
+- **Ban-safe ＝トークン／鍵を抽出しない**、包括的な保証ではありません——プロバイダー CLI の非対話利用は
+  どこでも公式に容認されているわけではなく、変わり得ます。自分のアカウントを各規約の範囲で使ってください。
+- **非同期ジョブはインプロセス**——サーバー再起動で実行中ジョブは `interrupted` になります。`batch_run` /
+  `workflow` は例外：各タスクをジャーナルし `resume_id` で再開します。
+- **インジェクションガードはヒューリスティック**——高シグナルのパターンを捕まえますが、すべてではありません；
+  委譲先の出力は命令ではなくデータとして扱ってください。
+- **トークン／クレジットの数値は推定**（chars/4 ＋あなたの `CREDITS_PER_1K`）、決して正確ではありません。
+- **コストティアは出典付きのデフォルトで、検出ではない**——プランの事実は日付入り；スナップショットが古いと
+  `doctor` が警告します。
+- **実験的**（`qwen`、`copilot`、`grok`、コミュニティレーン、Gemini `images=`）：フラグはライブ検証
+  されていません——`doctor deep` があなたのマシンで各 CLI の `--help` に対して確認します。
+
+---
+
+## ロードマップ
+
+出荷済みの履歴は [`CHANGELOG.md`](../../CHANGELOG.md) を参照。現在**探索中（未出荷）**：**独立オラクル**
+検証モード（別ファミリーのレーンが実装に盲目のまま*仕様*からテストを書くので、テストがバグを映すのでなく
+捕まえる）と、より細かい**上限を意識したフェイルオーバー**。大きなエージェント間「バス」構想（再帰的 spawn、
+共有状態、ワイヤープロトコル）は、出荷済みプロトコルとして売るのでなく、正直に*方向性*として位置づけて
+います——[docs/ARCHITECTURE.md](../ARCHITECTURE.md) を参照。
+
+---
+
+## 参考文献
+
+上記の設計判断は雰囲気ではありません——それぞれが文献の知見に対応します。各エントリは出典（著者＋発表の場）
+に対して確認しました。「正直なベンダー横断の検証」を売るツールは、自身の引用を正しく扱うべきだからです。
+
+| 論文 | ID | ここで何を裏付けるか |
+|-------|----|--------------------|
+| Du et al. — *Improving Factuality and Reasoning via Multiagent Debate* | [2305.14325](https://arxiv.org/abs/2305.14325) | `debate`：互いを批評するモデルは単一モデルに勝る |
+| ReConcile — *Round-Table Conference Improves Reasoning* | [2309.13007](https://arxiv.org/abs/2309.13007) | `debate` の収束＋確信度加重の合意 |
+| Mixture-of-Agents | [2406.04692](https://arxiv.org/abs/2406.04692) | 多様なモデル横断の階層集約（およびその限界） |
+| Chain-of-Agents | [2406.02818](https://arxiv.org/abs/2406.02818) | 役割特化のマルチエージェントパイプライン |
+| CriticGPT — *LLM Critics Help Catch LLM Bugs* | [2407.00215](https://arxiv.org/abs/2407.00215) | `review_diff` / `security_review`：LLM 批評者が人間の見逃すバグを捕まえる |
+| Perez et al. — *Discovering Language Model Behaviors*（追従性） | [2212.09251](https://arxiv.org/abs/2212.09251) | 同一ファミリーの審判が弱い理由 → ベンダー横断 `jury` ＋ピア匿名化 |
+| Wynn, Satija & Hadfield — *Talk Isn't Always Cheap* | [2509.05396](https://arxiv.org/abs/2509.05396) | 討論の故障モード → fail-closed 評決、有限ラウンド |
+| CONSENSAGENT — *Consensus via Sycophancy Mitigation*（Findings of ACL 2025） | [ACL 2025](https://aclanthology.org/2025.findings-acl.1141/) | 合意における追従性 → 「席を勝ち取る」／匿名化ピア |
+| Maryanskyy — *When Agents Disagree: The Selection Bottleneck* | [2603.20324](https://arxiv.org/abs/2603.20324) | `consensus`：**選択 > 統合**（決定論的ピア投票のデフォルト） |
+
+> **引用衛生のメモ。** *Talk Isn't Always Cheap*（2509.05396）は **Wynn, Satija & Hadfield** によるもの——
+> 人気の評議会フレームワークがこれを「Xiong et al.」と誤引用しています。私たちは繰り返す前に帰属を二重チェック
+> し、正直さがすべての訴求点なので明示します。
 
 ## 開発
 
 ```bash
 uv venv && uv pip install -e . pytest pytest-asyncio
-pytest -q          # unit + integration (cross-host) tests
+pytest -q          # unit + integration (cross-host) tests; no real CLI or network needed
 ```
 
 ## ライセンス
@@ -586,11 +372,8 @@ MIT
 
 <div align="center">
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../../assets/mark-dark.svg">
-  <img src="../../assets/mark-light.svg" width="84" alt="cli-bridge">
-</picture>
+<img src="../../assets/mark.gif" width="84" alt="cli-bridge">
 
-<sub>一方の側 · 評議会へと橋渡しされて</sub>
+<sub>片岸 · 評議会へと架かる</sub>
 
 </div>

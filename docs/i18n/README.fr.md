@@ -1,523 +1,254 @@
 <div align="center">
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../../assets/banner-dark.svg">
-  <img src="../../assets/banner-light.svg" width="860" alt="Vous → cli-bridge → un conseil de CLI IA en parallèle → une seule revue fusionnée">
-</picture>
+<img src="../../assets/banner.gif" width="860" alt="cli-bridge — votre assistant emprunte les pouvoirs de toutes les CLI IA que vous avez déjà : lectures à contexte géant, vision, builds en parallèle, vérifications inter-éditeurs">
 
 [English](../../README.md) · **Français** · [简体中文](README.zh-CN.md) · [Español](README.es.md) · [Português (BR)](README.pt-BR.md) · [日本語](README.ja.md) · [Deutsch](README.de.md)
 
 </div>
 
-_Le README en anglais fait foi ; cette traduction peut être en retard sur celui-ci._
+_Le README anglais fait foi ; cette traduction peut être en retard sur lui._
 
 # cli-bridge
 
+<!-- À réactiver au passage public (les deux cassent tant que le dépôt est privé / non publié) :
 ![CI](https://github.com/JoaoBerne/cli-bridge-mcp/actions/workflows/tests.yml/badge.svg)
-![PyPI](https://img.shields.io/pypi/v/cli-bridge-mcp)
+![PyPI](https://img.shields.io/pypi/v/cli-bridge-mcp) -->
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 ![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-server-purple)
 ![ban--safe](https://img.shields.io/badge/ban--safe-no%20token%20extraction-orange)
 
-**Votre assistant IA, mais qui peut appeler un ami.**
+**Votre assistant, avec les pouvoirs de toutes les CLI que vous avez déjà.**
 
-`cli-bridge` est un serveur [Model Context Protocol](https://modelcontextprotocol.io) qui
-**orchestre les CLI IA que vous avez déjà installées et auxquelles vous êtes déjà connecté** — Claude Code, Codex,
-Gemini CLI, opencode, … — depuis l'assistant avec lequel vous discutez. Pas de clés d'API, pas d'extraction
-de token, un journal strictement local, un plafond de coût dur, et les écritures se font uniquement sous forme de diffs dans une worktree jetable.
-Ça, c'est de la plomberie incontestable ; voici ce que ça débloque :
+> **Pas de clés API · pas d'extraction de jetons · pas de Node · pas de démon · stdlib + `mcp` uniquement.**
 
-Coincé sur un bug épineux ? Faites interroger GPT *et* Gemini en parallèle par votre assistant, puis comparez. Besoin d'une
-lecture sur 1 M de tokens d'un fichier énorme ? Confiez-la à Gemini. Envie d'un second avis pas cher ? Lancez-le sur un
-modèle gratuit. Une seule question, tous les modèles, côte à côte — sans quitter votre terminal.
-
-```
-You → Claude:  "ask the council whether this auth logic is safe"
-Claude → cli-bridge → [ Gemini ] [ GPT ] [ Mistral ] [ Qwen ] … in parallel
-            ← three independent reviews + a synthesis of where they agree & disagree
-```
-
-<div align="center">
-
-<img src="../../assets/demo.gif" width="860" alt="Démo de security-review de cli-bridge : un contournement d'authentification commité est détecté indépendamment par deux modèles, fusionné en un seul rapport classé par sévérité, 0 $ sur les lanes gratuites">
-
-_Exécution réelle (vitesse 2,5×) : un contournement d'authentification commité — `security-review` répartit les rôles OWASP sur des modèles
-gratuits en parallèle ; deux modèles le signalent **blocker** indépendamment, et `usage` montre les preuves._
-_Généré avec [vhs](https://github.com/charmbracelet/vhs) — [voir la source](../demo/)._
-
-</div>
-
-> **Pourquoi c'est différent, en un souffle :** il ne détient jamais de clé d'API et n'extrait jamais de token — il
-> pilote les CLI officielles que vous avez **déjà installées et auxquelles vous êtes déjà connecté**. Un conseil sur lanes gratuites coûte
-> **0,00 $** (les preuves sont dans `usage_report`) ; les lanes payantes ne s'exécutent jamais qu'à l'intérieur d'un plafond quotidien dur
-> que *vous* fixez. Et quand vous lui demandez de *faire* le travail, il édite dans une worktree git jetable et vous rend
-> un **diff** — votre dépôt actif n'est jamais touché.
-
-> **Et la partie honnête :** « plus de modèles = mieux » est *fragile* — les gros modèles partagent leurs données d'entraînement,
-> donc leurs erreurs sont corrélées. Nous avons mesuré notre propre affirmation centrale (`cli-bridge eval`, livré, sans juge
-> LLM) : un conseil diversifié n'a **pas** détecté plus de bugs qu'un seul modèle puissant — il a réduit les fausses
-> alertes **d'environ 2×**. Nous publions les chiffres dans les deux cas ([BENCHMARKS.md](../BENCHMARKS.md)), et le
-> harnais est livré pour que vous puissiez le faire tourner sur *vos* CLI.
+L'assistant à qui vous parlez ne peut pas lire un dépôt de 2 M de tokens d'un coup, ne peut pas voir
+une capture d'écran, ne peut pas vous fournir une image générée, et ne peut pas vérifier son propre
+travail sans biais. Les autres CLI IA que vous avez **déjà installées et où vous êtes déjà connecté** —
+Claude Code, Codex, Gemini, opencode, plus les modèles locaux via Ollama — font chacune quelque chose
+que la vôtre ne sait pas faire. `cli-bridge` est un serveur [Model Context Protocol](https://modelcontextprotocol.io)
+qui permet à votre assistant de **les emprunter** : il lance la CLI officielle en sous-processus
+(exactement comme vous le feriez à la main — pas de clés, pas d'extraction de jetons) et vous renvoie
+le résultat.
 
 ---
 
-## Pourquoi celui-ci
+## La démo en 10 secondes
 
-Il existe d'autres MCP « appelle d'autres modèles ». Voici ce qui distingue cli-bridge :
+Vous êtes dans Claude. Claude ne peut pas vous fournir une image. Codex, si — il écrit le code qui en
+génère une puis l'exécute. Alors demandez-lui :
 
-- 🛡️ **Ban-safe par conception.** Il lance la **CLI officielle** de chaque modèle — exactement comme vous le feriez à la
-  main. Pas d'extraction de token OAuth, pas de réutilisation de clé d'API, rien qui fasse flaguer un compte. Chaque CLI
-  gère sa propre authentification et sa propre facturation.
-- 💸 **Des coûts par défaut sourcés, puis *vous* ajustez selon votre forfait.** D'emblée, `ask_all` constitue un
-  conseil gratuit et ne touche jamais à votre quota d'abonnement (Claude, GPT) ni à vos crédits payants, sauf si vous le demandez.
-  Chaque lane est livrée avec un palier sourcé depuis les forfaits publiés du fournisseur
-  ([docs/COSTS.md](../COSTS.md), daté) — **jamais détecté depuis votre compte, et étiqueté comme
-  tel** — que vous surchargez selon vos propres abonnements
-  (`CLI_BRIDGE_<LANE>_COST=free|limited|paid`) ; sur un gros forfait, marquez-les tous `free`, ou définissez
-  `CLI_BRIDGE_PROFILE=max`.
-- 🔌 **Fonctionne depuis n'importe quel hôte.** Vous pilotez Claude Code ? Il masque la lane Claude (pas question de vous interroger vous-même)
-  et expose le reste. Vous pilotez Codex ou opencode à la place ? Même principe, détecté automatiquement depuis
-  le handshake MCP.
-- 🧩 **Ajoutez n'importe quelle CLI — ou votre propre API — sans forker.** Lanes intégrées pour Claude, GPT, Gemini,
-  Mistral, Qwen, Copilot, Grok et opencode. Enregistrez **votre propre CLI depuis un fichier JSON**, ou encapsulez
-  **votre propre API** en lançant `curl`. Zéro code.
-- 🧠 **Synthèse du conseil.** `ask_all` peut faire résumer par un modèle gratuit les points sur lesquels les autres sont *d'accord* et
-  *en désaccord* — transformez trois opinions en une seule décision.
-- 🔬 **Workflows multi-modèles.** `review_diff` et `security_review` répartissent des relecteurs **aux rôles diversifiés**
-  sur le conseil, puis fusionnent + dédoublonnent en un seul rapport classé par sévérité. `debate` fait critiquer et réviser les modèles entre eux sur un nombre borné de tours avant qu'un juge ne conclue.
-- ✍️ **Lecture seule par défaut, écritures à la demande.** Activez `agent: build` pour qu'une lane capable
-  **édite réellement les fichiers** — ou choisissez un `model` spécifique par appel, y compris un **frère de votre propre
-  famille** (interrogez Opus 4.6 depuis Claude Code 4.8).
-- 🪶 **Retours façon sous-agent.** Un délégué travaille dans son propre contexte et rend un condensé ; les sorties
-  énormes débordent vers un fichier et seul un aperçu revient, pour que le contexte de votre assistant reste léger.
-- 🔁 **Repli automatique.** `ask_cascade` essaie les lanes du moins cher au plus puissant et passe à la suivante lorsque
-  l'une atteint un quota/une erreur d'auth/un timeout — ainsi une lane morte se dégrade en douceur au lieu de vous faire défaut.
-- 🩺 **Conscient de lui-même.** La télémétrie locale suit la santé de chaque lane et met une lane en cooldown
-  après des échecs répétés de quota/auth/timeout, pour que `ask_all`/`ask_cascade` la contournent.
-- 🎯 **Apprend votre stack.** Notez la réponse d'une lane de 1 à 5 avec `rate_lane`, et `ask_best` privilégie les
-  modèles qui gagnent vraiment chaque type de tâche **sur votre machine** — un signal de qualité local stocké en
-  sqlite qui survit à `/compact` et aux redémarrages. Pas un classement public ; *vos* résultats.
-- 🧱 **Durci.** Les timeouts tuent tout l'arbre de processus (pas d'orphelins qui brûlent du quota), l'annulation par l'hôte
-  tue le délégué, les secrets sont masqués, les erreurs sont classées
-  (`quota` / `auth` / `timeout`) pour que votre assistant sache quoi faire ensuite. Fonctionne sur
-  macOS / Linux / Windows.
-- 📐 **Mesuré, pas affirmé.** « Plus de modèles trouvent plus de bugs » est *falsifiable*, alors cli-bridge
-  livre le test : `cli-bridge eval` oppose un conseil à un seul modèle puissant + auto-cohérence
-  à **budget d'appels égal** sur un corpus de bugs de raisonnement injectés, scoré de façon déterministe (sans juge
-  LLM). Il rapporte la moyenne ± écart-type avec un garde-fou « aucune différence mesurable » et un tableau gain/perte
-  par bug — et publie le résultat même quand le conseil perd. Voir
-  [BENCHMARKS.md § Qualité](../BENCHMARKS.md#quality--does-a-council-actually-beat-one-strong-model).
+```
+ask_build(lane="gpt", task="generate a 1200×630 social card to assets/card.png — write a script that renders it, then run it", zone="assets")
+→ Codex writes assets/card.png · you get the path back, never a binary blob (artifact-return)
+```
 
-### face aux autres MCP multi-modèles
+Votre assistant vient de gagner une capacité qu'il n'a pas. C'est toute l'idée — maintenant
+généralisez-la aux lectures à contexte géant, à la vision, au travail de fond en parallèle, et à la
+vérification indépendante inter-éditeurs.
 
-| | cli-bridge | passerelles à clé d'API | ponts par réutilisation de token |
-|---|:---:|:---:|:---:|
-| Ban-safe (lance la CLI officielle) | ✅ | ➖ (vos clés) | ❌ (risque CGU) |
-| Aucune clé d'API à gérer | ✅ | ❌ | ✅ |
-| Utilise vos abonnements existants (conseil gratuit à 0,00 $) | ✅ | ❌ | ✅ |
-| Paliers de coût par forfait + plafond quotidien dur + cooldown | ✅ | ➖ | ❌ |
-| Repli automatique (cascade) | ✅ | partiel | ❌ |
-| Routage qui **apprend de vos résultats** | ✅ | ❌ | ❌ |
-| Ajout de n'importe quelle CLI / votre propre API, sans fork | ✅ | ➖ | ❌ |
-| Se masque lui-même côté hôte appelant | ✅ | s/o | ➖ |
-| Mémoire de table ronde qui survit à un redémarrage | ✅ | ➖ (en mémoire) | ➖ |
-| Écriture agentique sûre (worktree → diff) | ✅ | ➖ | ❌ |
-| Livre une éval de qualité déterministe (conseil vs modèle unique) | ✅ | ❌ | ❌ |
+_(La lane génère l'image **par du code** — graphiques, diagrammes, SVG, art procédural — et renvoie le
+fichier ; ce n'est pas un modèle texte-vers-photo sauf si vous en branchez un. C'est pourquoi le
+résultat revient sous forme de chemin, pas de blob.)_
+
+### …et il délègue du vrai travail, en sûreté
+
+`cli-bridge build <lane> "<tâche>"` confie le travail à un autre modèle qui tourne dans un **worktree
+git jetable**, puis vous rend un **diff** — votre dépôt n'est jamais touché tant que vous ne
+l'appliquez pas vous-même.
+
+<p align="center">
+<img src="../../assets/demo-borrow.gif" width="860" alt="cli-bridge build : opencode ajoute une fonction dans un worktree jetable et renvoie un diff relisible ; le vrai dépôt reste propre">
+</p>
 
 ---
 
-## Démarrage rapide
+## Comment y penser (le modèle mental)
 
-### 1. Installation
+cli-bridge n'est pas une fonctionnalité, ce sont **quatre leviers**. Comprenez-les et chaque outil
+ci-dessous trouve sa place :
 
-```bash
-# zero-install run (recommended)
-uvx cli-bridge-mcp
-
-# or install it
-uv tool install cli-bridge-mcp     # or: pipx install cli-bridge-mcp
-```
-
-Vous n'obtenez une lane pour une CLI que si vous l'avez **déjà installée et que vous y êtes connecté**. cli-bridge détecte automatiquement
-ce qui se trouve sur votre `PATH`. Lancez l'outil `doctor` à tout moment pour voir ce qui est branché (`doctor deep`
-vérifie même chaque connexion en direct).
-
-| Lane | CLI | Coût (typique) |
-|------|-----|------|
-| `ask_claude`   | [Claude Code](https://docs.claude.com/claude-code) | abonnement |
-| `ask_gpt`      | [OpenAI Codex](https://github.com/openai/codex) | abonnement |
-| `ask_gemini`   | Gemini CLI (ou `agy` / Antigravity) | gratuit / abonnement |
-| `ask_mistral`  | Mistral Vibe | palier gratuit |
-| `ask_qwen` ⚗️  | Qwen Code | clé d'API à l'usage (palier OAuth gratuit fermé en avril 2026) |
-| `ask_copilot` ⚗️ | GitHub Copilot CLI | abonnement (crédits à l'usage depuis 2026-06) |
-| `ask_grok` ⚗️  | xAI Grok CLI | abonnement (SuperGrok / X Premium+) |
-| `ask_opencode` | passerelle [opencode](https://opencode.ai) (deepseek, qwen, glm, kimi…) | gratuit par défaut ; certains modèles consomment des crédits |
-
-⚗️ = expérimental (flags pas encore vérifiés en direct — merci de signaler les ruptures).
-Colonne Coût = le *forfait typique publié* du fournisseur en date de juin 2026 ([docs/COSTS.md](../COSTS.md)
-détaille limites, fins de service et sources) — cli-bridge ne détecte jamais ce qu'une lane vous coûte *à vous* ; déclarez votre
-propre forfait avec `CLI_BRIDGE_<LANE>_COST`.
-
-### Le conseil à 0 $ (aucun abonnement)
-
-Pas de forfait payant, pas de carte ? Vous pouvez quand même assembler un vrai conseil multi-modèles en ~5 minutes à partir de
-fournisseurs offrant un **palier réellement gratuit à arrêt net** (épuisement = HTTP 429, une facture est
-structurellement impossible — vérifié en juin 2026, sources dans [docs/COSTS.md](../COSTS.md)) :
-
-```bash
-# 1. Get free API keys (no card): console.groq.com · cloud.cerebras.ai ·
-#    a GitHub PAT (models scope) · openrouter.ai/keys
-export GROQ_API_KEY=... CEREBRAS_API_KEY=... GITHUB_MODELS_TOKEN=... OPENROUTER_API_KEY=...
-# 2. Point cli-bridge at the ready-made lanes
-export CLI_BRIDGE_LANES_FILE=/path/to/examples/free-apis.json
-```
-
-Ça fait **Groq** (llama-3.3-70b, 1 k req/jour) + **Cerebras** (gpt-oss-120b) + **GitHub Models**
-(chaque compte GitHub a un accès gratuit) + l'étendue d'**OpenRouter `:free`** — quatre voix indépendantes
-pour `ask_all`/`consensus`/`debate`, plus les modèles gratuits intégrés d'opencode s'il est installé.
-Réserves : le palier gratuit de Gemini CLI **prend fin le 2026-06-18** ; les paliers gratuits évoluent en quelques semaines — consultez
-[docs/COSTS.md](../COSTS.md) pour savoir ce qui était vrai au moment de la vérification.
-
-### 2. Enregistrez-le auprès de votre hôte
-
-C'est un simple serveur MCP stdio (`uvx cli-bridge-mcp`) — il fonctionne dans tous les clients MCP, et il
-masque automatiquement la lane de l'hôte qui appelle (pas question de vous interroger vous-même).
-
-**Claude Code** — une seule commande :
-
-```bash
-claude mcp add cli-bridge -- uvx cli-bridge-mcp
-```
-
-[![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_cli--bridge-0098FF?logo=githubcopilot&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=cli-bridge&config=%7B%22name%22%3A%22cli-bridge%22%2C%22command%22%3A%22uvx%22%2C%22args%22%3A%5B%22cli-bridge-mcp%22%5D%7D)
-[![Install in Cursor](https://img.shields.io/badge/Cursor-Install_cli--bridge-111111?logo=cursor&logoColor=white)](https://cursor.com/en/install-mcp?name=cli-bridge&config=eyJjb21tYW5kIjoidXZ4IiwiYXJncyI6WyJjbGktYnJpZGdlLW1jcCJdfQ==)
-
-<details>
-<summary><b>Claude Desktop</b> (<code>claude_desktop_config.json</code>)</summary>
-
-```json
-{ "mcpServers": { "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } } }
-```
-</details>
-
-<details>
-<summary><b>Codex</b> (<code>~/.codex/config.toml</code>)</summary>
-
-```toml
-[mcp_servers.cli-bridge]
-command = "uvx"
-args = ["cli-bridge-mcp"]
-```
-</details>
-
-<details>
-<summary><b>Cursor</b> (<code>~/.cursor/mcp.json</code>)</summary>
-
-```json
-{ "mcpServers": { "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } } }
-```
-</details>
-
-<details>
-<summary><b>VS Code</b> (<code>.vscode/mcp.json</code> ou réglages utilisateur)</summary>
-
-```json
-{ "servers": { "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } } }
-```
-</details>
-
-<details>
-<summary><b>Gemini CLI</b> (<code>~/.gemini/settings.json</code>)</summary>
-
-```json
-{ "mcpServers": { "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } } }
-```
-</details>
-
-<details>
-<summary><b>opencode</b> (<code>opencode.json</code>)</summary>
-
-```json
-{ "mcp": { "cli-bridge": { "type": "local", "command": ["uvx", "cli-bridge-mcp"] } } }
-```
-</details>
-
-<details>
-<summary><b>Windsurf</b> (<code>~/.codeium/windsurf/mcp_config.json</code>)</summary>
-
-```json
-{ "mcpServers": { "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } } }
-```
-</details>
-
-<details>
-<summary><b>Warp</b> (Réglages → AI → serveurs MCP)</summary>
-
-```json
-{ "cli-bridge": { "command": "uvx", "args": ["cli-bridge-mcp"] } }
-```
-</details>
-
-### 3. Utilisez-le
-
-Parlez simplement à votre assistant :
-
-> *« Demande un second avis à Gemini sur cette fonction. »*
-> *« Fais relire mon diff par tout le conseil et synthétise leurs désaccords. »* (→ `review_diff`)
-> *« Fais réfléchir GPT à fond sur cette race condition. »* (→ `effort: high`)
-> *« Lance une revue de sécurité sur mes changements indexés. »* (→ `security_review`)
-> *« Fais débattre les modèles pour savoir si on a besoin de cette abstraction. »* (→ `debate`)
-> *« Demande à gpt d'implémenter cette fonction. »* (→ `agent: build`, édite les fichiers)
-> *« Demande à Opus 4.6 de revérifier mon raisonnement. »* (modèle frère, depuis Claude Code)
-> *« Choisis la meilleure lane pour une revue approfondie — et retiens que celle-là a assuré. »* (→ `ask_best` + `rate_lane` ; la prochaine fois il route vers elle en priorité)
-
-Les hôtes qui prennent en charge les prompts MCP exposent aussi `review_diff`, `security_review`, `debate`,
-`premortem`, `test_plan`, `apilookup` et `cost_setup` comme commandes slash natives.
+1. **Emprunter** — atteindre une capacité que votre assistant n'a pas (vision, fenêtre de contexte
+   d'1 M de tokens, un fichier généré par un agent de code, un modèle simplement meilleur pour *ça*).
+2. **Répartir** — quand un abonnement atteint sa limite, continuer sur une autre lane que vous payez
+   déjà.
+3. **Décharger** — répartir le travail de fond laborieux et parallélisable sur des lanes
+   gratuites/bon marché pendant que vous codez ailleurs.
+4. **Vérifier** — faire contrôler le travail par une *famille d'éditeur différente*, parce qu'un
+   modèle ne voit pas ses propres angles morts. C'est la seule chose qu'un outil mono-éditeur ne peut
+   structurellement pas faire.
 
 ---
 
-## Outils
+## Ce que ça débloque
 
-| Outil | Ce qu'il fait |
-|------|--------------|
-| `ask_<lane>` | Interroge un seul modèle. Params : `task`, optionnels `model`, `effort`, `agent`, `cwd`, `timeout_s`, **`conversation`** (démarre/continue un fil de table ronde — voir plus bas). |
-| `ask_all` | Diffuse la même question à chaque lane gratuite et non limitée en parallèle. `synthesize: true` ajoute un résumé des accords/désaccords. `include_paid: true` pour interroger aussi les lanes limitées/payantes. |
-| `ask_cascade` | Interroge un seul modèle **avec repli automatique** — essaie les lanes du moins cher au plus puissant, saute celles en cooldown, passe à la suivante en cas de quota/auth/timeout. Renvoie le premier succès + une trace de ce qui a été tenté (palier de coût, latence, raison du saut). |
-| `ask_best` | Choisit **une seule lane selon le mode** (`fast`/`cheap`/`deep`/`code`/`review`/`security`) à partir du coût, de la santé, de la latence mesurée **et de vos propres scores `rate_lane`**, puis l'exécute avec repli. Pour « utilise juste le bon modèle » — `ask_all` compare, `ask_cascade` fait simplement le moins cher d'abord. |
-| `rate_lane` | **Apprenez au routeur.** Notez la réponse d'une lane de 1 à 5 pour un type de tâche (`mode`) → `ask_best` privilégie ensuite les lanes qui gagnent ce mode **sur votre machine**. Stocké en sqlite (survit à `/compact`/redémarrage) ; un seuil de deux notes avant qu'une lane n'oriente quoi que ce soit, pour que le feedback soit honnête, pas bruité. Chaque réponse `ask_best` affiche l'appel exact. |
-| `route_plan` | Affiche l'ordre que `ask_cascade` essaierait, selon votre profil + les cooldowns actuels (lecture seule, n'exécute rien). Passez `mode` pour prévisualiser `ask_best` — y compris la note courante de chaque lane. |
-| `ask_all_async` / `job_status` / `job_result` / `job_cancel` / `jobs_list` | Lance une diffusion comme **job en arrière-plan** qui renvoie un identifiant de job en <1 s, pour qu'une exécution lente du conseil ne dépasse pas l'échéance d'appel d'outil de l'hôte. L'annulation tue les groupes de processus des délégués. |
-| `review_diff` | Revue de code multi-modèles d'un diff git : les lanes relisent en parallèle avec **des focus différents** (correctness / sécurité / tests / maintenabilité), chacune renvoyant des findings JSON ; des pré-vérifications déterministes (secrets, shell dangereux) les amorcent ; les findings **fusionnent par fichier/ligne/titre** avec une confiance fondée sur l'accord (single/majority/consensus). `output_format: markdown` (défaut) ou `json`. Params : `cwd`, `base` (défaut HEAD), `diff`, `include_paid`, `timeout_s`. |
-| `security_review` | Revue **uniquement sécurité** d'un diff git, sensibilisée OWASP (injection / auth & contrôle d'accès / secrets & crypto / exposition de données & SSRF) → findings classés par sévérité + une section `residual_risk`. |
-| `debate` | Plusieurs modèles répondent à une question, **voient les réponses des autres et révisent** sur un nombre borné de tours (défaut 1, max 3), puis un **juge indépendant** (tenu à l'écart du débat quand 3 lanes ou plus) rédige le consensus final + le désaccord restant. Durci par l'usage en production : `context_files` injecte les fichiers clés dans chaque prompt de débatteur (**ancrage** — sans lui le conseil ne fait que paraphraser votre brief), une **passe de fact-check** (lane gratuite, activée par défaut) signale les commandes/tags/versions invérifiables du verdict, les affirmations portent des tags de provenance (`[brief]`/`[own-knowledge]`/`[verified]`), un brief trop maigre reçoit un avertissement du linter, et `steelman: true` fait défendre par une lane la position *contre* un verdict unanime avant que le juge ne reconclue. `summary_only` supprime les positions complètes (~60-80 % de tokens en moins) ; `dry_run` renvoie un manifeste de données de préflight (quels fichiers/caractères vont à quels fournisseurs) avant tout envoi. Params : `task`, `rounds`, `adversarial`, `context_files`, `fact_check`, `summary_only`, `allow_self_judge`, `steelman`, `dry_run`, `include_paid`, `cwd`, `timeout_s`. |
-| `consensus` | Le « conseil LLM » en mieux : chaque lane répond à l'aveugle, puis **classe les réponses anonymisées** (pas d'auto-favoritisme), les votes sont agrégés **de façon déterministe** (méthode Borda), et la **réponse classée #1 par les pairs est renvoyée telle quelle** — parce que *sélectionner* la meilleure réponse bat le fait de les *mélanger* (arXiv 2603.20324 : la synthèse préférée dans 0/42 tâches ; la sélection gagne, Glass's Δ≈2,07). `synthesize: true` opte pour un mélange par un président de séance (le mode plus faible). Renvoie la réponse finale + un tableau de classement par vote des pairs. `dry_run` renvoie un manifeste de données de préflight (quels fichiers/caractères vont à quels fournisseurs) sans rien lancer. Prend en charge l'ancrage `context_files` et `summary_only`. Params : `task`, `context_files`, `synthesize`, `summary_only`, `dry_run`, `include_paid`, `cwd`, `timeout_s`. |
-| `challenge` | Confie une affirmation à **une seule lane extérieure** avec un prompt de réévaluation critique → une revue sceptique indépendante (avec un garde-fou d'intégrité — elle ne fabriquera pas de désaccord). Mettez votre propre conclusion à l'épreuve avant d'agir. `lane` optionnel. |
-| `premortem` | Chaque lane imagine que le plan **a déjà échoué** et liste les modes de défaillance probables + les mitigations ; le tout fusionné en une liste de risques priorisée. Lancez-le avant de construire. |
-| `test_plan` | Dérive un **plan de test** priorisé (comportements, cas limites, cas concrets) à partir d'un diff git ou d'une description. |
-| `commit_msg` | Génère un message **Conventional Commit** à partir de votre diff indexé (se rabat sur la working tree). Lecture seule — produit du texte, ne commite jamais. `lane`, `cwd` optionnels. |
-| `pr_describe` | Génère un **titre + description de PR** (Summary / Changes / Testing) à partir du diff de la branche + du log de commits face à une base (défaut origin/main → main). Lecture seule. `base`, `lane`, `cwd` optionnels. |
-| `ask_build` | **Commander un vrai build.** `mode=isolated` (défaut) édite une worktree jetable et renvoie un **diff** — dépôt intact. `mode=direct` build directement dans un dossier cible, gardé par git + un **contrat de zone** (le délégué n'écrit que dans `zone` ; les écritures hors-zone sont détectées et annulées ; l'annulation est scopée à la zone, jamais un reset global) — l'hôte peut donc builder d'autres parties du **même dépôt en parallèle**. `async=true` en fait un build **pilotable**. `dry_run` montre le brief. (`ask_build_isolated` = alias hérité.) |
-| `job_tail` / `build_steer` | **Suivre et piloter un build comme un humain.** `job_tail(job_id, offset)` streame son journal de progression (par offset d'octets). `build_steer(job_id, instruction, interrupt)` met une correction en file pour le prochain tour, ou `interrupt=true` coupe le tour en cours (les fichiers déjà écrits sont conservés). Une **Definition of Done** exécutable optionnelle (`dod_cmd`, une liste argv) est lancée après chaque tour — succès = fini, échec = un tour de plus avec l'erreur renvoyée. |
-| `batch_run` | **Fan-out durable** : lance plusieurs requêtes indépendantes en parallèle en **un seul appel** au lieu de N (économise le contexte de l'hôte + le quota). Chaque résultat est journalisé, donc `resume_id` rejoue les tâches déjà finies et ne relance que le reste — **survit à un redémarrage du serveur**. Disponible en `async`. |
-| `workflow` | **Workflows multi-modèles prêts à l'emploi** sur le substrat de batch. **`refine_plan`** — laissez le conseil DÉMOLIR votre plan sous des angles distincts (passez `plan_file` ; chaque lane le lit, jamais recopié). `council_review` (N lanes répondent à une question + juge optionnel), `map_review` (relire plusieurs fichiers en parallèle), `research_verify` (répondre puis recouper de façon adversariale). Tous reprenables + en `async`. |
-| `list_models` | Liste les modèles disponibles d'une lane (param `lane`) là où la CLI les expose ; sinon affiche le modèle par défaut résolu + comment en choisir un. (`list_<lane>_models` existe aussi pour les lanes ayant une commande de liste native.) |
-| `conversations_list` / `conversation_show` | Liste les **fils de table ronde** récents (récupérer un id après une réinitialisation de contexte) / affiche la transcription complète d'un fil, attribuée par lane. |
-| `doctor` | Bilan de santé : CLI installées, hôte détecté, posture coût/quota, cooldowns, valeurs par défaut. `deep: true` sonde en direct l'auth de chaque lane gratuite **et vérifie les flags de chaque lane face à son `--help`** — avertit si une CLI a renommé/supprimé un flag dont cli-bridge dépend (dérive) avant que la lane n'échoue silencieusement. |
-| `usage_report` | Stats strictement locales : exécutions, succès/latence par lane, et tokens **estimés** (chars/4) + crédits (`CREDITS_PER_1K` par lane). `since`, `format=text\|json`. |
-| `usage_budget` | Exécutions du jour par lane face à `CLI_BRIDGE_<LANE>_DAILY_LIMIT` + dépense estimée ; signale les lanes au-delà de leur limite. |
-| `lane_stats` | Santé par lane : exécutions, échecs, échecs/timeouts consécutifs, cooldown actif. |
-| `reset_lane_state` | Réinitialise les compteurs de cooldown/échecs d'une lane (après une reconnexion ou un reset de quota). |
-| `setup` | Liste les lanes installées avec leur coût de forfait typique *sourcé* (free/limited/paid — jamais détecté depuis votre compte), demande lesquelles vous payez réellement, et **recommande un profil + un plafond quotidien** à confirmer — puis guide l'utilisateur pas à pas. |
+Chaque bloc : une phrase sur *quand on y a recours*, l'appel exact, et *ce qu'on récupère*.
 
-Il existe aussi une **CLI humaine** — le même moteur depuis votre terminal ou votre CI :
-`cli-bridge init` (détecte les CLI + affiche le câblage MCP), `doctor`, `ask <lane> <task>`, `ask-all`,
-`ask-best --mode`, `review-diff --base origin/main --json`, `bench --lane gemini --prompt … `
-(latence p50/p95/p99), `usage`, `budget`, `jobs`, `setup --write`. Voir
-`examples/github-action-pr-review.yml` pour une GitHub Action de revue de PR (runner auto-hébergé).
+### Emprunter des capacités que votre assistant n'a pas
+Chaque CLI a un super-pouvoir différent, et chacune tourne en mode non interactif — donc cli-bridge
+peut la lancer. Empruntez celle qui manque à votre hôte (elle doit être installée + connectée) :
 
-**Lecture seule par défaut ; écritures sur opt-in.** Un délégué analyse et répond normalement — c'est votre hôte
-qui applique les éventuelles éditions. Passez `agent: "build"` pour le laisser **éditer les fichiers directement** (par ex. *« demande à gpt d'implémenter
-cette fonction »*) : claude → `--permission-mode acceptEdits`, gpt → `--sandbox
-workspace-write`, mistral → `--agent accept-edits`, gemini → `--yolo` (ou `agy`
-`--dangerously-skip-permissions`), opencode → `--agent build`. Les lanes capables de build sont annotées
-non-lecture-seule, et une exécution `build` n'est jamais servie depuis le cache.
+| Super-pouvoir | Quelle CLI l'a | À emprunter quand |
+|------------|------------------|----------------|
+| **Images** | Codex (`gpt-image-2`, **sans clé API** — via votre forfait ChatGPT) | votre hôte ne sait pas dessiner |
+| **Contexte géant** | Gemini (fenêtre d'1 M de tokens) | un fichier/dépôt ne tient pas dans le contexte de votre hôte |
+| **Connaissance fraîche** | Gemini (ancrage Google Search) · Grok (web/X en direct) ⚗️ | battre une date de coupure : *« quelle est l'API actuelle de `<lib>` ? »* |
+| **Vision** | Gemini (`images=[…]`) ⚗️ | analyser une capture ou un diagramme |
+| **Un deuxième avis gratuit** | Gemini (palier quotidien gratuit) · opencode · Ollama (local, 0 $) | un contre-contrôle à 0 $ |
+| **Fichiers générés** | toute lane de build → artifact-return | récupérer un graphe / PDF / diagramme **par chemin** |
+| **Vidéo** ⚗️ | Gemini (Veo) · Grok (Imagine) — *si votre CLI installée l'expose* | il vous faut un clip généré |
 
-### Déléguer un vrai build — supervisé, dans votre dépôt
-
-`ask_build` transforme un délégué en coéquipier qui produit un résultat **complet et réel**, pas
-juste un diff à recopier. Deux modes :
-
-- **`mode=isolated`** (défaut, le plus sûr) — le délégué édite une worktree git jetable au niveau
-  de HEAD ; vous obtenez le diff et l'appliquez vous-même. Rien ne bouge dans votre dépôt.
-- **`mode=direct`** — le délégué écrit de **vrais fichiers** dans `target_dir`, pour que vous
-  (l'hôte) puissiez builder d'autres parties du **même dépôt en parallèle** (par ex. *« je fais le
-  backend, codex fait `frontend/` »*). La sûreté repose sur git + un **contrat de zone**, pas sur
-  l'isolation :
-  - le brief dit au délégué qu'il ne peut écrire **que dans `zone`** (un chemin sous `target_dir`) ;
-  - toute annulation est **scopée à la zone** (`git checkout -- <zone>` + `git clean -fd <zone>`,
-    jamais un `git reset --hard` global), donc votre travail non commité hors de la zone n'est
-    jamais touché ;
-  - un **verrou par zone** laisse des zones disjointes builder en même temps mais bloque deux builds
-    sur la même zone ;
-  - après chaque tour, un **`git status` global** détecte tout ce qui a été écrit hors de la zone
-    (échappée par `../`, chemin absolu, lien symbolique) et **annule le build** — le scoping git
-    protège les opérations git, il ne peut pas sandboxer le sous-processus, donc ce contrôle est
-    obligatoire. Un `target_dir` absent/vide est créé et `git init`-ialisé.
-
-**Suivez-le et pilotez-le.** Lancez avec `async=true` pour obtenir un `job_id`, puis :
-
-- `job_tail(job_id, offset)` streame la progression du build pour des résumés d'étape ;
-- `build_steer(job_id, "utilise Tailwind, pas du CSS inline")` met une correction en file pour le
-  prochain tour ; `build_steer(job_id, interrupt=true)` coupe le tour en cours (fichiers conservés) ;
-- passez `dod_cmd` (une **liste argv**, par ex. `["npm","run","build"]`, jamais une chaîne shell)
-  pour une Definition of Done **testée pour de vrai** après chaque tour — succès = fini, échec = un
-  tour de plus avec l'erreur renvoyée, borné par `max_fail_retries` (défaut 3) et `max_turns` (12).
-
-La continuité, c'est le système de fichiers (le délégué relit ses propres fichiers à chaque tour) ;
-la transcription brute vit dans la session du CLI délégué, cli-bridge garde le journal d'étapes
-pour `job_tail`.
-
-### Mettez votre plan à l'épreuve avant de builder (`workflow refine_plan`)
-
-cli-bridge excelle à *démolir un plan* avant que vous n'écriviez du code. `workflow
-preset=refine_plan` envoie votre plan à plusieurs lanes, chacune le critiquant sous un **angle
-distinct** (failles techniques & modes de panne / trous / sur-ingénierie / séquencement), puis
-regroupe les trouvailles pour que vous les fusionniez — ou passez `judge_lane` pour une seule liste
-de correctifs dédupliquée et triée par sévérité.
-
-```jsonc
-// un seul appel → N CLI démolissent le plan, chacun sous un angle différent
-{ "preset": "refine_plan", "plan_file": "docs/plan.md", "judge_lane": "gpt" }
+```
+ask_build(lane="gpt", task="generate a 1200×630 social card to assets/card.png", zone="assets")   # Codex image → file by path, no API key
+ask_gemini(task="find the bug across ./src — read the files you need", cwd="path/to/repo")         # 1M-token context
+ask_gemini(task="what's the current recommended API for <lib>? check the latest docs")            # fresh knowledge (Search grounding)
+ask_gemini(task="what's wrong in this UI?", images=["screenshot.png"])                             # vision (experimental)
 ```
 
-Passez **`plan_file`** (un chemin), pas le texte : chaque lane lit le fichier depuis son propre
-répertoire de travail, donc le plan n'est **jamais recopié dans N prompts** — le défaut frugal en
-tokens pour toute revue d'artefact (`map_review`, `review_diff`, `debate context_files` fonctionnent
-pareil). Comme tout `workflow`/`batch_run`, c'est **reprenable** (`resume_id` rejoue les tâches
-finies après un redémarrage) et lançable en `async`.
+⚗️ = expérimental / dépend de la version actuelle de la CLI installée (p. ex. Grok Build est en bêta) — à vérifier avec `doctor deep`.
 
-**Choisissez un modèle par appel** avec `model` (par ex. `model: "claude-opus-4-6"`). Depuis l'intérieur d'un hôte, vous pouvez
-même consulter un **modèle frère de votre propre famille** — `ask_<your-host>` apparaît comme un outil séparé qui exige un
-`model` explicite, donc depuis Claude Code vous pouvez interroger Opus 4.6 tout en faisant tourner 4.8.
-(Le `agy` d'Antigravity n'a pas de flag de modèle par appel — il utilise ce que ses propres réglages sélectionnent.)
+### Ne jamais s'arrêter quand vous touchez une limite
+Quand votre abonnement principal sature en plein travail. `ask_cascade` bascule sur une autre lane
+que vous payez déjà, en sautant toute lane mise en pause après une erreur de quota/auth/timeout.
 
-**Conversations de table ronde.** Passez `conversation: "new"` à n'importe quel `ask_<lane>` pour démarrer un fil
-multi-tours ; réutilisez l'id renvoyé — **même sur une autre lane** — pour continuer. Chaque lane voit la
-transcription partagée avec vos propres tours marqués « You » et les autres nommés, pour qu'un conseil puisse rebondir
-les uns sur les autres au lieu de repartir de zéro à chaque fois. La transcription est stockée localement (sqlite), donc un
-fil **survit à la réinitialisation de contexte de l'hôte (`/compact`) et à un redémarrage du serveur** — récupérez-en un avec
-`conversations_list`, lisez-le avec `conversation_show`. Une fenêtre glissante
-(`CLI_BRIDGE_CONVO_MAX_CHARS`, défaut 32000) garde les tours les plus récents et écarte les plus anciens, pour que le
-coût par tour reste borné quelle que soit la durée du fil.
+```
+ask_cascade(task="finish wiring this endpoint")   # cheapest→strongest; a cooled-down lane is skipped
+ask_best(task="…", mode="deep")                   # let the router pick the most suitable available lane
+```
 
-Pour opencode, un `model` vide demande à `opencode models` la liste `opencode/*-free` actuelle et en
-utilise un (le palier à 0 $ avec limitation de débit), choisi par motif + trié — jamais un nom figé, donc un
-modèle gratuit retiré est remplacé automatiquement. C'est **cost-safe** : un modèle Zen `opencode/*` nu facture
-au token (coût d'API) et `opencode-go/*` dépense des crédits prépayés, donc le défaut ne sélectionne jamais silencieusement
-un modèle payant — passez-les explicitement quand vous les voulez. Si la recherche échoue, il se rabat
-sur une graine gratuite ; définissez `CLI_BRIDGE_OPENCODE_MODEL` pour figer votre propre défaut.
+### Décharger le travail de fond — en parallèle, et pas cher
+Quand le travail est laborieux mais pas difficile (refactos, migrations, couverture de tests).
+Éclatez-le, journalisé pour qu'un redémarrage du serveur reprenne au lieu de tout recommencer ;
+déléguez un build et continuez à travailler.
 
-`ask_all` garde les appels par lane courts (45 s par défaut, 60 s max) pour que l'hôte MCP obtienne une réponse avant
-sa propre échéance d'appel d'outil. Pour une réponse lente/approfondie, appelez cette lane directement avec un
-`timeout_s` plus long.
+```
+batch_run(tasks=[...], dry_run=true)                       # cost envelope first — nothing is spawned
+batch_run(tasks=[...], max_calls=20, max_credits=2.0)      # then run under a hard budget (resumable)
+ask_build(lane="opencode", task="add the landing page", zone="frontend", mode="direct", async=true)   # delegate, keep building
+job_tail(job_id="…")  ·  build_steer(job_id="…", instruction="use Tailwind, not inline CSS")
+```
+
+### Briser l'auto-confirmation — le problème 2026 qu'un seul éditeur ne peut pas résoudre
+Quand vous avez besoin de *faire confiance* à un résultat. Un modèle qui relit son propre travail (ou
+celui d'un frère) ne fait que confirmer ses propres angles morts. cli-bridge met une **famille de
+modèle différente** dans le siège du relecteur.
+
+```
+workflow(preset="jury", task="is this migration safe?", author_lane="gpt")            # cross-family vote, fail-closed
+workflow(preset="verify_repair", task="add retry with backoff",
+         builder_lane="gpt", verifier_lane="gemini")                                   # A builds, B reviews, loop to green
+security_review(base="origin/main")   ·   review_diff(base="origin/main")              # OWASP, severity-ranked
+```
+
+### Obtenir un vrai deuxième avis
+Quand vous êtes arrivé à une conclusion et voulez la mettre à l'épreuve, ou plusieurs modèles côte à
+côte.
+
+```
+challenge(task="I'm dropping the cache layer — here's why: …")                         # one skeptic attacks it
+consensus(task="which migration strategy is safest here?")                             # N answer, peer-rank the best
+workflow(preset="fanout_compare", task="fix this failing test", lanes=["gpt","gemini","opencode"])
+```
 
 ---
 
-## Configuration
+## La boîte à outils complète
 
-Tout passe par des variables d'environnement — aucune édition de code. Ajustez-la à **vos** abonnements :
+Tous les outils, regroupés par intention. Lancez `CLI_BRIDGE_LEAN=1` pour une surface curatée d'une
+douzaine d'outils ; masquez/affichez n'importe lequel avec `CLI_BRIDGE_DISABLED_TOOLS` /
+`CLI_BRIDGE_ENABLED_TOOLS`.
 
-| Variable | Effet |
-|----------|--------|
-| `CLI_BRIDGE_<LANE>_COST` | `free`, `limited` ou `paid`. `free` rejoint `ask_all` ; `limited` est sensible au quota et sauté par la diffusion large ; `paid` dépense de l'argent/des crédits et est sauté par défaut. |
-| `CLI_BRIDGE_<LANE>_ENABLED` | `false` pour masquer une lane même si sa CLI est installée. |
-| `CLI_BRIDGE_<LANE>_BIN` | Pointe une lane vers un autre binaire (par ex. `CLI_BRIDGE_GEMINI_BIN=agy`). |
-| `CLI_BRIDGE_<LANE>_MODEL` | Modèle par défaut d'une lane quand l'appelant n'en passe pas. |
-| `CLI_BRIDGE_PROFILE` | `saver`, `balanced` ou `max`. `max` inclut les lanes limitées/payantes dans `ask_all` sauf si l'appelant surcharge `include_paid`. |
-| `CLI_BRIDGE_HOST` | Force l'identité de l'hôte (quelle lane masquer). Normalement auto-détectée. |
-| `CLI_BRIDGE_LANES_FILE` | Chemin vers un fichier JSON ajoutant **vos propres** CLI/API comme lanes. |
-| `CLI_BRIDGE_DISABLED_TOOLS` | Noms d'outils séparés par des virgules à masquer du listing (par ex. `debate,premortem,test_plan`) — réduit le contexte de schéma que chaque hôte paie à chaque requête. `doctor`/`setup` ne peuvent pas être masqués. |
-| `CLI_BRIDGE_ENABLED_TOOLS` | Liste d'autorisation pour un **mode allégé** en une seule variable : quand défini, seuls ces outils (+ `doctor`/`setup`) sont exposés (par ex. `ask_best,ask_all,review_diff`). |
-| `CLI_BRIDGE_<LANE>_PRIORITY` | Plus bas s'exécute plus tôt dans `ask_cascade` (défaut 50). Figez votre ordre préféré. |
-| `CLI_BRIDGE_INLINE_MAX_CHARS` | Au-delà, une réponse déborde vers un fichier au lieu d'inonder le contexte (défaut 12000). |
-| `CLI_BRIDGE_TERSE` | `off` / `lite` (défaut) / `full` / `ultra`. Préfixe un préambule de style de réponse compact aux prompts de délégué (anglais, raisonner pleinement en interne, répondre laconiquement, code/JSON intacts) pour réduire à la fois votre contexte et les tokens de sortie du délégué. Jamais appliqué aux outils de workflow structurés. |
-| `CLI_BRIDGE_TERSE_MIN_CHARS` | Saute le préambule laconique pour les tâches plus courtes que ce nombre de caractères (défaut `0` = ne jamais sauter). Les minuscules tâches ne peuvent pas rentabiliser le surcoût fixe du préambule. |
-| `CLI_BRIDGE_GUARD` | `off` / `warn` (défaut) / `strict`. Scanne la **sortie du délégué** à la recherche d'injection de prompt / d'empoisonnement d'outil ; `warn` préfixe une bannière, `strict` retient le corps. S'exécute après le masquage des secrets. |
-| `CLI_BRIDGE_MOCK` | `1` = dry-run : les lanes se déclarent installées et renvoient une réponse en boîte sans lancer aucune CLI. Essayez tout l'outil avec **zéro CLI installée**. |
-| `CLI_BRIDGE_RETRIES` | Réessais sur un échec TRANSITOIRE (défaut 1). Fait fonctionner une CLI instable du premier coup ; quota/auth/not-found/timeout ne sont jamais réessayés. |
-| `CLI_BRIDGE_TRACE_DIR` | Si défini, chaque délégation écrit ici une trace JSON masquée (argv, timing, sortie) — debug / audit reproductible. Désactivé par défaut. |
-| `CLI_BRIDGE_MAX_PARALLEL` | Plafond sur les lancements simultanés de délégués dans `ask_all` (défaut 6). Empêche un large conseil (beaucoup de lanes personnalisées) de faire un OOM sur une petite machine ou d'exploser le quota. |
-| `CLI_BRIDGE_DAILY_CREDIT_CAP` | Plafond dur sur la dépense payante *estimée* par jour UTC. >0 refuse une lane payante une fois que l'estimation du jour l'atteint — rend le « cost-safe » applicable, pas seulement rapporté. Les lanes gratuites ne sont jamais bloquées. |
-| `CLI_BRIDGE_ALLOW_LANES` | Liste d'autorisation, par ex. `gemini,gpt`. Vide = toutes. Configurations verrouillées / d'équipe : seules ces lanes sont exposées. |
-| `CLI_BRIDGE_DISABLE_BUILD` | `1` force chaque délégué en lecture seule (plan) même si un appelant demande `agent: build`. Pour les machines partagées. |
-| `CLI_BRIDGE_OVERFLOW_MAX_FILES` | Plafond sur le nombre de fichiers du répertoire de débordement (défaut 200) ; les plus anciens au-delà sont élagués pour que `/tmp` ne croisse pas sans limite. |
-| `CLI_BRIDGE_CONFIG_FILE` | Chemin vers une config JSON (défaut `~/.config/cli-bridge/config.json`). Une alternative plus conviviale aux variables d'env — **l'env l'emporte toujours**. Voir plus bas. |
-| `CLI_BRIDGE_CACHE_TTL_S` | `0` = désactivé (défaut). Quand `>0`, un appel identique dans ce nombre de secondes renvoie la réponse mise en cache au lieu de relancer la CLI (économise quota/crédits sur les répétitions ; les exécutions de build ne sont jamais mises en cache). |
-| `CLI_BRIDGE_<LANE>_CREDITS_PER_1K` | Crédits par 1 k tokens pour une lane, utilisé par `usage_report`/`usage_budget` pour **estimer** la dépense (chars/4). |
-| `CLI_BRIDGE_<LANE>_DAILY_LIMIT` | Exécutions max/jour pour une lane ; `usage_budget` signale en cas de dépassement. |
-| `CLI_BRIDGE_<LANE>_MIN_INTERVAL_S` | Cadençage anti-rafale des lancements : secondes minimales entre deux lancements de cette lane (défaut `0` = désactivé). Définissez-le (par ex. `2`) quand un palier gratuit limite le débit sous des appels consécutifs — les rafales sur une même lane sont espacées régulièrement, les autres lanes restent en parallèle. `lane_stats` le suggère quand une lane montre le schéma de limitation de débit. |
-| `CLI_BRIDGE_KEEP_WORKTREES` | Conserve les worktrees de `ask_build_isolated` au lieu de les jeter (pour inspection). |
-| `CLI_BRIDGE_REVIEW_TIMEOUT_S` | Timeout par relecteur pour `review_diff` / `security_review` (défaut 180 ; ceux-ci sont délibérément plus lourds que `ask_all`). |
-| `CLI_BRIDGE_OVERFLOW_TTL_H` | Heures avant qu'un fichier de débordement déversé ne soit élagué (défaut 24). |
-| `CLI_BRIDGE_TELEMETRY` | `off` pour désactiver le journal local des exécutions / le suivi des cooldowns (activé par défaut, strictement local à la machine). |
-| `CLI_BRIDGE_TRACE_FOOTER` | `off` masque le pied de page JSON `## Trace` dans les rapports de workflow — plus agréable pour les humains qui les lisent dans un terminal ; les hôtes MCP le veulent généralement (activé par défaut). |
-| `CLI_BRIDGE_STATE_DB` | Chemin vers la base sqlite d'état locale (défaut `~/.local/share/cli-bridge/state.sqlite`). |
-| `CLI_BRIDGE_STORE_TRANSCRIPTS` | `true` pour conserver un aperçu de tâche plus long dans la télémétrie (défaut : hash + aperçu de 60 caractères seulement). |
-| `CLI_BRIDGE_LOG` / `_LOG_FILE` | `debug`/`info` pour journaliser ce qui s'est exécuté où (défaut : silencieux). |
+### Consulter (lecture seule)
+| Outil | Ce qu'il fait | À utiliser quand |
+|------|--------------|-------------------|
+| `ask_<lane>` | Interroger une CLI précise — `ask_claude`, `ask_gpt` (Codex), `ask_gemini`, `ask_mistral`, `ask_opencode`, `ask_ollama`, et `ask_qwen`/`ask_grok`/`ask_copilot` si installées. Supporte `role="reviewer\|security\|planner\|devil"`, `conversation` (mémoire de table ronde), et `images=[…]` sur Gemini. | Vous voulez la force, la persona ou la modalité d'un modèle précis. |
+| `ask_all` | La même question à chaque lane *gratuite* en parallèle ; renvoie chaque réponse **plus un score de désaccord**. `synthesize: true` ajoute un résumé accord/désaccord. | Vous voulez de la largeur vite + un signal d'où les modèles divergent (= incertitude). |
+| `ask_cascade` | Essaie les lanes dans un ordre déterministe, s'arrête à la première bonne réponse, saute les lanes en pause ; escalade de confiance optionnelle. | Vous voulez de la résilience : une lane plafonnée/en échec est sautée automatiquement. |
+| `ask_best` | Un routeur choisit la lane la plus adaptée selon `mode` (`fast/cheap/deep/code/review/security`) + vos scores `rate_lane`. | Vous ne voulez pas choisir une lane à la main. |
+| `ask_all_async` + `job_status`/`job_result`/`job_cancel`/`jobs_list` | Lance `ask_all` en tâche de fond (id en <1 s). | Le fan-out est lent et vous voulez continuer à travailler. |
+| `consensus` | N lanes répondent, puis les pairs classent pour **sélectionner** la meilleure (la sélection bat la synthèse). | Une seule réponse défendable compte plus qu'un mélange. |
+| `challenge` | Une lane joue le sceptique contre une conclusion que vous fournissez. | Vous voulez que votre raisonnement soit attaqué avant de vous engager. |
+| `conversations_list` / `conversation_show` | Lister / lire les fils de table ronde persistants (survivent à `/compact` et aux redémarrages). | Vous voulez récupérer ou lire un fil multi-modèle. |
 
-### Fichier de config (à la place d'un mur de variables d'env)
+### Builder (écriture opt-in)
+| Outil | Ce qu'il fait | À utiliser quand |
+|------|--------------|-------------------|
+| `ask_build` | Délègue un vrai build. `mode=isolated` (défaut) édite un worktree jetable → **diff** ; `mode=direct` écrit dans une `zone` déclarée (verrou par zone + contrôle de violation de zone après le tour). `async=true` le lance comme un job pilotable. Les sorties non textuelles reviennent **par chemin** (artifact-return). | Vous voulez du travail *fait*, pas juste suggéré — sous revue ou en mains libres. |
+| `ask_build_isolated` | Alias pratique de `ask_build` avec `mode=isolated` — renvoie toujours un diff, ne touche jamais votre arbre. | Vous voulez le chemin sûr (diff) par son nom, sans régler `mode`. |
+| `job_tail` | Diffuse le journal de progression d'un build en cours (par offset d'octet). | Vous voulez regarder un délégué travailler. |
+| `build_steer` | Met en file une instruction de pilotage pour le tour suivant, ou `interrupt=true` coupe le tour courant (fichiers conservés). | Vous devez corriger le cap en plein build sans tout recommencer. |
 
-Vous préférez un fichier ? Déposez `~/.config/cli-bridge/config.json` (ou pointez `CLI_BRIDGE_CONFIG_FILE` vers un).
-Il complète toute variable d'env que vous n'avez pas définie — **l'environnement l'emporte toujours**, et les défauts fonctionnent encore
-sans aucun fichier :
+Les builds asynchrones tournent contre une **Definition-of-Done** exécutable (`dod_cmd`) — la
+prétention de succès du délégué est *testée*, pas crue sur parole.
 
-```json
-{
-  "profile": "balanced",
-  "guard": "warn",
-  "daily_credit_cap": 5.0,
-  "lanes": {
-    "gemini":   { "cost": "free" },
-    "opencode": { "cost": "free", "model": "opencode/deepseek-v4-flash-free" },
-    "gpt":      { "cost": "limited", "daily_limit": 50 }
-  }
-}
-```
+### Relire & vérifier
+| Outil | Ce qu'il fait | À utiliser quand |
+|------|--------------|-------------------|
+| `review_diff` | Revue structurée d'un diff → findings (sévérité, fichier, justification), fusionnés de façon déterministe entre lanes avec confiance single/majority/consensus. | Avant qu'un changement n'atterrisse. |
+| `security_review` | Passe sécurité orientée OWASP, classée par sévérité + une section `residual_risk`. | Le changement touche l'auth, la gestion d'entrées, les secrets. |
+| `debate` | Les modèles se critiquent sur un nombre borné de tours, finissant par un pied `VOTE` + arrêt anticipé sur convergence ; un juge indépendant conclut. | Une décision vraiment contestée. |
+| `premortem` / `test_plan` | Analyse des modes de défaillance d'un plan / un plan de test priorisé depuis un diff ou une description. | Avant d'écrire du code. |
+| `commit_msg` / `pr_describe` | Un message Conventional-Commit depuis votre diff stagé / un titre+corps de PR depuis la branche. Lecture seule — émet du texte. | Vous êtes sur le point de committer ou d'ouvrir une PR. |
+| `workflow(preset=…)` | Pipelines nommés : `jury` (vote inter-familles k-sur-N, fail-closed), `verify_repair` (boucle build→revue→réparation inter-modèles), `refine_plan`, `fanout_compare`, `council_review`, `map_review`, `research_verify`. | Vous voulez un motif multi-étapes éprouvé en un appel. |
 
-### Ajoutez votre propre CLI (sans fork)
+### Orchestrer
+| Outil | Ce qu'il fait | À utiliser quand |
+|------|--------------|-------------------|
+| `batch_run` | Fan-out durable, **journalisé** sur de nombreuses tâches. `dry_run=true` renvoie une enveloppe de coût (rien n'est lancé) ; `max_calls`/`max_credits` plafonnent la dépense ; `resume_id` rejoue les tâches finies et ne lance que le reste après un redémarrage. | Du travail en masse que vous voulez borné et résistant aux crashs. |
 
-`my-lanes.json`, puis `CLI_BRIDGE_LANES_FILE=/path/to/my-lanes.json` :
+### Opérer
+| Outil | Ce qu'il fait | À utiliser quand |
+|------|--------------|-------------------|
+| `usage_report` / `usage_budget` | Comptabilité estimée des tokens/crédits (chars/4 — honnêtement étiquetée comme une estimation) + budget face à un plafond quotidien. | Vous voulez voir la facture / poser un plafond. |
+| `rate_lane` / `route_plan` | Noter une lane de 1 à 5 pour un mode afin qu'`ask_best` apprenne votre stack / prévisualiser l'ordre qu'une cascade tenterait. | Vous voulez que le routeur s'améliore avec le temps. |
+| `lane_stats` / `reset_lane_state` | Santé par lane, mises en pause, et le signal de jury « gagner sa place » / remettre à zéro les compteurs d'une lane. | Une lane se comporte mal, ou vous voulez le rapport de places. |
+| `set_lane_cost` | Enregistrer ce qu'une lane vous coûte *à vous* (« Codex est gratuit sur mon forfait ») — persisté, pas besoin de `setup`. | Vous lui glissez un fait tarifaire en passant. |
+| `doctor` / `setup` | Détecter les CLI installées + chemins résolus ; `doctor deep` valide chaque lane contre son propre `--help` sur votre machine. | Première utilisation, ou quand une lane casse. |
+| `list_models` / `list_<lane>_models` | Lister les modèles d'une lane là où la CLI les expose. | Vous voulez choisir un modèle précis. |
 
-```json
-[
-  {
-    "key": "aider", "display": "Aider", "bin": "aider",
-    "ask": ["--message", "{task}"], "model_flag": "--model",
-    "client_ids": ["aider"], "note": "Aider one-shot via --message."
-  }
-]
-```
+Il existe aussi une **CLI humaine** (`cli-bridge doctor|ask|ask-all|ask-best|build|review-diff|eval|…`) —
+le même moteur depuis votre terminal ou la CI (`--json` partout). `cli-bridge build <lane> "<tâche>"`
+délègue un vrai build à une lane dans un worktree jetable et affiche le **diff** — votre dépôt n'est
+jamais touché.
 
-Vous disposez maintenant d'un outil `ask_aider`. (Une lane personnalisée avec une clé intégrée, par ex. `grok`, *surcharge*
-l'intégrée — pratique quand les flags de votre installation diffèrent.)
+---
 
-**L'écosystème plus large, prêt à brancher :** `examples/community-lanes.json` livre des lanes
-au mieux pour **Aider, Goose, Plandex, Amp, Crush, Amazon Q Developer CLI et Droid (Factory)** —
-toutes marquées expérimentales et `limited` (tenues hors de la diffusion large jusqu'à ce que *vous* déclariez ce qu'elles
-vous coûtent), et toutes couvertes par la vérification de dérive de flags de `doctor deep`, qui valide chaque lane
-face au `--help` propre de la CLI sur *votre* machine avant que quoi que ce soit ne casse silencieusement. Claude Code,
-Codex, Gemini + Antigravity (`agy`), opencode, Qwen Code, Copilot et Grok sont déjà
-intégrés. Tout le reste (Cline, OpenHands, Continue, Roo/Kilo Code, Kimi K2 CLI, …) est à
-3 lignes de JSON — et n'importe laquelle de ces CLI qui parle MCP peut aussi se placer de l'*autre* côté,
-en faisant tourner cli-bridge comme serveur.
+## Ce que vous obtenez vraiment en les combinant
 
-### Apportez votre propre API (aucune CLI nécessaire)
+Un seul assistant dont le plafond sur **chaque axe est le meilleur de l'écosystème** — pas l'outil que
+vous avez ouvert ce matin : coder avec le modèle le plus fort, lire 1–2 M de tokens quand le vôtre est
+trop court, répondre avec une connaissance fraîche au-delà d'une date de coupure, générer
+images/vidéos, voir des captures, et retomber sur une lane gratuite/locale quand vous êtes plafonné —
+réparti sur les abonnements que vous payez déjà.
 
-Encapsulez n'importe quel endpoint compatible OpenAI en lançant `curl`. Votre clé reste dans une variable d'env, jamais dans le
-fichier. `{task_json}` est le prompt, échappé en JSON :
+La propriété émergente **qu'aucune CLI seule n'a : un vrai contrôle inter-éditeurs** — un *éditeur
+différent* dans le siège du relecteur. Les sous-agents de même famille (ceux de Claude Code, de Grok)
+ne peuvent que s'auto-confirmer.
 
-```json
-[
-  {
-    "key": "myapi", "display": "My API", "bin": "curl", "default_model": "gpt-4o-mini",
-    "paid": true,
-    "ask": [
-      "-sS",
-      "--variable", "%MY_API_KEY",
-      "--expand-header", "Authorization: Bearer {{MY_API_KEY}}",
-      "https://api.openai.com/v1/chat/completions",
-      "-d", "{\"model\":\"{model}\",\"messages\":[{\"role\":\"user\",\"content\":\"{task_json}\"}]}"
-    ]
-  }
-]
-```
+La couture honnête : ceci unit des **capacités, pas un esprit** — des spawns sans état (pas de mémoire
+partagée), de la latence/du coût de spawn, une qualité inégale, et l'hôte garde toujours la barre.
+C'est de l'**orchestration, pas de la fusion** : vous dirigez des spécialistes, vous n'obtenez pas un
+seul cerveau doté de tous les pouvoirs.
 
-La paire `--variable %MY_API_KEY` + `--expand-header` (curl ≥ 8.3) importe la clé *à l'intérieur* de
-curl — elle n'apparaît jamais dans la liste des processus. `doctor` avertit si une lane personnalisée déploie plutôt un secret
-`${ENV}` dans l'argv.
+→ Forces & limites par CLI (datées, ça bouge vite) : **[docs/COMPARISON.md](../COMPARISON.md)**.
 
-(Voir `examples/` pour les deux, prêts à copier.)
+## Pourquoi cli-bridge (et pas un autre MCP « appeler d'autres modèles »)
+
+- 🛡️ **Ban-safe par conception.** Il lance la **CLI officielle** de chaque modèle, exactement comme
+  vous à la main — pas d'extraction de jeton OAuth, pas de réutilisation de clé API. Chaque CLI gère
+  sa propre auth et facturation.
+- 💸 **Des défauts cost-safe que vous accordez à votre forfait.** D'origine, `ask_all` / `ask_cascade`
+  bâtissent un conseil *gratuit* et ne touchent jamais au quota payant sauf demande. Chaque lane
+  embarque un palier sourcé des forfaits publiés de l'éditeur (datés dans
+  [docs/COSTS.md](../COSTS.md), **jamais détecté depuis votre compte**) ; surchargez par lane avec
+  `CLI_BRIDGE_<LANE>_COST=free|limited|paid`.
+- 🔌 **Marche depuis n'importe quel hôte.** Claude Code, Codex, opencode, Cursor, VS Code
+  (Cline/Continue), Zed — tout ce qui parle MCP sur stdio. La lane de l'hôte est tenue hors fan-out ;
+  masquez-la avec `CLI_BRIDGE_HIDE_HOST=1`. Même un **modèle local peut être l'hôte** — voir
+  [`examples/local-first-host.md`](../../examples/local-first-host.md).
+- 🧭 **L'avantage inter-éditeurs est le moat.** La vérification indépendante, c'est un *éditeur
+  différent* dans le siège du relecteur — la chose rare à mesure que l'IA écrit une part croissante du
+  code, et précisément ce qu'un outil mono-éditeur ne peut offrir.
 
 ---
 
@@ -526,53 +257,145 @@ curl — elle n'apparaît jamais dans la liste des processus. `doctor` avertit s
 ```
 host (Claude/Codex/…) ──MCP──> cli-bridge ──spawn──> official CLI ──> model
                                     │
-              hides the host's own lane · only shows installed, enabled CLIs
-              kills the whole process tree on timeout / cancellation
-              redacts secrets · classifies errors · spills huge output to a file
+       keeps the host's own lane out of fan-out · only shows installed, enabled CLIs
+       kills the whole process tree on timeout/cancellation · redacts secrets
+       classifies errors (auth/limit/failed) · spills huge output to a file
 ```
 
-Aucun appel réseau propre. Aucune clé stockée. Il exécute les mêmes binaires en lesquels vous avez déjà confiance, dans votre
-répertoire de travail, et vous rend la réponse.
+Aucun appel réseau propre. Aucune clé stockée. Il lance les mêmes binaires que vous utilisez déjà,
+dans votre répertoire de travail, et vous rend la réponse.
 
-### Fonctionne aussi dans les hôtes MCP des IDE
+<div align="center">
 
-cli-bridge est du MCP pur via stdio, donc n'importe quel hôte compatible MCP fonctionne — pas seulement les CLI de terminal.
-Pointez Cursor / VS Code (Cline, Continue) / Zed vers la **même commande** (`uvx cli-bridge-mcp`, ou
-`<python> -m cli_bridge`). La lane propre de l'hôte est auto-masquée ; tout le reste est identique.
+<img src="../../assets/demo.gif" width="860" alt="démo cli-bridge security-review : un contournement d'autorisation committé est attrapé par un conseil inter-éditeurs, fusionné en un rapport classé par sévérité, 0 $ sur les lanes gratuites">
 
-### Limitations connues (liste honnête)
+_Run réel (vitesse 2,2×) : le levier Vérifier — `security-review` éclate les rôles OWASP sur des
+modèles gratuits en parallèle (ici claude/gpt/opencode/ollama) ; ils signalent un contournement d'auth
+committé en **blocker**, et `usage` montre les reçus._
 
-- **Le « ban-safe » dépend des CGU de chaque fournisseur.** cli-bridge n'exécute que la CLI officielle que vous lanceriez
-  à la main — mais l'usage non interactif/scripté n'est pas *garanti* autorisé et peut changer. Utilisez
-  vos propres comptes dans le respect de leurs conditions ; considérez « ban-safe » comme « pas d'extraction de token/clé », pas comme une
-  garantie globale.
-- **Les jobs async sont in-process.** Un redémarrage du serveur marque les jobs en cours comme `interrupted`.
-  `batch_run` et `workflow` font exception — ils journalisent chaque tâche, donc un `resume_id` rejoue les
-  tâches finies et ne relance que le reste après un redémarrage.
-- **Pièges PATH de wrapper shell.** Si votre shell enveloppe les CLI déléguées dans une fonction ou un alias
-  (par ex. une garde `_opsec` dans `.zshrc`), lancer cli-bridge *depuis ce shell* peut casser — mais
-  cli-bridge lance le **binaire directement** (sans shell), donc il n'est pas affecté ; seul un wrapper qui
-  masque le binaire sur le `PATH` compte. `doctor` montre le chemin résolu par lane.
-- **Le garde-fou anti-injection est heuristique.** Il attrape les motifs à fort signal, pas tout ; en
-  mode `warn` le texte atteint quand même l'hôte (traitez la sortie du délégué comme des données).
-- **Les chiffres de tokens/crédits sont des estimations** (chars/4 + votre `CREDITS_PER_1K`), jamais exacts.
-- **Lanes BYO-API (curl) :** une clé `${ENV}` est substituée dans l'argv, donc elle peut apparaître dans la liste des
-  processus de cette machine pendant l'appel (elle n'est jamais journalisée — les traces la masquent). Préférez la
-  CLI propre d'un fournisseur quand c'est possible ; pour curl, un fichier d'en-têtes (`curl -H @file`) évite l'exposition dans l'argv.
-- **Lanes expérimentales** (`qwen`, `copilot`, `grok`) : les flags ne sont pas vérifiés en direct — signalez les ruptures.
-- **Les paliers de coût sont des défauts sourcés, pas de la détection** — faits de forfaits fournisseurs datés de juin 2026
-  ([docs/COSTS.md](../COSTS.md)) ; les forfaits/quotas évoluent, `doctor` avertit quand l'instantané est périmé.
-- **Hôte en sandbox :** si votre hôte exécute le serveur dans une sandbox stricte (FS en lecture seule / pas de
-  réseau), les CLI lancées en héritent et peuvent échouer à atteindre leurs fournisseurs. cli-bridge fait remonter
-  cela comme une erreur `auth`/`failed` plutôt que de rester bloqué.
+</div>
 
 ---
+
+## Écrire du code en sûreté : deux modes
+
+Les écritures sont contenues, de deux façons — **vous choisissez** sous revue ou en mains libres :
+
+- **`isolated` (défaut).** Édite dans un worktree git jetable et rend un **diff**. Votre arbre de
+  travail n'est jamais touché.
+- **`direct`.** Écrit de vrais fichiers, **mais uniquement dans une `zone` que vous déclarez**,
+  derrière un verrou par zone avec un contrôle de violation de zone après le tour. Vous dans
+  `backend/`, un délégué dans `frontend/`, en même temps — aucun ne peut gribouiller tout votre
+  dépôt ; l'annulation est limitée à la zone, jamais un reset global.
+
+La ré-entrée des délégués est plafonnée en profondeur (`CLI_BRIDGE_MAX_DEPTH`, défaut 1) pour qu'un
+délégué mal configuré ne puisse pas fork-bomber le conseil.
+
+---
+
+## Démarrage rapide (≈5 min)
+
+```bash
+# Run it (no install):
+uvx cli-bridge-mcp
+# or:  python -m cli_bridge
+
+# Point your MCP host at that same command, then:
+cli-bridge doctor        # see which CLIs are detected + their resolved paths
+```
+
+### Lanes
+
+**Intégrées :** Claude Code, Codex, Gemini (+ Antigravity `agy`), opencode, **Ollama (modèles locaux,
+0 $, offline)**, Qwen Code, Copilot, Grok.
+
+**Runtimes locaux** au-delà d'Ollama — **LM Studio · MLX · llama.cpp** — fournis en recettes
+sans code : pointez `CLI_BRIDGE_LANES_FILE` vers [`examples/lmstudio.lane.json`](../../examples/lmstudio.lane.json),
+[`mlx.lane.json`](../../examples/mlx.lane.json), ou [`llamacpp.lane.json`](../../examples/llamacpp.lane.json).
+(Plusieurs runtimes locaux des *mêmes* poids ouverts donnent des réponses corrélées — la vraie
+diversité de conseil vient d'éditeurs distincts, pas d'un second runtime local.)
+
+**Lanes communautaires** (`examples/community-lanes.json`, expérimentales + `limited` jusqu'à ce que
+vous déclariez leur coût) : Aider, Goose, Plandex, Amp, Crush, Amazon Q Developer CLI, Droid.
+
+**Tout le reste, c'est ~3 lignes de JSON.** Ajoutez une lane personnalisée, ou enveloppez n'importe
+quel endpoint compatible OpenAI en lançant `curl` (la clé reste dans curl, jamais dans argv). Voir
+[`examples/`](../../examples/) pour les recettes.
+
+---
+
+## La partie honnête
+
+« Plus de modèles = mieux » est *fragile* — les gros modèles partagent leurs données d'entraînement,
+donc leurs erreurs sont corrélées. Nous avons mesuré notre propre affirmation centrale
+(`cli-bridge eval`, sans juge LLM) : un conseil diversifié n'a **pas** attrapé plus de bugs qu'un seul
+modèle fort — il a coupé les fausses alertes **~2×**. Même taux de détection, bien moins de bruit — ce
+qui est exactement ce qui garde un relecteur digne de confiance plutôt qu'ignoré. **La précision est
+le produit, pas le rappel.** Le harnais est livré, vous pouvez donc le confirmer sur *vos* CLI —
+chiffres dans un sens comme dans l'autre dans [docs/BENCHMARKS.md](../BENCHMARKS.md).
+
+---
+
+## Limitations connues
+
+- **Ban-safe = pas d'extraction de jeton/clé**, pas une garantie générale — l'usage non interactif de
+  la CLI d'un fournisseur n'est pas formellement sanctionné partout et peut changer. Utilisez vos
+  propres comptes dans le respect de leurs conditions.
+- **Les jobs asynchrones sont en-process** — un redémarrage du serveur marque les jobs en cours
+  `interrupted`. `batch_run` / `workflow` font exception : ils journalisent chaque tâche et reprennent
+  via `resume_id`.
+- **Le garde anti-injection est heuristique** — il attrape les motifs à fort signal, pas tout ;
+  traitez la sortie d'un délégué comme de la donnée, pas des instructions.
+- **Les chiffres de tokens/crédits sont des estimations** (chars/4 + votre `CREDITS_PER_1K`), jamais
+  exacts.
+- **Les paliers de coût sont des défauts sourcés, pas de la détection** — les faits de forfait sont
+  datés ; `doctor` prévient quand l'instantané est périmé.
+- **Expérimental** (`qwen`, `copilot`, `grok`, lanes communautaires, Gemini `images=`) : les flags ne
+  sont pas vérifiés en live — `doctor deep` les contrôle contre le `--help` de chaque CLI sur votre
+  machine.
+
+---
+
+## Feuille de route
+
+Voir [`CHANGELOG.md`](../../CHANGELOG.md) pour l'historique livré. Actuellement **en exploration (non
+livré)** : un mode de vérification à **oracle indépendant** (une lane d'une autre famille écrit les
+tests depuis la *spec*, aveugle à l'implémentation, pour que le test attrape le bug au lieu de le
+refléter) et un **failover plus fin face aux limites**. Les grandes idées de « bus » inter-agents
+(spawn récursif, état partagé, protocole filaire) sont positionnées honnêtement comme une *direction*,
+jamais vendues comme un protocole livré — voir [docs/ARCHITECTURE.md](../ARCHITECTURE.md).
+
+---
+
+## Références
+
+Les choix de conception ci-dessus ne sont pas des intuitions — chacun correspond à un résultat de la
+littérature. Chaque entrée a été vérifiée contre sa source (auteurs + lieu de publication), parce
+qu'un outil qui vend de la « vérification inter-éditeurs honnête » se doit d'avoir ses propres
+citations justes.
+
+| Article | ID | Ce qu'il étaye ici |
+|-------|----|--------------------|
+| Du et al. — *Improving Factuality and Reasoning via Multiagent Debate* | [2305.14325](https://arxiv.org/abs/2305.14325) | `debate` : des modèles qui se critiquent battent un modèle seul |
+| ReConcile — *Round-Table Conference Improves Reasoning* | [2309.13007](https://arxiv.org/abs/2309.13007) | convergence de `debate` + consensus pondéré par la confiance |
+| Mixture-of-Agents | [2406.04692](https://arxiv.org/abs/2406.04692) | agrégation en couches sur des modèles diversifiés (et ses limites) |
+| Chain-of-Agents | [2406.02818](https://arxiv.org/abs/2406.02818) | pipelines multi-agents spécialisés par rôle |
+| CriticGPT — *LLM Critics Help Catch LLM Bugs* | [2407.00215](https://arxiv.org/abs/2407.00215) | `review_diff` / `security_review` : un critique LLM attrape des bugs que les humains ratent |
+| Perez et al. — *Discovering Language Model Behaviors* (sycophantie) | [2212.09251](https://arxiv.org/abs/2212.09251) | pourquoi un juge de même famille est faible → `jury` inter-éditeurs + anonymisation des pairs |
+| Wynn, Satija & Hadfield — *Talk Isn't Always Cheap* | [2509.05396](https://arxiv.org/abs/2509.05396) | modes de défaillance du débat → verdicts fail-closed, tours bornés |
+| CONSENSAGENT — *Consensus via Sycophancy Mitigation* (Findings of ACL 2025) | [ACL 2025](https://aclanthology.org/2025.findings-acl.1141/) | sycophantie en consensus → « gagner sa place » / pairs anonymisés |
+| Maryanskyy — *When Agents Disagree: The Selection Bottleneck* | [2603.20324](https://arxiv.org/abs/2603.20324) | `consensus` : **sélection > synthèse** (le défaut de vote déterministe entre pairs) |
+
+> **Note d'hygiène de citation.** *Talk Isn't Always Cheap* (2509.05396) est de **Wynn, Satija &
+> Hadfield** — un framework de conseil populaire le mé-cite comme « Xiong et al. ». Nous
+> revérifions les attributions avant de les répéter, et le signalons parce que l'honnêteté est tout le
+> propos.
 
 ## Développement
 
 ```bash
 uv venv && uv pip install -e . pytest pytest-asyncio
-pytest -q          # unit + integration (cross-host) tests
+pytest -q          # unit + integration (cross-host) tests; no real CLI or network needed
 ```
 
 ## Licence
@@ -583,10 +406,7 @@ MIT
 
 <div align="center">
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../../assets/mark-dark.svg">
-  <img src="../../assets/mark-light.svg" width="84" alt="cli-bridge">
-</picture>
+<img src="../../assets/mark.gif" width="84" alt="cli-bridge">
 
 <sub>une rive · reliée à un conseil</sub>
 
