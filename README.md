@@ -360,7 +360,7 @@ Hosts that support MCP prompts also surface `review_diff`, `security_review`, `d
 | `review_diff` | Multi-model code review of a git diff: lanes review in parallel with **different focuses** (correctness / security / tests / maintainability), each returning JSON findings; deterministic prechecks (secrets, dangerous shell) seed them; findings **merge by file/line/title** with agreement-based confidence (single/majority/consensus). `output_format: markdown` (default) or `json`. Params: `cwd`, `base` (default HEAD), `diff`, `include_paid`, `timeout_s`. |
 | `security_review` | OWASP-aware **security-only** review of a git diff (injection / auth & access control / secrets & crypto / data exposure & SSRF) → severity-ranked findings + a `residual_risk` section. |
 | `debate` | Several models answer a question, **see each other's answers and revise** over bounded rounds (default 1, max 3), then an **independent judge** (held out of the debate when 3+ lanes) writes the final consensus + remaining disagreement. Hardened from production use: `context_files` injects key files into every debater prompt (**grounding** — without it the council only paraphrases your brief), a **fact-check pass** (free lane, on by default) flags the verdict's unverifiable commands/tags/versions, claims carry provenance tags (`[brief]`/`[own-knowledge]`/`[verified]`), a thin brief gets a linter warning, and `steelman: true` makes one lane argue *against* a unanimous verdict before the judge re-concludes. `summary_only` drops the full positions (~60-80 % fewer tokens); `dry_run` returns a preflight data manifest (which files/chars go to which vendors) before anything is sent. Params: `task`, `rounds`, `adversarial`, `context_files`, `fact_check`, `summary_only`, `allow_self_judge`, `steelman`, `dry_run`, `include_paid`, `cwd`, `timeout_s`. |
-| `consensus` | The "LLM council" done better: each lane answers blind, then **ranks the anonymized answers** (no self-favouring), votes are aggregated **deterministically** (Borda count), and the **peer-ranked #1 answer is returned verbatim** — because *selecting* the best answer beats *blending* them (arXiv 2603.20324: synthesis loses to baseline; selection wins, g=3.86). `synthesize: true` opts into a chairman blend (the weaker mode). Returns the final answer + a peer-vote ranking table. `dry_run` returns a preflight data manifest (which files/chars go to which vendors) without spawning. Supports `context_files` grounding and `summary_only`. Params: `task`, `context_files`, `synthesize`, `summary_only`, `dry_run`, `include_paid`, `cwd`, `timeout_s`. |
+| `consensus` | The "LLM council" done better: each lane answers blind, then **ranks the anonymized answers** (no self-favouring), votes are aggregated **deterministically** (Borda count), and the **peer-ranked #1 answer is returned verbatim** — because *selecting* the best answer beats *blending* them ([arXiv 2603.20324](https://arxiv.org/abs/2603.20324): synthesis was preferred over the baseline in **0 of 42 tasks**; judge-based selection beat MoA-style synthesis by ΔWR ≈ +0.63, Glass's Δ ≈ 2.07). `synthesize: true` opts into a chairman blend (the weaker mode). Returns the final answer + a peer-vote ranking table. `dry_run` returns a preflight data manifest (which files/chars go to which vendors) without spawning. Supports `context_files` grounding and `summary_only`. Params: `task`, `context_files`, `synthesize`, `summary_only`, `dry_run`, `include_paid`, `cwd`, `timeout_s`. |
 | `challenge` | Hand a claim to **one outside lane** with a critical-reassessment prompt → an independent skeptical review (with an integrity guardrail — it won't manufacture disagreement). Pressure-test your own conclusion before acting. Optional `lane`. |
 | `premortem` | Each lane imagines the plan **already failed** and lists likely failure modes + mitigations; merged into a prioritized risk list. Run it before building. |
 | `test_plan` | Derive a prioritized **test plan** (behaviors, edge cases, concrete cases) from a git diff or a description. |
@@ -637,6 +637,28 @@ Point Cursor / VS Code (Cline, Continue) / Zed at the **same command** (`uvx cli
   deliberately want nested delegation.
 
 ---
+
+## References
+
+The design choices above aren't vibes — each maps to a finding in the literature. Every entry
+below was checked against its source (authors + venue), because a tool that sells "honest
+cross-vendor verification" should get its own citations right.
+
+| Paper | ID | What it backs here |
+|-------|----|--------------------|
+| Du et al. — *Improving Factuality and Reasoning via Multiagent Debate* | [arXiv 2305.14325](https://arxiv.org/abs/2305.14325) | `debate`: multiple models critiquing each other beats one model alone |
+| ReConcile — *Round-Table Conference Improves Reasoning* | [arXiv 2309.13007](https://arxiv.org/abs/2309.13007) | `debate` convergence + confidence-weighted consensus |
+| Mixture-of-Agents | [arXiv 2406.04692](https://arxiv.org/abs/2406.04692) | layered aggregation across diverse models (and its limits — see below) |
+| Chain-of-Agents | [arXiv 2406.02818](https://arxiv.org/abs/2406.02818) | role-specialized multi-agent pipelines |
+| CriticGPT — *LLM Critics Help Catch LLM Bugs* (McAleese et al.) | [arXiv 2407.00215](https://arxiv.org/abs/2407.00215) | `review_diff` / `security_review`: an LLM critic catches bugs humans miss |
+| Perez et al. — *Discovering Language Model Behaviors* (sycophancy) | [arXiv 2212.09251](https://arxiv.org/abs/2212.09251) | why a *same-family* judge is weak → cross-vendor `jury` + peer anonymization |
+| Wynn, Satija & Hadfield — *Talk Isn't Always Cheap* | [arXiv 2509.05396](https://arxiv.org/abs/2509.05396) | debate failure modes → fail-closed verdicts, bounded rounds |
+| CONSENSAGENT — *Consensus via Sycophancy Mitigation* (Findings of ACL 2025) | [ACL 2025](https://aclanthology.org/2025.findings-acl.1141/) | sycophancy in multi-agent consensus → "earn their seat" / anonymized peers |
+| Maryanskyy — *When Agents Disagree: The Selection Bottleneck* | [arXiv 2603.20324](https://arxiv.org/abs/2603.20324) | `consensus`: **selection > synthesis** (the deterministic peer-vote default) |
+
+> **A citation hygiene note.** *Talk Isn't Always Cheap* (2509.05396) is **Wynn, Satija &
+> Hadfield** — a popular council framework miscites it as "Xiong et al." Double-check attributions
+> before repeating them; we did, and flag it because honesty is the whole pitch.
 
 ## Development
 

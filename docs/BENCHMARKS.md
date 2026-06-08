@@ -29,7 +29,8 @@ numbers to pick `ask_best --mode fast` lanes and to set `CLI_BRIDGE_*_PRIORITY`.
 ## Quality — does a council actually beat one strong model?
 
 Latency is the *cost*; the *value* claim is "more models find more bugs". That is **not** a given —
-selection can beat synthesis and a council can over-detect (arXiv 2603.20324). So
+selection can beat synthesis and a council can over-detect ([arXiv 2603.20324](https://arxiv.org/abs/2603.20324) —
+synthesis preferred in 0/42 tasks; see the README References for the full, source-checked list). So
 cli-bridge measures it honestly and ships the harness; we publish the result even when the council
 **loses**.
 
