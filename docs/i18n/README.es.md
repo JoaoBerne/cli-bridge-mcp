@@ -11,7 +11,7 @@ _El README en inglés es la fuente autoritativa; esta traducción puede ir por d
 # cli-bridge
 
 ![CI](https://github.com/JoaoBerne/cli-bridge-mcp/actions/workflows/tests.yml/badge.svg)
-![PyPI](https://img.shields.io/pypi/v/cli-bridge-mcp)
+![status](https://img.shields.io/badge/status-pre--public%20(not%20on%20PyPI)-lightgrey)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 ![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-server-purple)
@@ -289,9 +289,9 @@ un delegado mal configurado no pueda fork-bombear el consejo.
 ## Inicio rápido (≈5 min)
 
 ```bash
-# Run it (no install):
-uvx cli-bridge-mcp
-# or:  python -m cli_bridge
+# Run it (no install) — installs straight from the repo:
+uvx --from git+https://github.com/JoaoBerne/cli-bridge-mcp cli-bridge doctor
+# or, from a clone:  python -m cli_bridge
 
 # Point your MCP host at that same command, then:
 cli-bridge doctor        # see which CLIs are detected + their resolved paths
