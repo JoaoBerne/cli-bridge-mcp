@@ -127,6 +127,63 @@ def test_decoy_classified_as_fp_decoy():
     assert sc.fp_decoy == 1 and sc.fp_other == 0
 
 
+# ── confidence calibration (ECE + Brier + signed gap over planted-bug ground truth) ──────────
+
+def test_score_fixture_emits_calib_pairs_anchored_to_the_matcher():
+    bug = _bug(line=10, keyword_groups=[["leak"]])
+    tp = _f(line=10, evidence="leak", models=["gpt", "gemini", "mistral"])    # consensus, correct
+    fp = _f(line=50, evidence="totally unrelated", models=["gpt"])            # single, wrong
+    sc = ev.score_fixture([tp, fp], _fx([bug]), total_reviewers=3)
+    assert (1.0, True) in sc.calib                       # 3/3 agreement, matched a bug
+    assert (round(1 / 3, 6), False) in [(round(p, 6), c) for p, c in sc.calib]   # 1/3, an FP
+    assert len(sc.calib) == 2
+
+
+def test_score_fixture_no_calib_without_reviewer_count():
+    bug = _bug(keyword_groups=[["leak"]])
+    sc = ev.score_fixture([_f(evidence="leak")], _fx([bug]))   # total_reviewers defaults to 0
+    assert sc.calib == []                                # confidence is meaningless for 1 reviewer
+
+
+def test_calibration_values_and_discrete_bins():
+    # Hand-built: 3 discrete agreement levels (consensus/majority/single), N=60 ≥ 50.
+    pairs = ([(1.0, True)] * 27 + [(1.0, False)] * 3          # pred 1.0, acc 0.90, n=30
+             + [(0.5, True)] * 10 + [(0.5, False)] * 10       # pred 0.5, acc 0.50, n=20
+             + [(1 / 3, True)] * 2 + [(1 / 3, False)] * 8)    # pred .333, acc 0.20, n=10
+    out = ev.calibration(pairs)
+    assert out["n"] == 60 and out["ece_reliable"] is True
+    assert out["ece"] == pytest.approx(0.072222, abs=1e-4)
+    assert out["brier"] == pytest.approx(0.162963, abs=1e-4)
+    assert out["signed_gap"] == pytest.approx(0.072222, abs=1e-4)   # +ve → overconfident
+    # one bin per DISTINCT pred value, sorted, never empty
+    assert [b["n"] for b in out["bins"]] == [10, 20, 30]
+    assert out["bins"][-1]["acc"] == pytest.approx(0.9)
+
+
+def test_calibration_suppresses_ece_below_n50():
+    pairs = [(1.0, True), (0.5, False), (1 / 3, True)]    # N=3 < 50
+    out = ev.calibration(pairs)
+    assert out["ece"] is None and out["ece_reliable"] is False
+    assert out["brier"] is not None and out["signed_gap"] is not None   # always defined
+    assert out["n"] == 3
+
+
+def test_calibration_empty_is_a_non_result():
+    out = ev.calibration([])
+    assert out == {"n": 0, "ece": None, "brier": None, "signed_gap": None,
+                   "bins": [], "ece_reliable": False}
+
+
+def test_render_markdown_includes_calibration_table():
+    arm = ev.ArmRun(tp=2, n_bugs=2, calib=[(1.0, True), (0.5, False), (1 / 3, True)])
+    res = ev.EvalResult(council=[arm], single=[arm], fixtures=_fx([_bug()]) and [_fx([_bug()])],
+                        council_lanes=["gpt", "gemini"], single_lane="gpt", k=2)
+    md = ev.render_markdown(res)
+    assert "Confidence calibration" in md
+    assert "Brier" in md and "signed gap" in md
+    assert "n/a (N=" in md                               # 3 pairs < 50 → ECE suppressed, not faked
+
+
 def test_severity_exact_counted():
     bug = _bug(line=10, severity="blocker", keyword_groups=[["leak"]])
     sc = ev.score_fixture([_f(line=10, severity="blocker", evidence="leak")], _fx([bug]))
