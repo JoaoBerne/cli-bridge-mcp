@@ -2149,12 +2149,6 @@ async def _review_diff(lanes: list[LaneSpec], args: dict) -> list[TextContent]:
     return [_emit(report, label="review_diff")]
 
 
-async def _synthesize(question, answered, targets) -> str:
-    # Thin glue: synthesis lives in council.py; inject run_lane + the free host-model judge.
-    return await council.synthesize(question, answered, targets,
-                                    run_lane=_run_lane, host_sample=_host_sample)
-
-
 async def _doctor_deep(host: str, lanes: list[LaneSpec]) -> str:
     """doctor + a tiny live probe of each free, exposed lane to check auth/quota for real."""
     base = _doctor(host)

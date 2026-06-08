@@ -5,7 +5,7 @@ validated against a live host, but the host-first / lane-fallback logic is fully
 """
 import asyncio
 
-from cli_bridge import server
+from cli_bridge import council, server
 from cli_bridge.lanes import LaneSpec
 from cli_bridge.runner import RunResult
 
@@ -21,31 +21,27 @@ def _answered():
     return a, b, [(a, RunResult(True, "answer a", "ok")), (b, RunResult(True, "answer b", "ok"))]
 
 
-def test_synthesize_prefers_host_no_lane_spent(monkeypatch):
+def test_synthesize_prefers_host_no_lane_spent():
     a, b, answered = _answered()
 
     async def fake_host(prompt, max_tokens=1024):
         return "HOST SYNTHESIS"
-    monkeypatch.setattr(server, "_host_sample", fake_host)
 
     async def boom(*args, **kwargs):
         raise AssertionError("a lane must NOT be spawned when host sampling works")
-    monkeypatch.setattr(server, "_run_lane", boom)
 
-    out = asyncio.run(server._synthesize("q", answered, [a, b]))
+    out = asyncio.run(council.synthesize("q", answered, [a, b], run_lane=boom, host_sample=fake_host))
     assert "HOST SYNTHESIS" in out and "host model" in out
 
 
-def test_synthesize_falls_back_to_lane(monkeypatch):
+def test_synthesize_falls_back_to_lane():
     a, b, answered = _answered()
 
     async def no_host(prompt, max_tokens=1024):
         return None
-    monkeypatch.setattr(server, "_host_sample", no_host)
 
     async def fake_run_lane(lane, args, *, tool="ask", terse=True):
         return RunResult(True, "LANE SYNTHESIS", "ok")
-    monkeypatch.setattr(server, "_run_lane", fake_run_lane)
 
-    out = asyncio.run(server._synthesize("q", answered, [a, b]))
+    out = asyncio.run(council.synthesize("q", answered, [a, b], run_lane=fake_run_lane, host_sample=no_host))
     assert "LANE SYNTHESIS" in out
