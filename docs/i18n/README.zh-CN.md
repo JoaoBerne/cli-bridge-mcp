@@ -11,7 +11,7 @@ _英文 README 为准；本翻译可能滞后。欢迎社区校对。_
 # cli-bridge
 
 ![CI](https://github.com/JoaoBerne/cli-bridge-mcp/actions/workflows/tests.yml/badge.svg)
-![PyPI](https://img.shields.io/pypi/v/cli-bridge-mcp)
+![status](https://img.shields.io/badge/status-pre--public%20(not%20on%20PyPI)-lightgrey)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 ![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-server-purple)
@@ -265,9 +265,9 @@ claude/gpt/opencode/ollama）；它们把一处提交的鉴权绕过标记为 **
 ## 快速开始（约 5 分钟）
 
 ```bash
-# Run it (no install):
-uvx cli-bridge-mcp
-# or:  python -m cli_bridge
+# Run it (no install) — installs straight from the repo:
+uvx --from git+https://github.com/JoaoBerne/cli-bridge-mcp cli-bridge doctor
+# or, from a clone:  python -m cli_bridge
 
 # Point your MCP host at that same command, then:
 cli-bridge doctor        # see which CLIs are detected + their resolved paths
