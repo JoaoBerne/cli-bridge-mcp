@@ -11,7 +11,7 @@ _O README em inglês é a fonte autoritativa; esta tradução pode ficar para tr
 # cli-bridge
 
 ![CI](https://github.com/JoaoBerne/cli-bridge-mcp/actions/workflows/tests.yml/badge.svg)
-![status](https://img.shields.io/badge/status-pre--public%20(not%20on%20PyPI)-lightgrey)
+![status](https://img.shields.io/badge/status-not%20on%20PyPI%20yet-lightgrey)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 ![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-server-purple)
