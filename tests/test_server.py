@@ -178,20 +178,48 @@ def test_host_lane_exposed_for_sibling_model(monkeypatch):
     assert server._host_lane("claude-code") is claude
 
 
-def test_self_ask_tool_listed_and_requires_model(monkeypatch):
+def test_host_lane_shown_by_default_model_optional(monkeypatch):
+    # Default: the host's own lane is a normal, visible tool (model NOT required).
     claude = _claude_lane()
     monkeypatch.setattr(server, "installed_lanes", lambda lst: [claude])
     monkeypatch.setenv("CLI_BRIDGE_HOST", "claude-code")
+    monkeypatch.delenv("CLI_BRIDGE_HIDE_HOST", raising=False)
+    tools = asyncio.run(server.list_tools())
+    ask_claude = next((t for t in tools if t.name == "ask_claude"), None)
+    assert ask_claude is not None
+    assert "model" not in ask_claude.inputSchema["required"]
+
+
+def test_host_lane_callable_without_model_by_default(monkeypatch):
+    claude = _claude_lane()
+    monkeypatch.setattr(server, "installed_lanes", lambda lst: [claude])
+    monkeypatch.setenv("CLI_BRIDGE_HOST", "claude-code")
+    monkeypatch.delenv("CLI_BRIDGE_HIDE_HOST", raising=False)
+
+    async def fake_run_lane(lane, args, *, tool="ask", terse=True):
+        return RunResult(True, "own lane says hi", "ok", latency_ms=5)
+    monkeypatch.setattr(server, "_run_lane", fake_run_lane)
+
+    out = asyncio.run(server.call_tool("ask_claude", {"task": "hi"}))
+    assert "own lane says hi" in out[0].text
+
+
+def test_self_ask_tool_listed_and_requires_model_when_hidden(monkeypatch):
+    claude = _claude_lane()
+    monkeypatch.setattr(server, "installed_lanes", lambda lst: [claude])
+    monkeypatch.setenv("CLI_BRIDGE_HOST", "claude-code")
+    monkeypatch.setenv("CLI_BRIDGE_HIDE_HOST", "1")            # legacy: sibling-only consult
     tools = asyncio.run(server.list_tools())
     ask_claude = next((t for t in tools if t.name == "ask_claude"), None)
     assert ask_claude is not None
     assert "model" in ask_claude.inputSchema["required"]
 
 
-def test_self_ask_rejects_missing_model(monkeypatch):
+def test_self_ask_rejects_missing_model_when_hidden(monkeypatch):
     claude = _claude_lane()
     monkeypatch.setattr(server, "installed_lanes", lambda lst: [claude])
     monkeypatch.setenv("CLI_BRIDGE_HOST", "claude-code")
+    monkeypatch.setenv("CLI_BRIDGE_HIDE_HOST", "1")
     out = asyncio.run(server.call_tool("ask_claude", {"task": "hi"}))
     assert "explicit `model`" in out[0].text
 

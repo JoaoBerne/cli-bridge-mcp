@@ -134,9 +134,10 @@ There are other "call other models" MCPs. Here's what makes cli-bridge different
   such** — that you override per your own subscriptions
   (`CLI_BRIDGE_<LANE>_COST=free|limited|paid`); on a big plan, mark them all `free`, or set
   `CLI_BRIDGE_PROFILE=max`.
-- 🔌 **Works from any host.** Driving Claude Code? It hides the Claude lane (no asking yourself)
-  and exposes the rest. Driving Codex or opencode instead? Same deal, detected automatically from
-  the MCP handshake.
+- 🔌 **Works from any host.** Driving Claude Code? The Claude lane is shown as a normal tool but
+  kept out of `ask_all`/`ask_cascade` fan-out (asking your own running model in a parallel council
+  is redundant) — set `CLI_BRIDGE_HIDE_HOST=1` to hide it entirely. Driving Codex or opencode
+  instead? Same deal, detected automatically from the MCP handshake.
 - 🧩 **Add any CLI — or your own API — without forking.** Built-in lanes for Claude, GPT, Gemini,
   Mistral, Qwen, Copilot, Grok and opencode. Register **your own CLI from a JSON file**, or wrap
   **your own API** by spawning `curl`. Zero code.
@@ -179,7 +180,7 @@ There are other "call other models" MCPs. Here's what makes cli-bridge different
 | Automatic fallback (cascade) | ✅ | some | ❌ |
 | Routing that **learns from your outcomes** | ✅ | ❌ | ❌ |
 | Add any CLI / your own API, no fork | ✅ | ➖ | ❌ |
-| Self-hides the calling host | ✅ | n/a | ➖ |
+| Detects the calling host (keeps it out of fan-out; opt-in hide) | ✅ | n/a | ➖ |
 | Round-table memory that survives a restart | ✅ | ➖ (in-memory) | ➖ |
 | Safe agentic write (worktree → diff) | ✅ | ➖ | ❌ |
 | Ships a deterministic quality eval (council vs single) | ✅ | ❌ | ❌ |
@@ -241,7 +242,8 @@ Caveats: Gemini CLI's free tier **sunsets 2026-06-18**; free tiers churn in week
 ### 2. Register it with your host
 
 It's a plain stdio MCP server (`uvx cli-bridge-mcp`) — it works in every MCP client, and it
-auto-hides the lane of whichever host is calling (no asking yourself).
+detects whichever host is calling and keeps that lane out of fan-out (`CLI_BRIDGE_HIDE_HOST=1`
+hides it entirely).
 
 **Claude Code** — one command:
 
@@ -469,7 +471,8 @@ Everything is environment variables — no code edits. Tune it to **your** subsc
 | `CLI_BRIDGE_<LANE>_BIN` | Point a lane at a different binary (e.g. `CLI_BRIDGE_GEMINI_BIN=agy`). |
 | `CLI_BRIDGE_<LANE>_MODEL` | Default model for a lane when the caller doesn't pass one. |
 | `CLI_BRIDGE_PROFILE` | `saver`, `balanced`, or `max`. `max` includes limited/paid lanes in `ask_all` unless the caller overrides `include_paid`. |
-| `CLI_BRIDGE_HOST` | Force the host identity (which lane to hide). Normally auto-detected. |
+| `CLI_BRIDGE_HOST` | Force the host identity (which lane is the caller). Normally auto-detected. |
+| `CLI_BRIDGE_HIDE_HOST` | `1` hides the host's own lane entirely (legacy: reachable only as an explicit-model *sibling* consult). Default off — the host lane is a normal, visible tool; it's only ever kept out of `ask_all`/`ask_cascade` fan-out. |
 | `CLI_BRIDGE_LANES_FILE` | Path to a JSON file adding **your own** CLIs/APIs as lanes. |
 | `CLI_BRIDGE_DISABLED_TOOLS` | Comma-separated tool names to hide from the listing (e.g. `debate,premortem,test_plan`) — trims the schema context every host pays per request. `doctor`/`setup` can't be hidden. |
 | `CLI_BRIDGE_ENABLED_TOOLS` | Allowlist for a one-env **lean mode**: when set, only these tools (+ `doctor`/`setup`) are exposed (e.g. `ask_best,ask_all,review_diff`). |
@@ -580,7 +583,7 @@ secret into argv instead.
 ```
 host (Claude/Codex/…) ──MCP──> cli-bridge ──spawn──> official CLI ──> model
                                     │
-              hides the host's own lane · only shows installed, enabled CLIs
+              keeps the host's own lane out of fan-out · only shows installed, enabled CLIs
               kills the whole process tree on timeout / cancellation
               redacts secrets · classifies errors · spills huge output to a file
 ```
@@ -592,7 +595,8 @@ working directory, and hands the answer back.
 
 cli-bridge is plain MCP over stdio, so any MCP-capable host works — not just terminal CLIs.
 Point Cursor / VS Code (Cline, Continue) / Zed at the **same command** (`uvx cli-bridge-mcp`, or
-`<python> -m cli_bridge`). The host's own lane is auto-hidden; everything else is identical.
+`<python> -m cli_bridge`). The host's own lane stays out of fan-out (hide it with
+`CLI_BRIDGE_HIDE_HOST=1`); everything else is identical.
 
 ### Known limitations (honest list)
 

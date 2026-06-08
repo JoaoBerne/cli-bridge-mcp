@@ -195,6 +195,14 @@ def lean() -> bool:
     return os.environ.get("CLI_BRIDGE_LEAN", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def hide_host() -> bool:
+    """CLI_BRIDGE_HIDE_HOST=1 → hide the caller's OWN lane (legacy behaviour: ask_<host> is then
+    only reachable as an explicit-model SIBLING consult). Off by default — the host's own lane is
+    a normal, visible tool you can call directly. It still never joins ask_all/ask_cascade fan-out
+    (asking your own running model in a parallel council is redundant)."""
+    return os.environ.get("CLI_BRIDGE_HIDE_HOST", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def build_disabled() -> bool:
     """CLI_BRIDGE_DISABLE_BUILD=1 forces every delegate to read-only (plan), even if a caller
     asks agent='build'. For shared/team machines where no delegate should edit files."""

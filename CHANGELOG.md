@@ -41,6 +41,10 @@ All notable changes to this project are documented here. The format follows
   unchanged. Moved `council_recap`/`one_phrase` into council.py (fixes the backwards import).
   Renamed usage_report `format` → `output_format` (legacy still read). Added "use X not Y"
   disambiguation lines to the overlapping tool clusters.
+- **Host's own lane now visible by default.** `ask_<host>` is exposed as a normal, directly-callable
+  tool (model optional) instead of being hidden; it is still kept out of `ask_all`/`ask_cascade`
+  fan-out (self-asking in a parallel council is redundant). The old behaviour — hidden, reachable
+  only as an explicit-model *sibling* consult — is now opt-in via `CLI_BRIDGE_HIDE_HOST=1`.
 
 ### Added (cross-CLI orchestration unblocks)
 - **Artifact return** (`ask_build mode=direct`): non-text files the build writes in the zone

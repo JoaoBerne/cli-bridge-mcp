@@ -13,7 +13,7 @@ binaries you run by hand. That's the whole trick.
 ```
 host (Claude/Codex/…) ──MCP/stdio──▶ cli-bridge ──spawn subprocess──▶ official CLI ──▶ model
                                           │
-                                          ├─ hides the host's own lane (don't ask yourself)
+                                          ├─ keeps the host's own lane out of fan-out (CLI_BRIDGE_HIDE_HOST=1 hides it)
                                           ├─ kills the whole process tree on timeout/cancel
                                           ├─ redacts secrets, classifies errors
                                           └─ spills huge output to a file (keeps host context lean)

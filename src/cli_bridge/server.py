@@ -2,7 +2,8 @@
 
 Low-level MCP server so we can filter tools per client at list time:
 - only lanes whose CLI is installed are exposed,
-- the *calling* client's own lane is hidden (no point asking yourself),
+- the *calling* client's own lane is shown as a normal tool but kept out of fan-out
+  (CLI_BRIDGE_HIDE_HOST=1 hides it entirely, sibling-model-consult only),
 detected from the MCP `clientInfo.name` (with a CLI_BRIDGE_HOST env override).
 
 Every lane spawns the official CLI as a subprocess — no token extraction, no API keys,
@@ -210,13 +211,12 @@ def _active_lanes() -> tuple[list[LaneSpec], str]:
 
 
 def _host_lane(host: str) -> LaneSpec | None:
-    """The caller's OWN installed lane, if it supports model selection — so the host can
-    consult a DIFFERENT model of its own family (e.g. Claude Code -> ask Opus 4.6). Returned
-    separately from the delegates so it never joins a fan-out, only direct ask_<host> calls."""
+    """The caller's OWN installed lane. Visible as a normal ask_<host> tool by default; with
+    CLI_BRIDGE_HIDE_HOST=1 it is hidden and only reachable as an explicit-model SIBLING consult.
+    Returned separately from the delegates either way, so it never joins a fan-out."""
     if not host:
         return None
-    own = next((ln for ln in installed_lanes(all_lanes()) if _is_host(ln, host)), None)
-    return own if own and "model" in own.caps else None
+    return next((ln for ln in installed_lanes(all_lanes()) if _is_host(ln, host)), None)
 
 
 # ─────────────────────────────── tool schema construction ───────────────────────────────
@@ -523,7 +523,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
         ))
     tools.append(Tool(
         name="doctor",
-        description="Health check: which CLIs are installed, which is the host (hidden), paid lanes, "
+        description="Health check: which CLIs are installed, which is the host, paid lanes, "
                     "defaults, current cost profile. Pass deep=true to also probe each lane with a "
                     "tiny live call (checks auth/quota — uses a bit of free quota; skips paid lanes).",
         inputSchema={"type": "object", "properties": {
@@ -1103,7 +1103,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
 
 
 def _self_ask_tool(lane: LaneSpec) -> Tool:
-    """ask_<host> for the caller's OWN family — requires an explicit `model` so it's only ever
+    """ask_<host> in CLI_BRIDGE_HIDE_HOST mode — requires an explicit `model` so it's only ever
     used to reach a SIBLING model (asking your own running model the same thing is pointless)."""
     schema = _ask_schema(lane)
     schema["required"] = ["task", "model"]
@@ -1114,6 +1114,20 @@ def _self_ask_tool(lane: LaneSpec) -> Tool:
                      "Requires an explicit `model` (e.g. a sibling like claude-opus-4-6); empty "
                      f"model is rejected. {lane.note}"),
         inputSchema=schema,
+        annotations=_ann(readOnlyHint=not can_write, openWorldHint=True,
+                         destructiveHint=can_write),
+    )
+
+
+def _host_ask_tool(lane: LaneSpec) -> Tool:
+    """ask_<host> as a NORMAL direct tool (default): the caller's own lane is visible and callable
+    like any other (model optional). It still stays out of ask_all/ask_cascade fan-out."""
+    can_write = "agent" in lane.caps
+    return Tool(
+        name=f"ask_{lane.key}",
+        description=(f"Consult {lane.display} — your own lane (e.g. a fresh instance, or a sibling "
+                     f"model via `model`). Kept out of ask_all/ask_cascade fan-out. {lane.note}"),
+        inputSchema=_ask_schema(lane),
         annotations=_ann(readOnlyHint=not can_write, openWorldHint=True,
                          destructiveHint=can_write),
     )
@@ -1168,7 +1182,11 @@ async def list_tools() -> list[Tool]:
     tools = _tools_for(lanes)
     own = _host_lane(host)
     if own:
-        tools.insert(0, _self_ask_tool(own))   # reach a sibling model of your own family
+        if config.hide_host():
+            if "model" in own.caps:                # legacy: reach a sibling model of your own family
+                tools.insert(0, _self_ask_tool(own))
+        else:
+            tools.insert(0, _host_ask_tool(own))   # visible by default: a normal direct ask_<host>
     return _filter_tools(tools)
 
 
@@ -1938,11 +1956,11 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
         key = name[4:]
         lane = _lane_by_key(key, lanes)
         if not lane:
-            # Maybe it's the host's OWN family lane (sibling-model consultation): allowed only
-            # with an explicit model so the host doesn't just re-ask its own running model.
+            # The host's OWN lane. Visible/callable by default; in CLI_BRIDGE_HIDE_HOST mode it is
+            # allowed only with an explicit model (a SIBLING consult, not re-asking yourself).
             own = _host_lane(host)
             if own and own.key == key:
-                if not _str(args, "model"):
+                if config.hide_host() and not _str(args, "model"):
                     return [TextContent(type="text", text=(
                         f"[error] ask_{key} is your own family — pass an explicit `model` to "
                         "consult a SIBLING model (e.g. claude-opus-4-6). Re-asking the model "
@@ -2318,7 +2336,9 @@ def _render_lane_stats() -> str:
 
 def _doctor(host: str) -> str:
     lines = ["# cli-bridge - health check", ""]
-    lines.append(f"Host (caller): **{host or 'unknown'}** - its own lane is hidden.")
+    host_note = ("its own lane is hidden (CLI_BRIDGE_HIDE_HOST)" if config.hide_host()
+                 else "its own lane is shown (direct calls only, never in fan-out)")
+    lines.append(f"Host (caller): **{host or 'unknown'}** - {host_note}.")
     prof = _profile() + ("" if _profile_is_set() else " (default — run `setup` to configure)")
     lines.append(f"Cost profile: **{prof}**")
     lines.append("_Cost tiers are NOT detected from your account — '(default)' = a sourced "
@@ -2333,7 +2353,9 @@ def _doctor(host: str) -> str:
         mark = "installed" if installed else "NOT on PATH"
         if not lane.enabled:
             mark += " (disabled by env)"
-        hidden = " - hidden (this is the host)" if _is_host(lane, host) else ""
+        hidden = ((" - hidden (this is the host)" if config.hide_host()
+                   else " - this is the host (shown; never in fan-out)")
+                  if _is_host(lane, host) else "")
         src = "set by you" if lane.cost_is_configured else "default — yours may differ"
         paid = f" - {lane.cost_label} ({src})"
         exp = " - experimental" if lane.experimental else ""
