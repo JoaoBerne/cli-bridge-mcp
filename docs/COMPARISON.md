@@ -51,3 +51,21 @@ cli-bridge unites **capabilities, not mind**. Be clear-eyed about what it is *no
 > **Lane abstraction as insurance.** When a vendor renames or retires a CLI (e.g. Gemini → Antigravity
 > on 2026-06-18), you swap the lane and your workflow is unchanged. The `agy` lane already covers that
 > one — the abstraction is the point.
+
+## Experimental lanes — verified invocations (⚗️)
+
+The ⚗️ lanes are **not run live by cli-bridge's test suite**, so they stay flagged experimental. The
+headless invocation each lane builds was, however, **verified against the vendor's official docs
+(2026-06)** — it's the documented non-interactive command, not a guess. Run `cli-bridge doctor deep`
+to check the flags against the installed CLI's `--help` and warn on drift.
+
+| Lane | Invocation cli-bridge builds | Verified against (2026-06) |
+|---|---|---|
+| `copilot` | `copilot -p "<task>"` · `--model <id>` · `--allow-all-tools` (build) | [Copilot CLI programmatic reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-programmatic-reference) · [Allowing tools](https://docs.github.com/en/copilot/how-tos/copilot-cli/allowing-tools) |
+| `qwen` | `qwen -p "<task>"` · `-m <id>` · `--yolo` (build) | [Qwen Code — Headless mode](https://qwenlm.github.io/qwen-code-docs/en/users/features/headless/) |
+| `grok` | `grok -p "<task>"` · `--model <id>` (best-effort) | [Grok Build Beta](https://x.ai/cli) · install `curl -fsSL https://x.ai/cli/install.sh \| bash` |
+
+> Verified = the **flags exist and are documented**; it does **not** mean cli-bridge has exercised the
+> full path end-to-end on these lanes. `--model` on `grok` stays best-effort (the flag set churns in
+> beta). Build/write flags (`--allow-all-tools`, `--yolo`) grant the delegate your own filesystem
+> access — opt-in, same as every other build lane.

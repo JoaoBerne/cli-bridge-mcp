@@ -6,6 +6,29 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added (local lane + council quality + quota resilience)
+- **Ollama lane** — `ask_ollama` / `list_ollama_models` spawn the local `ollama` CLI
+  (`run --hidethinking <model> <task>`, `NO_COLOR=1`/`TERM=dumb`): $0, offline, private, read-only.
+  Empty model = the first from `ollama list`. Maximal jury de-correlation (with the honest caveat
+  that two local runtimes of the *same* open weights still correlate).
+- **Local-model recipes** — `examples/` custom-lane JSON for driving other CLIs against a local
+  Ollama/LM-Studio endpoint (useful when coding offline and needing extra horsepower).
+- **Peer-anonymized debate/council** — debaters and reviewers see neutral `Reviewer A/B` / `Debater 1/2`
+  labels instead of vendor names, so a model can't favour (or attack) a known rival; convergence
+  early-stop ladder unchanged.
+- **`seat_report` (earn-their-seat)** — `jury_outcomes` telemetry tracks each lane's
+  PASS/FAIL/ABSTAIN history so a lane that never adds signal can be benched on evidence, not vibes.
+- **Discrete calibration binning** — `cli-bridge eval` calibration (ECE/Brier/signed gap) now bins on
+  the *discrete* predicted-confidence values actually emitted, not 10 equal-width bins, with an N≥50
+  gate — honest numbers on small samples.
+
+### Changed (quota resilience)
+- **Quota-empty cooldown with capped backoff** — a silent exit-0 empty (free-tier quota almost surely
+  spent) cools the lane after `COOLDOWN_EMPTY_THRESHOLD` consecutive empties; each further empty
+  **doubles** the wait, capped at `COOLDOWN_EMPTY_MAX_S` (6 h). Bounded both ways: never infinite, and
+  a single success resets the streak to the 30-min base. Stops fan-out hammering a daily-quota-dead
+  lane while still re-probing within a day.
+
 ### Added (dynamic orchestration engine + cross-vendor jury)
 - **`workflow preset=jury`** — the cross-vendor verification edge: an author lane produces, then N
   verifiers **from different vendor families** vote PASS/FAIL/ABSTAIN, aggregated k-of-N

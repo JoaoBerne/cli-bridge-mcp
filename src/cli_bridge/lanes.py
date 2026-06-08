@@ -480,8 +480,9 @@ BUILTIN_LANES: list[LaneSpec] = [
              client_ids=frozenset({"copilot", "github-copilot"}),
              experimental=True,
              install_hint="gh extension install github/gh-copilot  (subscription)",
-             note="GitHub Copilot. agent='build' EDITS files (--allow-all-tools). Flags unverified; "
-                  "if your install is `gh copilot`, set CLI_BRIDGE_COPILOT_BIN and a custom lane."),
+             note="GitHub Copilot. agent='build' EDITS files (--allow-all-tools). Flags verified vs "
+                  "GitHub docs 2026-06 (-p/--model/--allow-all-tools), not run live by the suite; if "
+                  "your install is `gh copilot`, set CLI_BRIDGE_COPILOT_BIN and a custom lane."),
     LaneSpec("grok", "Grok (xAI CLI)", "grok", _grok_ask,
              cost_default="limited",
              cost_note="Requires a SuperGrok / X Premium+ subscription (no free CLI tier as of "
