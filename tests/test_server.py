@@ -6,6 +6,16 @@ from cli_bridge.lanes import LaneSpec
 from cli_bridge.runner import RunResult
 
 
+def test_ollama_surfaces_ask_and_list_tools_read_only():
+    from cli_bridge.lanes import BUILTIN_LANES
+    ollama = next(ln for ln in BUILTIN_LANES if ln.key == "ollama")
+    names = {t.name for t in server._tools_for([ollama])}
+    assert "ask_ollama" in names                       # the consult tool
+    assert "list_ollama_models" in names               # surfaced because models_args is set
+    ask = next(t for t in server._tools_for([ollama]) if t.name == "ask_ollama")
+    assert ask.annotations.readOnlyHint is True        # no agent cap → never advertises write
+
+
 def test_slug_normalizes_host_names():
     assert server._slug("Claude Code") == "claude-code"
     assert server._slug("claude_code") == "claude-code"

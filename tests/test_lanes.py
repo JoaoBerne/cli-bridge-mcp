@@ -150,6 +150,53 @@ def test_grok_lane_exists_no_hardcoded_model():
     assert "--model" in argv2 and "grok-x" in argv2
 
 
+# ── Ollama built-in lane (local models, ban-safe) ──────────────────────────────────────
+
+def test_ollama_argv_requires_hidethinking():
+    # --hidethinking is mandatory: ollama models are thinking models, so without it stdout
+    # carries the chain of thought before the answer.
+    argv = _lane("ollama").build_ask("Reply OK", "qwen3.5:0.8b", "", "")
+    assert argv == ["run", "--hidethinking", "qwen3.5:0.8b", "Reply OK"]
+
+
+def test_ollama_is_read_only_free_lane():
+    lane = _lane("ollama")
+    assert lane.cost_label == "free" and lane.is_paid is False
+    assert lane.caps == frozenset({"model"})              # no effort/agent — read-only, no build
+    assert lanes.family_of(lane) == "ollama"              # distinct family for jury decorrelation
+
+
+def test_ollama_spawn_env_strips_ansi():
+    # ollama writes ANSI cursor codes to stdout even when redirected; NO_COLOR + dumb TERM fix it.
+    env = _lane("ollama").env_ask("", "", "")
+    assert env == {"NO_COLOR": "1", "TERM": "dumb"}
+
+
+def test_ollama_default_model_skips_header(monkeypatch):
+    # `ollama list` prints a header row then model rows; the empty-model default is the first
+    # model's first column. The header is skipped UNCONDITIONALLY (not by matching its text).
+    lanes._ollama_model_cache.clear()
+    monkeypatch.setattr(lanes.subprocess, "run", lambda *a, **k: SimpleNamespace(
+        returncode=0,
+        stdout="NAME       ID       SIZE    MODIFIED\n"
+               "gemma4:e4b-it-qat   ee66   6.1 GB   41 hours ago\n"
+               "qwen3.5:0.8b        f381   1.0 GB   5 weeks ago\n"))
+    try:
+        assert _lane("ollama").model_for("") == "gemma4:e4b-it-qat"
+    finally:
+        lanes._ollama_model_cache.clear()
+
+
+def test_ollama_default_model_empty_on_failure(monkeypatch):
+    lanes._ollama_model_cache.clear()
+    monkeypatch.setattr(lanes.subprocess, "run",
+                        lambda *a, **k: SimpleNamespace(returncode=1, stdout=""))
+    try:
+        assert _lane("ollama").model_for("") == ""        # no models pulled → empty, re-probe later
+    finally:
+        lanes._ollama_model_cache.clear()
+
+
 # ── opencode free-model discovery is PATTERN-based, not a pinned name ───────────────────
 
 def test_opencode_default_never_picks_a_paid_model(monkeypatch):

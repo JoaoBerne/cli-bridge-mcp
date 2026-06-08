@@ -139,7 +139,8 @@ There are other "call other models" MCPs. Here's what makes cli-bridge different
   is redundant) — set `CLI_BRIDGE_HIDE_HOST=1` to hide it entirely. Driving Codex or opencode
   instead? Same deal, detected automatically from the MCP handshake.
 - 🧩 **Add any CLI — or your own API — without forking.** Built-in lanes for Claude, GPT, Gemini,
-  Mistral, Qwen, Copilot, Grok and opencode. Register **your own CLI from a JSON file**, or wrap
+  Mistral, Qwen, Copilot, Grok, opencode and **Ollama** (local models, $0, offline). Register
+  **your own CLI from a JSON file**, or wrap
   **your own API** by spawning `curl`. Zero code.
 - 🧠 **Council synthesis.** `ask_all` can have a free model summarize where the others *agree* and
   *disagree* — turn three opinions into one decision.
@@ -213,6 +214,7 @@ live-checks each login).
 | `ask_copilot` ⚗️ | GitHub Copilot CLI | subscription (usage-based credits since 2026-06) |
 | `ask_grok` ⚗️  | xAI Grok CLI | subscription (SuperGrok / X Premium+) |
 | `ask_opencode` | [opencode](https://opencode.ai) gateway (deepseek, qwen, glm, kimi…) | free by default; some models use credits |
+| `ask_ollama`   | [Ollama](https://ollama.com) (local models, offline) | $0 — runs on your machine |
 
 ⚗️ = experimental (flags not yet verified live — please report breakage).
 Cost column = the vendor's *typical published plan* as of June 2026 ([docs/COSTS.md](docs/COSTS.md)

@@ -139,6 +139,8 @@ class LaneSpec:
             return env_model
         if self.key == "opencode":
             return _opencode_default_model(self.bin)
+        if self.key == "ollama":
+            return _current_ollama_model(self.bin)
         return self.default_model
 
 
@@ -278,6 +280,20 @@ def _grok_ask(task, model, effort, agent, bin=""):  # xAI Grok CLI (experimental
     return cmd + ["-p", task]
 
 
+def _ollama_ask(task, model, effort, agent, bin=""):  # local models via the ollama CLI
+    # ollama has no effort/agent knobs and never edits files (read-only). `--hidethinking` is
+    # REQUIRED: real ollama models are thinking models, so without it stdout carries the whole
+    # chain of thought before the answer. It's a harmless no-op on a non-thinking model.
+    return ["run", "--hidethinking", model, task]
+
+
+def _ollama_env(model="", effort="", agent=""):
+    # ollama writes ANSI cursor-control codes to STDOUT even when redirected to a file (it
+    # rewrites the line for word-wrap), which corrupts the captured answer. NO_COLOR + a dumb
+    # TERM make it emit the plain response. Applied to every ollama spawn via LaneSpec.env_ask.
+    return {"NO_COLOR": "1", "TERM": "dumb"}
+
+
 # opencode's bare default can resolve to a PAID model, so we pick a free one. The pick is
 # DISCOVERED live and chosen by PATTERN, never by a hardcoded model id — the "best free" model
 # churns and any pinned name eventually 404s (the whole reason this is dynamic). The seed below
@@ -325,6 +341,36 @@ def _current_opencode_free_model(bin_name: str) -> str:
     free = sorted(m for m in models if m.startswith("opencode/") and m.endswith("-free"))
     result = free[0] if free else ""
     _opencode_model_cache[bin_name] = (now, result)
+    return result
+
+
+# ollama requires a model arg (`ollama run <model>`), so an empty model must resolve to one that
+# is actually pulled. Mirror the opencode probe: DISCOVER live, never hardcode an id. A short TTL
+# picks up a freshly `ollama pull`ed model; "" on failure re-probes next call.
+_OLLAMA_MODEL_TTL_S = 300
+_ollama_model_cache: dict[str, tuple[float, str]] = {}
+
+
+def _current_ollama_model(bin_name: str) -> str:
+    import time
+    now = time.time()
+    hit = _ollama_model_cache.get(bin_name)
+    if hit and now - hit[0] < _OLLAMA_MODEL_TTL_S:
+        return hit[1]
+    try:
+        proc = subprocess.run([bin_name, "list"], capture_output=True, text=True,
+                              timeout=5, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""  # transient failure: don't cache, re-probe next call
+    if proc.returncode != 0:
+        return ""
+    rows = [line for line in proc.stdout.splitlines() if line.strip()]
+    # The first row is the header (NAME ID SIZE MODIFIED). Skip it UNCONDITIONALLY rather than
+    # matching the literal header text — ollama may localize or reorder columns. Take the first
+    # column (model name) of the first model row.
+    models = rows[1:]
+    result = models[0].split()[0] if models else ""
+    _ollama_model_cache[bin_name] = (now, result)
     return result
 
 
@@ -448,6 +494,19 @@ BUILTIN_LANES: list[LaneSpec] = [
              note="xAI Grok. Fast, web-aware, strong reasoning. No model hardcoded (empty = the "
                   "CLI's own default; pass model=<id> to pick one). `--model` best-effort and "
                   "experimental — run `doctor deep` to check flags against `grok --help`."),
+    LaneSpec("ollama", "Ollama (local models)", "ollama", _ollama_ask,
+             cost_default="free",
+             cost_note="modèles locaux — $0, sur ta machine, privé/offline (aucun appel réseau).",
+             models_args=["list"], help_args=["run", "--help"],
+             caps=frozenset({"model"}), env_ask=_ollama_env,
+             probe_flags=("--hidethinking",),
+             client_ids=frozenset({"ollama"}),
+             install_hint="macOS: brew install ollama · Linux: curl -fsSL "
+                          "https://ollama.com/install.sh | sh ; puis `ollama pull <model>`",
+             note="Local via ollama. $0, privé, offline. Read-only (no build). Empty model = the "
+                  "first model from `ollama list`. Max decorrelation for the jury — but note a "
+                  "local runtime of open weights still correlates with OTHER local runtimes of the "
+                  "same weights; real jury diversity comes from distinct vendors."),
 ]
 
 
