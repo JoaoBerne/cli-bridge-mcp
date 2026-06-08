@@ -20,6 +20,9 @@
 
 **Your AI assistant, but it can phone a friend.**
 
+> **No API keys · no Node · no daemon · stdlib + `mcp` only.** It drives the official CLIs you're
+> already logged into — nothing to provision, nothing new to trust with a secret.
+
 `cli-bridge` is a [Model Context Protocol](https://modelcontextprotocol.io) server that
 **orchestrates the AI CLIs you've already installed and logged into** — Claude Code, Codex,
 Gemini CLI, opencode, … — from whatever assistant you're talking to. No API keys, no token
@@ -188,7 +191,7 @@ There are other "call other models" MCPs. Here's what makes cli-bridge different
 
 ---
 
-## Quick start
+## Quick start (≈5 min)
 
 ### 1. Install
 
@@ -348,6 +351,9 @@ Hosts that support MCP prompts also surface `review_diff`, `security_review`, `d
 
 ## Tools
 
+### Ask — one model, or several at once
+_Get an answer: one lane, a parallel council, or let the router pick._
+
 | Tool | What it does |
 |------|--------------|
 | `ask_<lane>` | Ask one model. Params: `task`, optional `model`, `effort`, `agent`, `cwd`, `timeout_s`, **`conversation`** (start/continue a round-table thread — see below). |
@@ -357,6 +363,12 @@ Hosts that support MCP prompts also surface `review_diff`, `security_review`, `d
 | `rate_lane` | **Teach the router.** Score a lane's answer 1–5 for a task-type (`mode`) → `ask_best` then prefers the lanes that win that mode **on your machine**. Stored in sqlite (survives `/compact`/restart); a two-rating floor before any lane steers, so feedback is honest, not noisy. Every `ask_best` answer prints the exact call. |
 | `route_plan` | Show the order `ask_cascade` would try, given your profile + current cooldowns (read-only, runs nothing). Pass `mode` to preview `ask_best` — including each lane's running rating. |
 | `ask_all_async` / `job_status` / `job_result` / `job_cancel` / `jobs_list` | Run a fan-out as a **background job** that returns a job id in <1s, so a slow council run can't hit the host's tool-call deadline. Cancel kills the delegates' process groups. |
+
+### Review & reason — structured, multi-model
+_Findings, debates, and verdicts — not just a chat reply._
+
+| Tool | What it does |
+|------|--------------|
 | `review_diff` | Multi-model code review of a git diff: lanes review in parallel with **different focuses** (correctness / security / tests / maintainability), each returning JSON findings; deterministic prechecks (secrets, dangerous shell) seed them; findings **merge by file/line/title** with agreement-based confidence (single/majority/consensus). `output_format: markdown` (default) or `json`. Params: `cwd`, `base` (default HEAD), `diff`, `include_paid`, `timeout_s`. |
 | `security_review` | OWASP-aware **security-only** review of a git diff (injection / auth & access control / secrets & crypto / data exposure & SSRF) → severity-ranked findings + a `residual_risk` section. |
 | `debate` | Several models answer a question, **see each other's answers and revise** over bounded rounds (default 1, max 3), then an **independent judge** (held out of the debate when 3+ lanes) writes the final consensus + remaining disagreement. Hardened from production use: `context_files` injects key files into every debater prompt (**grounding** — without it the council only paraphrases your brief), a **fact-check pass** (free lane, on by default) flags the verdict's unverifiable commands/tags/versions, claims carry provenance tags (`[brief]`/`[own-knowledge]`/`[verified]`), a thin brief gets a linter warning, and `steelman: true` makes one lane argue *against* a unanimous verdict before the judge re-concludes. `summary_only` drops the full positions (~60-80 % fewer tokens); `dry_run` returns a preflight data manifest (which files/chars go to which vendors) before anything is sent. Params: `task`, `rounds`, `adversarial`, `context_files`, `fact_check`, `summary_only`, `allow_self_judge`, `steelman`, `dry_run`, `include_paid`, `cwd`, `timeout_s`. |
@@ -366,10 +378,28 @@ Hosts that support MCP prompts also surface `review_diff`, `security_review`, `d
 | `test_plan` | Derive a prioritized **test plan** (behaviors, edge cases, concrete cases) from a git diff or a description. |
 | `commit_msg` | Generate a **Conventional Commit** message from your staged diff (falls back to the working tree). Read-only — emits text, never commits. Optional `lane`, `cwd`. |
 | `pr_describe` | Generate a **PR title + description** (Summary / Changes / Testing) from the branch's diff + commit log vs a base (default origin/main → main). Read-only. Optional `base`, `lane`, `cwd`. |
+
+### Build — delegate real work, safely
+_A delegate edits code; you get a diff, or a zone-guarded build you can steer._
+
+| Tool | What it does |
+|------|--------------|
 | `ask_build` | **Commission a real build.** `mode=isolated` (default) edits a throwaway worktree and returns a **diff** — repo untouched. `mode=direct` builds straight into a target dir, guarded by git + a **zone contract** (delegate writes only inside `zone`; out-of-zone writes are detected and reverted; undo is zone-scoped, never a global reset) so the host can build other parts of the **same repo in parallel**. `async=true` makes it a **steerable** job. `dry_run` previews the brief. Non-text files the build writes (images, PDFs, binaries) are returned as **artifacts by path** (type + size), not dumped as a binary diff — so a delegate can have another CLI *generate* a file and hand you the path (capability-borrowing). (`ask_build_isolated` is a legacy alias.) |
 | `job_tail` / `build_steer` | **Follow & steer a running build like a human.** `job_tail(job_id, offset)` streams its progress log (byte-offset). `build_steer(job_id, instruction, interrupt)` queues a correction for the next turn, or `interrupt=true` cuts the current turn (files written so far are kept). An optional executable **Definition of Done** (`dod_cmd`, an argv list) is run after each turn — pass = done, fail = one more turn with the error fed back. |
+
+### Orchestrate — durable, resumable fan-out
+_Many asks (or a ready-made workflow) in one call that survives a restart._
+
+| Tool | What it does |
+|------|--------------|
 | `batch_run` | **Durable fan-out**: run many independent asks in parallel in **one call** instead of N (saves host context + quota). Each result is journalled, so `resume_id` replays the tasks that already finished and runs only the rest — **survives a server restart**. `dry_run: true` returns a **cost envelope** (calls + est token/credit range) without spawning; `max_calls`/`max_credits` cap the invocation (over-budget tasks skipped). `async`-able. |
 | `workflow` | **Ready-made multi-model workflows** over the batch substrate. **`refine_plan`** — let the council DEMOLISH your plan from distinct angles (pass `plan_file`; each lane reads it, never recopied). `council_review` (N lanes answer one question + optional judge), `map_review` (review many files in parallel), `research_verify` (answer then adversarially cross-check), **`verify_repair`** (one lane builds, a **different model** reviews, repair loop until `VERDICT: APPROVED` or `max_rounds` — cross-model catches what self-review can't), **`fanout_compare`** (same task to N lanes, answers side by side to pick/merge), **`jury`** (author produces → N verifiers from **different vendor families** vote PASS/FAIL/ABSTAIN, k-of-N **fail-closed**, author≠reviewer enforced — the cross-vendor verification edge a single-vendor tool can't match). All resumable + async-able. |
+
+### Admin & utilities
+_Discovery, round-table memory, health, cost, and setup._
+
+| Tool | What it does |
+|------|--------------|
 | `list_models` | List a lane's available models (`lane` param) where the CLI exposes them; otherwise shows the resolved default model + how to choose one. (`list_<lane>_models` also exists for lanes with a native list command.) |
 | `conversations_list` / `conversation_show` | List recent **round-table threads** (recover an id after a context reset) / show one thread's full transcript, attributed by lane. |
 | `doctor` | Health check: installed CLIs, detected host, cost/quota stance, cooldowns, defaults. `deep: true` live-probes each free lane's auth **and checks every lane's flags against its `--help`** — warns if a CLI renamed/removed a flag cli-bridge relies on (drift) before the lane fails silently. |
