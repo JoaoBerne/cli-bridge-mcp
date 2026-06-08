@@ -1,10 +1,11 @@
 name: tests
 
 on:
-  push:
-    branches: [main, master]
+  # PR-only: a rebase-merge lands the exact commits the PR already tested, so a separate
+  # push-on-main run would re-test identical commits — pure duplication. Dropped to halve CI cost.
   pull_request:
     branches: [main, master]
+  workflow_dispatch:   # manual full-matrix run on main when you want one (e.g. before a release)
 
 jobs:
   lint:
@@ -43,9 +44,9 @@ jobs:
         os: [ubuntu-latest]
         python-version: ["3.10", "3.11", "3.12", "3.13"]
         include:
-          # prove portability (a stated invariant) at both ends of the version range
-          - os: macos-latest
-            python-version: "3.10"
+          # prove portability (a stated invariant). macOS minutes bill at 10× on GitHub-hosted
+          # runners, so we keep a single macOS job (newest Python) and cover both ends of the
+          # version range on Windows (2×) instead. Full cross-product on demand via workflow_dispatch.
           - os: macos-latest
             python-version: "3.13"
           - os: windows-latest
