@@ -643,6 +643,20 @@ def _vote_tally(positions: dict) -> dict:
     }
 
 
+def _convergence_state(sim: float | None) -> str:
+    """3-state convergence ladder from the latest round's answer similarity. COSMETIC label only —
+    the real early-stop threshold is DEBATE_CONVERGENCE; this just narrates where the debate landed.
+    Converged ≥0.85 · Refining 0.4–0.85 · Diverging <0.4 (Impasse dropped — a flat Diverging covers
+    it)."""
+    if sim is None:
+        return "n/a"
+    if sim >= 0.85:
+        return "converged"
+    if sim >= 0.4:
+        return "refining"
+    return "diverging"
+
+
 def _round_similarity(prev: dict, cur: dict) -> float | None:
     """Mean lexical similarity of each debater's answer vs the previous round (stdlib difflib).
     High = answers stabilised. None when there is no comparable prior answer."""
@@ -733,6 +747,7 @@ async def debate(targets: list[LaneSpec], args: dict, run_lane, progress=None) -
     # debaters vote to stop or answers converge — the round count is a ceiling, not a quota.
     rounds_run = 0
     early_stop = ""
+    last_sim: float | None = None
     for _ in range(rounds):
         if len(positions) < 2:
             break                         # nothing to debate against
@@ -754,6 +769,8 @@ async def debate(targets: list[LaneSpec], args: dict, run_lane, progress=None) -
             early_stop = "all debaters voted to stop"
             break
         sim = _round_similarity(prev, positions)
+        if sim is not None:
+            last_sim = sim
         if sim is not None and sim >= DEBATE_CONVERGENCE:
             early_stop = f"answers converged ({sim:.0%} similar to prior round)"
             break
@@ -774,6 +791,8 @@ async def debate(targets: list[LaneSpec], args: dict, run_lane, progress=None) -
         meta["votes"] = f"{tally['continue_yes']} continue / {tally['continue_no']} stop"
         if tally["mean_confidence"] is not None:
             meta["mean_confidence"] = tally["mean_confidence"]
+    if rounds_run:
+        meta["convergence"] = _convergence_state(last_sim)   # 3-state ladder (cosmetic label)
     if early_stop:
         meta["early_stop"] = early_stop
     if pack_notes:
@@ -844,9 +863,10 @@ async def debate(targets: list[LaneSpec], args: dict, run_lane, progress=None) -
         legend = ", ".join(f"{labels[d]} = {d}" for d, _ in final_positions if d in labels)
         if legend:
             lines.append(f"_Labels (judge saw these, not vendor names): {legend}_\n")
-    if "votes" in meta or early_stop:
+    if "votes" in meta or early_stop or "convergence" in meta:
         bits = ([f"vote: {meta['votes']}"] if "votes" in meta else []) \
             + ([f"mean confidence {meta['mean_confidence']}"] if "mean_confidence" in meta else []) \
+            + ([f"convergence: {meta['convergence']}"] if "convergence" in meta else []) \
             + ([f"early stop: {early_stop}"] if early_stop else [])
         lines.append("_" + " · ".join(bits) + "_\n")
     lines.append(council_recap([(d, True, 0, t) for d, t in clean_positions],
