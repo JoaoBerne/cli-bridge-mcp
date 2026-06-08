@@ -8,8 +8,9 @@
 
 # cli-bridge
 
+<!-- Re-add at go-public (both break while the repo is private / unpublished):
 ![CI](https://github.com/JoaoBerne/cli-bridge-mcp/actions/workflows/tests.yml/badge.svg)
-![PyPI](https://img.shields.io/pypi/v/cli-bridge-mcp)
+![PyPI](https://img.shields.io/pypi/v/cli-bridge-mcp) -->
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 ![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-server-purple)
