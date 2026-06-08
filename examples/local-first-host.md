@@ -21,7 +21,7 @@ inside cli-bridge is a *leaf* — it answers/builds; it doesn't orchestrate.)
 
 - ollama running with a **tool-capable** model pulled (`ollama pull qwen3.5` / `gemma4` etc.).
   ⚠️ A tiny model (e.g. `:0.8b`) won't reliably emit MCP tool calls — give the brain a real one.
-- opencode installed; cli-bridge runnable (`uvx --from git+https://github.com/JoaoBerne/cli-bridge-mcp cli-bridge`; not on PyPI yet).
+- opencode installed; cli-bridge runnable (`uvx --from cli-bridge-mcp cli-bridge`).
 - At least one cloud lane logged in (e.g. `gemini`/`agy`, `codex`) so there's something to escalate to.
 
 ## 1. Point opencode at a local ollama model (the brain)

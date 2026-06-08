@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/banner.gif" width="860" alt="cli-bridge — your assistant borrows the powers of every AI CLI you already have: huge-context reads, vision, parallel builds, cross-vendor checks">
+<img src="https://raw.githubusercontent.com/JoaoBerne/cli-bridge-mcp/main/assets/banner.gif" width="860" alt="cli-bridge — your assistant borrows the powers of every AI CLI you already have: huge-context reads, vision, parallel builds, cross-vendor checks">
 
 **English** · [Français](docs/i18n/README.fr.md) · [简体中文](docs/i18n/README.zh-CN.md) · [Español](docs/i18n/README.es.md) · [Português (BR)](docs/i18n/README.pt-BR.md) · [日本語](docs/i18n/README.ja.md) · [Deutsch](docs/i18n/README.de.md)
 
@@ -9,7 +9,7 @@
 # cli-bridge
 
 ![CI](https://github.com/JoaoBerne/cli-bridge-mcp/actions/workflows/tests.yml/badge.svg)
-![status](https://img.shields.io/badge/status-not%20on%20PyPI%20yet-lightgrey)
+![PyPI](https://img.shields.io/pypi/v/cli-bridge-mcp)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 ![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-server-purple)
@@ -53,7 +53,7 @@ writing code, when that's the better fit.)_
 worktree**, then gives you back a **diff** — your repo is never touched until you apply it yourself.
 
 <p align="center">
-<img src="assets/demo-borrow.gif" width="860" alt="cli-bridge build: opencode adds a function in a throwaway worktree and returns a reviewable diff; the real repo stays clean">
+<img src="https://raw.githubusercontent.com/JoaoBerne/cli-bridge-mcp/main/assets/demo-borrow.gif" width="860" alt="cli-bridge build: opencode adds a function in a throwaway worktree and returns a reviewable diff; the real repo stays clean">
 </p>
 
 ---
@@ -249,7 +249,7 @@ working directory, and hands the answer back.
 
 <div align="center">
 
-<img src="assets/demo.gif" width="860" alt="cli-bridge security-review demo: a committed auth bypass is caught by a cross-vendor council, merged into one severity-ranked report, $0 on free lanes">
+<img src="https://raw.githubusercontent.com/JoaoBerne/cli-bridge-mcp/main/assets/demo.gif" width="860" alt="cli-bridge security-review demo: a committed auth bypass is caught by a cross-vendor council, merged into one severity-ranked report, $0 on free lanes">
 
 _Real run (2.2× speed): the Verify lever — `security-review` fans OWASP roles across free models in
 parallel (claude/gpt/opencode/ollama here); they flag a committed auth bypass **blocker**, and
@@ -283,13 +283,10 @@ can't fork-bomb the council.
 - **At least one AI CLI installed and logged in** — that's what cli-bridge borrows. Have any of:
   Claude Code, Codex, Gemini CLI, opencode, Ollama (local, $0). You consult only the lanes you already have.
 
-> **Not on PyPI yet.** A registry release is GO-gated (see [Roadmap](#roadmap)). Install from git with
-> the `uvx --from git+…` form below — plain `uvx cli-bridge-mcp` will fail to resolve.
-
 **1. Check what cli-bridge can see** (no install — `uvx` fetches, runs, discards):
 
 ```bash
-uvx --from git+https://github.com/JoaoBerne/cli-bridge-mcp cli-bridge doctor
+uvx --from cli-bridge-mcp cli-bridge doctor
 ```
 
 `doctor` lists which CLIs are detected, their resolved paths, and cost tiers. `doctor deep` validates
@@ -300,7 +297,7 @@ hand. Point the host at the same command:
 
 - **Claude Code** (writes the config for you):
   ```bash
-  claude mcp add cli-bridge -- uvx --from git+https://github.com/JoaoBerne/cli-bridge-mcp cli-bridge-mcp
+  claude mcp add cli-bridge -- uvx cli-bridge-mcp
   ```
 - **Any other host** (Codex, Cursor, VS Code, Zed, …) — add to its MCP config
   (`~/.claude.json`, `.mcp.json`, or the host's equivalent):
@@ -309,7 +306,7 @@ hand. Point the host at the same command:
     "mcpServers": {
       "cli-bridge": {
         "command": "uvx",
-        "args": ["--from", "git+https://github.com/JoaoBerne/cli-bridge-mcp", "cli-bridge-mcp"]
+        "args": ["cli-bridge-mcp"]
       }
     }
   }
@@ -416,7 +413,7 @@ MIT
 
 <div align="center">
 
-<img src="assets/mark.gif" width="84" alt="cli-bridge">
+<img src="https://raw.githubusercontent.com/JoaoBerne/cli-bridge-mcp/main/assets/mark.gif" width="84" alt="cli-bridge">
 
 <sub>one side · bridged to a council</sub>
 
