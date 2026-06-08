@@ -8,9 +8,8 @@
 
 # cli-bridge
 
-<!-- Re-add at go-public (both break while the repo is private / unpublished):
 ![CI](https://github.com/JoaoBerne/cli-bridge-mcp/actions/workflows/tests.yml/badge.svg)
-![PyPI](https://img.shields.io/pypi/v/cli-bridge-mcp) -->
+![PyPI](https://img.shields.io/pypi/v/cli-bridge-mcp)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 ![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-server-purple)
@@ -31,8 +30,8 @@ you'd run it by hand — no keys, no token extraction) and hands the result back
 
 ## The 10-second demo
 
-You're in Claude. Claude can't hand you an image. Codex can — it writes the code that renders one
-and runs it. So ask it:
+You're in Claude. Claude can't hand you an image. Codex can — natively with `gpt-image-2`, or by
+writing a script that renders one. For a precise layout like a social card, have it script and run it:
 
 ```
 ask_build(lane="gpt", task="generate a 1200×630 social card to assets/card.png — write a script that renders it, then run it", zone="assets")
@@ -42,9 +41,11 @@ ask_build(lane="gpt", task="generate a 1200×630 social card to assets/card.png 
 Your assistant just gained an ability it doesn't have. That's the whole idea — now scale it to
 giant-context reads, vision, parallel grunt-work, and independent cross-vendor verification.
 
-_(The lane renders the image **via code** — charts, diagrams, SVGs, procedural art — and hands back
-the file; it's not a text-to-photo model unless you point one at it. That's why the result comes back
-as a path, not a blob.)_
+_(Codex generates the image with **`gpt-image-2`**, a real text-to-image model built into the CLI —
+counted against your ChatGPT plan's usage, no separate API key (image generation needs a **paid**
+plan; it's not on the Free tier). It comes back as a **path**, not a blob, because binaries travel by
+artifact-return, not the text channel. A build lane can also *render* charts, diagrams or SVGs by
+writing code, when that's the better fit.)_
 
 ### …and it delegates real work, safely
 
@@ -80,7 +81,7 @@ Borrow the one your host lacks (it must be installed + logged in):
 
 | Superpower | Which CLI has it | Borrow it when |
 |------------|------------------|----------------|
-| **Images** | Codex (`gpt-image-2`, **no API key** — via your ChatGPT plan) | your host can't draw |
+| **Images** | Codex (`gpt-image-2`, **no API key** — paid ChatGPT plan, not Free) | your host can't draw |
 | **Huge context** | Gemini (1M-token window) | a file/repo won't fit your host's context |
 | **Fresh knowledge** | Gemini (Google-Search grounding) · Grok (live web/X) ⚗️ | beat a stale cutoff: *"what's the current API of `<lib>`?"* |
 | **Vision** | Gemini (`images=[…]`) ⚗️ | analyse a screenshot or diagram |
@@ -89,7 +90,7 @@ Borrow the one your host lacks (it must be installed + logged in):
 | **Video** ⚗️ | Gemini (Veo) · Grok (Imagine) — *if your installed CLI exposes it* | you need a generated clip |
 
 ```
-ask_build(lane="gpt", task="generate a 1200×630 social card to assets/card.png", zone="assets")   # Codex image → file by path, no API key
+ask_build(lane="gpt", task="generate a 1200×630 social card to assets/card.png", zone="assets")   # Codex image → file by path, no API key (paid ChatGPT plan)
 ask_gemini(task="find the bug across ./src — read the files you need", cwd="path/to/repo")         # 1M-token context
 ask_gemini(task="what's the current recommended API for <lib>? check the latest docs")            # fresh knowledge (Search grounding)
 ask_gemini(task="what's wrong in this UI?", images=["screenshot.png"])                             # vision (experimental)

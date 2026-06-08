@@ -12,7 +12,7 @@ vendor optimised a *different* axis — which is exactly why combining them pays
 | CLI (lane) | Best at / what it does uniquely | Real limit |
 |---|---|---|
 | **Claude Code** (`claude`) | Strongest tooled reasoning; a programmable platform — subagents (parallel delegation), hooks (deterministic enforcement), reusable skills | subagents are **same-family** (self-confirmation), and tied to one machine / one checkout |
-| **Codex** (`gpt`) | Image generation (`gpt-image-2`, **no API key** — via your ChatGPT plan); the strongest sandboxing (container by default) | smaller context (~400K) ⚗️ |
+| **Codex** (`gpt`) | Image generation (`gpt-image-2`, **no API key** — paid ChatGPT plan, not Free); the strongest sandboxing (container by default) | smaller context (~400K) ⚗️ |
 | **Gemini** (`gemini` / `agy`) | 1M-token context; Google-Search grounding; web fetch; free 1000 req/day; image (Nano Banana) + video (Veo) ⚗️ | personal CLI moves to **Antigravity on 2026-06-18** (the `agy` lane already covers it) |
 | **Grok** (`grok`) ⚗️ | Real-time data from X + the web (native, not an add-on); context up to 2M; video (Imagine) | CLI is **beta** (SuperGrok Heavy) |
 | **Qwen Code** (`qwen`) ⚗️ | Open source; self-hostable locally via Ollama (offline, $0); strong agentic coding | below the top proprietary models on the hardest tasks |

@@ -10,9 +10,8 @@ _O README em inglês é a fonte autoritativa; esta tradução pode ficar para tr
 
 # cli-bridge
 
-<!-- Reativar ao tornar público (ambos quebram enquanto o repo é privado / não publicado):
 ![CI](https://github.com/JoaoBerne/cli-bridge-mcp/actions/workflows/tests.yml/badge.svg)
-![PyPI](https://img.shields.io/pypi/v/cli-bridge-mcp) -->
+![PyPI](https://img.shields.io/pypi/v/cli-bridge-mcp)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 ![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-server-purple)
@@ -46,9 +45,11 @@ Seu assistente acabou de ganhar uma capacidade que não tem. É toda a ideia —
 leituras de contexto gigante, visão, trabalho braçal em paralelo, e verificação independente entre
 fornecedores.
 
-_(A lane gera a imagem **via código** — gráficos, diagramas, SVGs, arte procedural — e devolve o
-arquivo; não é um modelo texto-para-foto a menos que você aponte um. Por isso o resultado volta como um
-caminho, não como um blob.)_
+_(O Codex gera a imagem com **`gpt-image-2`**, um verdadeiro modelo de texto-para-imagem embutido no
+CLI — descontado do seu plano ChatGPT, sem chave de API separada (a geração de imagens exige um plano
+**pago**; não está no nível gratuito). O resultado volta como um **caminho**, não como um blob, porque
+um binário trafega via artifact-return, não pelo canal de texto. Uma lane build também pode *renderizar*
+gráficos, diagramas ou SVGs escrevendo código, quando for mais adequado.)_
 
 ### …e ele delega trabalho real, com segurança
 
@@ -88,7 +89,7 @@ iniciá-la. Tome emprestada a que falta ao seu host (precisa estar instalada + l
 
 | Superpoder | Qual CLI o tem | Tome emprestado quando |
 |------------|------------------|----------------|
-| **Imagens** | Codex (`gpt-image-2`, **sem chave de API** — via seu plano ChatGPT) | seu host não sabe desenhar |
+| **Imagens** | Codex (`gpt-image-2`, **sem chave de API** — plano ChatGPT pago, não o gratuito) | seu host não sabe desenhar |
 | **Contexto enorme** | Gemini (janela de 1 M de tokens) | um arquivo/repo não cabe no contexto do seu host |
 | **Conhecimento fresco** | Gemini (grounding com Google Search) · Grok (web/X ao vivo) ⚗️ | vencer uma data de corte: *«qual é a API atual de `<lib>`?»* |
 | **Visão** | Gemini (`images=[…]`) ⚗️ | analisar uma captura ou um diagrama |
@@ -97,7 +98,7 @@ iniciá-la. Tome emprestada a que falta ao seu host (precisa estar instalada + l
 | **Vídeo** ⚗️ | Gemini (Veo) · Grok (Imagine) — *se a sua CLI instalada o expõe* | você precisa de um clipe gerado |
 
 ```
-ask_build(lane="gpt", task="generate a 1200×630 social card to assets/card.png", zone="assets")   # Codex image → file by path, no API key
+ask_build(lane="gpt", task="generate a 1200×630 social card to assets/card.png", zone="assets")   # Codex image → file by path, no API key (paid ChatGPT plan)
 ask_gemini(task="find the bug across ./src — read the files you need", cwd="path/to/repo")         # 1M-token context
 ask_gemini(task="what's the current recommended API for <lib>? check the latest docs")            # fresh knowledge (Search grounding)
 ask_gemini(task="what's wrong in this UI?", images=["screenshot.png"])                             # vision (experimental)
