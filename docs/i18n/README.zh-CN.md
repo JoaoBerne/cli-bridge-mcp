@@ -138,62 +138,9 @@ workflow(preset="fanout_compare", task="fix this failing test", lanes=["gpt","ge
 
 ---
 
-## 完整工具箱
+## 工具箱
 
-全部工具，按你的意图分组。运行 `CLI_BRIDGE_LEAN=1` 可得到约 12 个工具的精选面；用
-`CLI_BRIDGE_DISABLED_TOOLS` / `CLI_BRIDGE_ENABLED_TOOLS` 隐藏/显示任意工具。
-
-### 咨询（只读）
-| 工具 | 它做什么 | 何时使用 |
-|------|--------------|-------------------|
-| `ask_<lane>` | 询问某个特定 CLI —— `ask_claude`、`ask_gpt`（Codex）、`ask_gemini`、`ask_mistral`、`ask_opencode`、`ask_ollama`，以及已安装时的 `ask_qwen`/`ask_grok`/`ask_copilot`。支持 `role="reviewer\|security\|planner\|devil"`、`conversation`（圆桌记忆）以及 Gemini 上的 `images=[…]`。 | 你想要某个模型的强项、人设或模态。 |
-| `ask_all` | 把同一问题并行发给每条*免费* lane；返回每个答案**外加一个分歧分数**。`synthesize: true` 追加一份一致/分歧摘要。 | 你想要快速的广度 + 模型在何处分歧的信号（= 不确定性）。 |
-| `ask_cascade` | 按确定性顺序尝试 lane，在第一个好答案处停止，跳过冷却中的 lane；可选的置信度升级。 | 你想要韧性：触顶/失败的 lane 会被自动跳过。 |
-| `ask_best` | 路由器按 `mode`（`fast/cheap/deep/code/review/security`）+ 你的 `rate_lane` 评分挑选最合适的 lane。 | 你不想手动挑 lane。 |
-| `ask_all_async` + `job_status`/`job_result`/`job_cancel`/`jobs_list` | 把 `ask_all` 作为后台任务发出（id 在 <1 秒内返回）。 | 扇出很慢，你想继续工作。 |
-| `consensus` | N 条 lane 作答，然后同侪排名以**选出**最佳（选择胜过综合）。 | 一个站得住脚的单一答案比混合更重要。 |
-| `challenge` | 一条 lane 扮演怀疑者，针对你提供的结论发难。 | 你想在投入之前让自己的推理被攻击。 |
-| `conversations_list` / `conversation_show` | 列出/读取持久的圆桌线程（能挺过 `/compact` 与重启）。 | 你想找回或阅读一个多模型线程。 |
-
-### 构建（按需开启写入）
-| 工具 | 它做什么 | 何时使用 |
-|------|--------------|-------------------|
-| `ask_build` | 委派一次真实构建。`mode=isolated`（默认）在一次性 worktree 编辑 → **diff**；`mode=direct` 写入你声明的 `zone`（按区加锁 + 回合后越区检查）。`async=true` 以可操控任务运行。非文本输出**按路径**返回（artifact-return）。 | 你想把活*干完*，而非仅给建议 —— 经审查或放手不管。 |
-| `ask_build_isolated` | `ask_build` 配 `mode=isolated` 的便捷别名 —— 始终返回 diff，绝不触碰你的工作树。 | 你想按名字使用安全的 diff 路径，而不设 `mode`。 |
-| `job_tail` | 流式输出运行中构建的进度日志（按字节偏移）。 | 你想看着被委派者干活。 |
-| `build_steer` | 为下一回合排入一条操控指令，或 `interrupt=true` 切断当前回合（文件保留）。 | 你需要在构建途中改向而不重启。 |
-
-异步构建针对一个可执行的 **Definition-of-Done** 门禁（`dod_cmd`）运行 —— 被委派者声称的成功会被*测试*，
-而非被轻信。
-
-### 审查与验证
-| 工具 | 它做什么 | 何时使用 |
-|------|--------------|-------------------|
-| `review_diff` | 对 diff 的结构化审查 → findings（严重度、文件、依据），以 single/majority/consensus 置信度在各 lane 间确定性合并。 | 在一个变更落地之前。 |
-| `security_review` | 面向 OWASP、按严重度排序的安全检查 + 一个 `residual_risk` 部分。 | 变更涉及鉴权、输入处理、密钥时。 |
-| `debate` | 模型在有限回合内互相批评，以 `VOTE` 页脚 + 收敛提前停止结束；一位独立裁判作结。 | 一个真正有争议的决定。 |
-| `premortem` / `test_plan` | 对计划的失败模式分析 / 从 diff 或描述生成优先级排序的测试计划。 | 在写代码之前。 |
-| `commit_msg` / `pr_describe` | 从你已暂存的 diff 生成 Conventional-Commit 消息 / 从分支生成 PR 标题+正文。只读 —— 输出文本。 | 你即将提交或开 PR。 |
-| `workflow(preset=…)` | 命名流水线：`jury`（跨家族 k-of-N 投票，fail-closed）、`verify_repair`（跨模型 构建→审查→修复 循环）、`refine_plan`、`fanout_compare`、`council_review`、`map_review`、`research_verify`。 | 你想用一次调用获得一个经验证的多步模式。 |
-
-### 编排
-| 工具 | 它做什么 | 何时使用 |
-|------|--------------|-------------------|
-| `batch_run` | 对大量任务的持久、**带日志**扇出。`dry_run=true` 返回成本封套（什么都不启动）；`max_calls`/`max_credits` 给开销设上限；`resume_id` 重放已完成的任务，重启后只跑其余部分。 | 你想要有界且抗崩溃的批量工作。 |
-
-### 运维
-| 工具 | 它做什么 | 何时使用 |
-|------|--------------|-------------------|
-| `usage_report` / `usage_budget` | 估算的 token/额度核算（chars/4 —— 诚实地标注为估算）+ 对每日上限的预算管理。 | 你想看账单 / 设上限。 |
-| `rate_lane` / `route_plan` | 为某个模式给 lane 打 1–5 分，让 `ask_best` 学习你的技术栈 / 预览一次 cascade 会尝试的顺序。 | 你想让路由器随时间改进。 |
-| `lane_stats` / `reset_lane_state` | 每条 lane 的健康、冷却，以及「赢得席位」陪审信号 / 清零某条 lane 的计数器。 | 某条 lane 表现异常，或你想要席位报告。 |
-| `set_lane_cost` | 记录某条 lane 对*你*的花费（「Codex 在我的套餐里免费」）—— 持久化，无需 `setup`。 | 你顺口提到一条定价事实。 |
-| `doctor` / `setup` | 检测已安装的 CLI + 解析路径；`doctor deep` 在你的机器上对照每条 lane 自身的 `--help` 进行验证。 | 首次运行，或某条 lane 坏了时。 |
-| `list_models` / `list_<lane>_models` | 在 CLI 暴露的情况下列出某条 lane 的模型。 | 你想挑选某个特定模型。 |
-
-还有一个**人类 CLI**（`cli-bridge doctor|ask|ask-all|ask-best|build|review-diff|eval|…`）—— 从你的终端
-或 CI 使用同一引擎（处处 `--json`）。`cli-bridge build <lane> "<任务>"` 把一次真实构建委派给一次性 worktree
-里的 lane 并打印 **diff** —— 你的仓库绝不会被触碰。
+约 30 个工具，按用途分组（咨询 / 构建 / 校验 / 编排）。**完整参考——每个工具、每个参数：[`docs/TOOLS.md`](../../docs/TOOLS.md)**（或 `cli-bridge --help`）。`CLI_BRIDGE_LEAN=1` 可启用约 12 个工具的精简集。
 
 ---
 
