@@ -90,7 +90,12 @@ typed result envelope + provenance, `findings.extract_json` contract, per-invoca
 `dry_run` cost envelope, **cross-vendor `jury`** (author≠reviewer family, k-of-N fail-closed) +
 `lanes.family_of`, **disagreement-as-uncertainty** score on `ask_all`, opt-in **confidence-escalate**
 cascade, **`BRIDGE_DEPTH` re-entry guard**, **`CLI_BRIDGE_LEAN`** core surface, `role=` personas,
-Gemini `images=` vision (experimental).
+Gemini `images=` vision (experimental). **Local + council quality + quota resilience:** **Ollama lane**
+(`ask_ollama`/`list_ollama_models` — local, $0, offline, read-only) + local-model custom-lane recipes
+(`examples/`), **peer-anonymized debate/council** (neutral Reviewer/Debater labels so no model favours
+a known rival), **`seat_report`** earn-their-seat (`jury_outcomes` telemetry benches dead-weight lanes
+on evidence), **discrete calibration binning** (eval bins on emitted confidences, N≥50 gate),
+**quota-empty cooldown with capped exponential backoff** (never infinite, success-resets).
 
 ### Considered & deferred (rationale — not just "not yet")
 - **forced-pacing engine** — contradicts the model (cli-bridge delegates investigation to the
