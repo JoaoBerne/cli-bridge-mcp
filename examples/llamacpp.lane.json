@@ -1,0 +1,28 @@
+[
+  {
+    "//": "llama.cpp as a local lane — point CLI_BRIDGE_LANES_FILE at this file (or merge it).",
+    "//1": "ban-safe: cli-bridge spawns `llama-cli`; no keys, no network. It's the GGUF engine that",
+    "//2": "ollama and LM Studio wrap, exposed directly — cross-platform (macOS/Linux/Windows).",
+    "//3": "`llama-cli -m <model.gguf> -p <task> -no-cnv -n 512`: -no-cnv = single-shot (exit after",
+    "//4": "the answer), -n caps the generated tokens. model = a PATH to a .gguf file (pass it per",
+    "//5": "call via model=, or set CLI_BRIDGE_LLAMACPP_MODEL / default_model). Alternatively use",
+    "//6": "`-hf <user/repo>` instead of -m to pull from Hugging Face — edit the ask template for that.",
+    "//7": "CAVEAT (output is noisier than ollama): llama-cli RE-ECHOES the prompt at the top of",
+    "//8": "stdout and prints perf stats to stderr. `--simple-io` cleans it up somewhat; the host",
+    "//9": "sees the prompt prefix — trim it on your side if needed.",
+    "//10": "JURY CAVEAT: a local runtime of open weights correlates with OTHER local runtimes of the",
+    "//11": "same weights — real jury decorrelation comes from distinct VENDORS, not a second runtime.",
+
+    "key": "llamacpp",
+    "display": "llama.cpp (local, GGUF)",
+    "bin": "llama-cli",
+    "cost": "free",
+    "default_model": "",
+    "model_flag": "-m",
+    "ask": ["-p", "{task}", "-no-cnv", "-n", "512"],
+    "help": ["--help"],
+    "client_ids": ["llama.cpp", "llamacpp"],
+    "install_hint": "brew install llama.cpp  (or build from ggml-org/llama.cpp) — then point model= at a .gguf",
+    "note": "Local via llama.cpp (`llama-cli`). $0, private, offline, cross-platform. Read-only. model = a path to a .gguf file. Note: stdout re-echoes the prompt + perf stats on stderr. Local open weights → correlated with other local runtimes; not jury diversity."
+  }
+]

@@ -1,0 +1,26 @@
+[
+  {
+    "//": "LM Studio as a local lane — point CLI_BRIDGE_LANES_FILE at this file (or merge it).",
+    "//1": "ban-safe like every lane: cli-bridge just spawns the `lms` CLI; no keys, no network.",
+    "//2": "`lms chat <model> -p <prompt> -y` prints the answer to stdout and quits (-y skips the",
+    "//3": "interactive prompt). The model is POSITIONAL, so set it in default_model below or via",
+    "//4": "CLI_BRIDGE_LMSTUDIO_MODEL=<id> — replace the example with a CHAT model you've pulled",
+    "//5": "(`lms get <model>`; an embedding-only install has nothing to chat with).",
+    "//6": "First call may print 'Waking up LM Studio service…' while the runtime starts.",
+    "//7": "JURY CAVEAT: a local runtime of open weights correlates with OTHER local runtimes of",
+    "//8": "the same weights (ollama, mlx, llama.cpp) — real jury decorrelation comes from distinct",
+    "//9": "VENDORS, not a second runtime of the same model. Use this for $0/offline, not diversity.",
+
+    "key": "lmstudio",
+    "display": "LM Studio (local)",
+    "bin": "lms",
+    "cost": "free",
+    "default_model": "qwen2.5-7b-instruct",
+    "model_flag": "",
+    "ask": ["chat", "{model}", "-p", "{task}", "-y"],
+    "help": ["chat", "--help"],
+    "client_ids": ["lmstudio", "lm-studio"],
+    "install_hint": "https://lmstudio.ai — then `lms get <chat-model>` to pull a chat model",
+    "note": "Local via LM Studio (`lms chat -p`). $0, private, offline. Read-only. Set the model in default_model or CLI_BRIDGE_LMSTUDIO_MODEL. Local open weights → correlated with other local runtimes; not jury diversity."
+  }
+]
