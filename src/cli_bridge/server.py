@@ -1557,9 +1557,12 @@ async def _run_lane(lane: LaneSpec, args: dict, *, tool: str = "ask",
     # Some lanes select the model via ENV (e.g. vibe's VIBE_ACTIVE_MODEL), not a flag. Merge any
     # such overrides onto a COPY of the environment (a bare dict would drop the CLI's own PATH/auth).
     extra_env = lane.env_ask(model, effort, agent) if lane.env_ask else {}
+    # Opt-in nested-session guard: strip the host's own CLAUDE_*/CODEX_* session markers so a
+    # delegate `claude`/`codex` doesn't refuse to run "inside a session" (auth tokens kept).
+    base_env = config.strip_nesting(dict(os.environ)) if config.strip_nesting_env() else os.environ
     # Always stamp the child's depth (current+1) so a delegate that itself loads cli-bridge trips
     # the re-entry guard above. Merge onto a COPY of the env (a bare dict drops the CLI's PATH/auth).
-    spawn_env = {**os.environ, **extra_env, "CLI_BRIDGE_DEPTH": str(depth + 1)}
+    spawn_env = {**base_env, **extra_env, "CLI_BRIDGE_DEPTH": str(depth + 1)}
     await runner.pace(lane.key, lane.min_interval_s)   # anti-burst (opt-in, per lane)
     rec = telemetry.start(tool, lane.key, model, task)
     timeout = _timeout(args.get("timeout_s"))
