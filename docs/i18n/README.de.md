@@ -153,63 +153,9 @@ workflow(preset="fanout_compare", task="fix this failing test", lanes=["gpt","ge
 
 ---
 
-## Der komplette Werkzeugkasten
+## Der Werkzeugkasten
 
-Alle Tools, gruppiert nach Vorhaben. Führe `CLI_BRIDGE_LEAN=1` für eine kuratierte Oberfläche von ~12
-Tools aus; blende beliebige mit `CLI_BRIDGE_DISABLED_TOOLS` / `CLI_BRIDGE_ENABLED_TOOLS` aus/ein.
-
-### Konsultieren (nur lesen)
-| Tool | Was es tut | Greif dazu, wenn |
-|------|--------------|-------------------|
-| `ask_<lane>` | Eine bestimmte CLI fragen — `ask_claude`, `ask_gpt` (Codex), `ask_gemini`, `ask_mistral`, `ask_opencode`, `ask_ollama`, und `ask_qwen`/`ask_grok`/`ask_copilot` falls installiert. Unterstützt `role="reviewer\|security\|planner\|devil"`, `conversation` (Round-Table-Gedächtnis) und `images=[…]` bei Gemini. | Du willst die Stärke, Persona oder Modalität eines bestimmten Modells. |
-| `ask_all` | Dieselbe Frage an jede *kostenlose* Lane parallel; gibt jede Antwort **plus einen Uneinigkeits-Score** zurück. `synthesize: true` ergänzt eine Einig/Uneinig-Zusammenfassung. | Du willst schnell Breite + ein Signal, wo Modelle divergieren (= Unsicherheit). |
-| `ask_cascade` | Probiert Lanes in deterministischer Reihenfolge, stoppt bei der ersten guten Antwort, überspringt abgekühlte Lanes; optionale Confidence-Eskalation. | Du willst Resilienz: eine gedeckelte/fehlschlagende Lane wird automatisch übersprungen. |
-| `ask_best` | Ein Router wählt die passendste Lane nach `mode` (`fast/cheap/deep/code/review/security`) + deinen `rate_lane`-Bewertungen. | Du willst keine Lane von Hand wählen. |
-| `ask_all_async` + `job_status`/`job_result`/`job_cancel`/`jobs_list` | Feuert `ask_all` als Hintergrund-Job (id in <1 s). | Der Fan-out ist langsam und du willst weiterarbeiten. |
-| `consensus` | N Lanes antworten, dann ranken Peers, um die beste zu **wählen** (Auswahl schlägt Synthese). | Eine einzelne vertretbare Antwort zählt mehr als eine Mischung. |
-| `challenge` | Eine Lane spielt Skeptiker gegen einen Schluss, den du lieferst. | Du willst deine Argumentation angegriffen sehen, bevor du dich festlegst. |
-| `conversations_list` / `conversation_show` | Persistente Round-Table-Threads auflisten / lesen (überleben `/compact` und Neustarts). | Du willst einen Multi-Modell-Thread wiederfinden oder lesen. |
-
-### Bauen (opt-in Schreiben)
-| Tool | Was es tut | Greif dazu, wenn |
-|------|--------------|-------------------|
-| `ask_build` | Delegiert einen echten Build. `mode=isolated` (Standard) editiert einen wegwerfbaren Worktree → **Diff**; `mode=direct` schreibt in eine deklarierte `zone` (Sperre pro Zone + Zonenverletzungs-Check nach dem Zug). `async=true` läuft als steuerbarer Job. Nicht-textuelle Ausgaben kommen **per Pfad** zurück (artifact-return). | Du willst Arbeit *erledigt*, nicht nur vorgeschlagen — review-gegated oder freihändig. |
-| `ask_build_isolated` | Bequemer Alias für `ask_build` mit `mode=isolated` — gibt immer einen Diff zurück, fasst deinen Baum nie an. | Du willst den sicheren Diff-Pfad beim Namen, ohne `mode` zu setzen. |
-| `job_tail` | Streamt das Fortschrittsprotokoll eines laufenden Builds (per Byte-Offset). | Du willst einem Delegierten bei der Arbeit zusehen. |
-| `build_steer` | Reiht eine Steuer-Anweisung für den nächsten Zug ein, oder `interrupt=true` schneidet den aktuellen Zug ab (Dateien bleiben). | Du musst mitten im Build umsteuern, ohne neu zu starten. |
-
-Asynchrone Builds laufen gegen ein ausführbares **Definition-of-Done**-Gate (`dod_cmd`) — die
-Erfolgsbehauptung des Delegierten wird *getestet*, nicht geglaubt.
-
-### Prüfen & verifizieren
-| Tool | Was es tut | Greif dazu, wenn |
-|------|--------------|-------------------|
-| `review_diff` | Strukturierte Prüfung eines Diffs → Findings (Schweregrad, Datei, Begründung), deterministisch über Lanes hinweg zusammengeführt mit single/majority/consensus-Konfidenz. | Bevor eine Änderung landet. |
-| `security_review` | OWASP-orientierter, nach Schweregrad geordneter Sicherheitsdurchlauf + ein `residual_risk`-Abschnitt. | Die Änderung berührt Auth, Eingabeverarbeitung, Secrets. |
-| `debate` | Modelle kritisieren einander über begrenzte Runden, abschließend mit einem `VOTE`-Footer + Konvergenz-Abbruch; ein unabhängiger Richter zieht das Fazit. | Eine wirklich umstrittene Entscheidung. |
-| `premortem` / `test_plan` | Fehlermodus-Analyse eines Plans / ein priorisierter Testplan aus einem Diff oder einer Beschreibung. | Bevor du Code schreibst. |
-| `commit_msg` / `pr_describe` | Eine Conventional-Commit-Message aus deinem gestageten Diff / ein PR-Titel+Body aus dem Branch. Nur lesen — gibt Text aus. | Du bist kurz davor zu committen oder eine PR zu öffnen. |
-| `workflow(preset=…)` | Benannte Pipelines: `jury` (familienübergreifendes k-von-N-Votum, fail-closed), `verify_repair` (modellübergreifende Build→Review→Repair-Schleife), `refine_plan`, `fanout_compare`, `council_review`, `map_review`, `research_verify`. | Du willst ein erprobtes Mehrschritt-Muster in einem Aufruf. |
-
-### Orchestrieren
-| Tool | Was es tut | Greif dazu, wenn |
-|------|--------------|-------------------|
-| `batch_run` | Dauerhafter, **journaled** Fan-out über viele Aufgaben. `dry_run=true` gibt eine Kosten-Hülle zurück (nichts gestartet); `max_calls`/`max_credits` deckeln die Ausgaben; `resume_id` spielt fertige Aufgaben ab und führt nach einem Neustart nur den Rest aus. | Massenarbeit, die du begrenzt und crash-sicher willst. |
-
-### Betreiben
-| Tool | Was es tut | Greif dazu, wenn |
-|------|--------------|-------------------|
-| `usage_report` / `usage_budget` | Geschätzte Token-/Credit-Abrechnung (chars/4 — ehrlich als Schätzung gekennzeichnet) + Budgetierung gegen ein Tageslimit. | Du willst die Rechnung sehen / ein Limit setzen. |
-| `rate_lane` / `route_plan` | Eine Lane 1–5 für einen Modus bewerten, damit `ask_best` deinen Stack lernt / die Reihenfolge einer Kaskade vorab ansehen. | Du willst, dass der Router sich mit der Zeit verbessert. |
-| `lane_stats` / `reset_lane_state` | Gesundheit pro Lane, Abkühlungen und das „Sitz verdienen“-Jury-Signal / die Zähler einer Lane zurücksetzen. | Eine Lane benimmt sich daneben, oder du willst den Sitz-Report. |
-| `set_lane_cost` | Festhalten, was eine Lane *dich* kostet („Codex ist in meinem Plan kostenlos“) — persistiert, kein `setup` nötig. | Du lässt nebenbei einen Preis-Fakt fallen. |
-| `doctor` / `setup` | Installierte CLIs + aufgelöste Pfade erkennen; `doctor deep` validiert jede Lane gegen ihr eigenes `--help` auf deiner Maschine. | Erster Lauf, oder wenn eine Lane kaputtgeht. |
-| `list_models` / `list_<lane>_models` | Die Modelle einer Lane auflisten, wo die CLI sie bereitstellt. | Du willst ein bestimmtes Modell wählen. |
-
-Es gibt auch eine **menschliche CLI** (`cli-bridge doctor|ask|ask-all|ask-best|build|review-diff|eval|…`) —
-dieselbe Engine aus deinem Terminal oder der CI (`--json` überall). `cli-bridge build <lane> "<Aufgabe>"`
-delegiert einen echten Build an eine Lane in einem wegwerfbaren Worktree und gibt den **Diff** aus —
-dein Repo wird nie angefasst.
+~30 Werkzeuge, nach Absicht gruppiert (konsultieren / bauen / prüfen / orchestrieren). **Vollständige Referenz — jedes Werkzeug, jeder Flag: [`docs/TOOLS.md`](../../docs/TOOLS.md)** (oder `cli-bridge --help`). `CLI_BRIDGE_LEAN=1` für eine schlanke Oberfläche (~12 Werkzeuge).
 
 ---
 
