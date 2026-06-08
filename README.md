@@ -225,6 +225,10 @@ recipes — point `CLI_BRIDGE_LANES_FILE` at [`examples/lmstudio.lane.json`](exa
 (Same ban-safe spawn; note that several local runtimes of the *same* open weights give correlated
 answers — real council diversity comes from distinct vendors, not a second local runtime.)
 
+Coding with a **local model as your brain** and want cloud power only when you ask? See
+[`examples/local-first-host.md`](examples/local-first-host.md) — a local-model MCP host (opencode on
+ollama) that escalates one hard task to a strong cloud lane, staying private/$0 by default.
+
 ⚗️ = experimental (flags not yet verified live — please report breakage).
 Cost column = the vendor's *typical published plan* as of June 2026 ([docs/COSTS.md](docs/COSTS.md)
 has limits, sunsets and sources) — cli-bridge never detects what a lane costs *you*; declare your
