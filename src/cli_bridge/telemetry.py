@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS lane_state (
   lane TEXT PRIMARY KEY,
   consecutive_failures INTEGER NOT NULL DEFAULT 0,
   consecutive_timeouts INTEGER NOT NULL DEFAULT 0,
+  consecutive_empties INTEGER NOT NULL DEFAULT 0,
   cooldown_until REAL,
   last_kind TEXT,
   last_model TEXT,
@@ -136,7 +137,10 @@ CREATE INDEX IF NOT EXISTS idx_jury_outcomes ON jury_outcomes(lane, source);
 
 
 # Columns added after v1 shipped — best-effort ALTER so existing DBs gain them without a wipe.
-_MIGRATIONS = (("runs", "input_chars", "INTEGER NOT NULL DEFAULT 0"),)
+_MIGRATIONS = (
+    ("runs", "input_chars", "INTEGER NOT NULL DEFAULT 0"),
+    ("lane_state", "consecutive_empties", "INTEGER NOT NULL DEFAULT 0"),
+)
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
@@ -194,16 +198,17 @@ def _update_lane_state(conn: sqlite3.Connection, lane: str, ok: bool, kind: str,
     if not lane:
         return
     row = conn.execute(
-        "SELECT consecutive_failures, consecutive_timeouts, total_runs, total_failures "
-        "FROM lane_state WHERE lane=?", (lane,)).fetchone()
-    cf, ct, total, tfail = row if row else (0, 0, 0, 0)
+        "SELECT consecutive_failures, consecutive_timeouts, consecutive_empties, total_runs, "
+        "total_failures FROM lane_state WHERE lane=?", (lane,)).fetchone()
+    cf, ct, ce, total, tfail = row if row else (0, 0, 0, 0, 0)
 
     cooldown_until = None
     if ok:
-        cf = ct = 0
+        cf = ct = ce = 0
     else:
         tfail += 1
         ct = ct + 1 if kind == "timeout" else 0
+        ce = ce + 1 if kind == "empty" else 0      # silent empty (exit 0, no output) = likely quota
         cf = cf + 1 if kind in _COOLING_KINDS else cf
         if kind == "quota":
             cooldown_until = _now() + config.COOLDOWN_QUOTA_S
@@ -211,17 +216,22 @@ def _update_lane_state(conn: sqlite3.Connection, lane: str, ok: bool, kind: str,
             cooldown_until = _now() + config.COOLDOWN_AUTH_S
         elif kind == "timeout" and ct >= config.COOLDOWN_TIMEOUT_THRESHOLD:
             cooldown_until = _now() + config.COOLDOWN_TIMEOUT_S
+        elif kind == "empty" and ce >= config.COOLDOWN_EMPTY_THRESHOLD:
+            # repeated silent empties on a (free) lane = quota almost surely spent → bench it so
+            # fan-out/cascade stop wasting calls, instead of hammering a dead lane every run.
+            cooldown_until = _now() + config.COOLDOWN_EMPTY_S
 
     conn.execute(
         "INSERT INTO lane_state (lane, consecutive_failures, consecutive_timeouts, "
-        "cooldown_until, last_kind, last_model, last_run_at, total_runs, total_failures) "
-        "VALUES (?,?,?,?,?,?,?,?,?) "
+        "consecutive_empties, cooldown_until, last_kind, last_model, last_run_at, total_runs, "
+        "total_failures) VALUES (?,?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(lane) DO UPDATE SET consecutive_failures=excluded.consecutive_failures, "
-        "consecutive_timeouts=excluded.consecutive_timeouts, cooldown_until=excluded.cooldown_until, "
+        "consecutive_timeouts=excluded.consecutive_timeouts, "
+        "consecutive_empties=excluded.consecutive_empties, cooldown_until=excluded.cooldown_until, "
         "last_kind=excluded.last_kind, last_model=excluded.last_model, "
         "last_run_at=excluded.last_run_at, total_runs=excluded.total_runs, "
         "total_failures=excluded.total_failures",
-        (lane, cf, ct, cooldown_until, kind, model, _now(), total + 1, tfail))
+        (lane, cf, ct, ce, cooldown_until, kind, model, _now(), total + 1, tfail))
 
 
 def cooldown_remaining(lane: str) -> int:
