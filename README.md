@@ -55,20 +55,53 @@ worktree** and hands back a **diff** — your repo is never touched until you ap
 
 ---
 
-## Quick start (≈5 min)
+## Installation (≈5 min)
+
+**Prerequisites**
+
+- **Python 3.10+** and **[`uv`](https://docs.astral.sh/uv/)** (`uvx` ships with it):
+  `curl -LsSf https://astral.sh/uv/install.sh | sh` (macOS/Linux) · `winget install astral-sh.uv` (Windows).
+- **At least one AI CLI installed and logged in** — that's what cli-bridge borrows. Have any of:
+  Claude Code, Codex, Gemini CLI, opencode, Ollama (local, $0). You consult only the lanes you already have.
+
+> **Not on PyPI yet.** A registry release is GO-gated (see [Roadmap](#roadmap)). Install from git with
+> the `uvx --from git+…` form below — plain `uvx cli-bridge-mcp` will fail to resolve.
+
+**1. Check what cli-bridge can see** (no install — `uvx` fetches, runs, discards):
 
 ```bash
-# Run it (no install) — installs straight from the repo:
 uvx --from git+https://github.com/JoaoBerne/cli-bridge-mcp cli-bridge doctor
-# or, from a clone:  python -m cli_bridge
 ```
 
-> **Not on PyPI yet.** A registry release is GO-gated (see [Roadmap](#roadmap)). Until then, install
-> from git with the `uvx --from git+…` form above — plain `uvx cli-bridge-mcp` will fail to resolve.
+`doctor` lists which CLIs are detected, their resolved paths, and cost tiers. `doctor deep` validates
+each lane against its own `--help`.
 
-Point your MCP host at the same command. Example config (`~/.claude.json` or `.mcp.json`) in
-[`examples/mcp.example.json`](examples/mcp.example.json); `cli-bridge doctor` reports which CLIs are
-detected and their resolved paths.
+**2. Add it to your MCP host.** cli-bridge is an MCP server — it runs *inside* your assistant, not by
+hand. Point the host at the same command:
+
+- **Claude Code** (writes the config for you):
+  ```bash
+  claude mcp add cli-bridge -- uvx --from git+https://github.com/JoaoBerne/cli-bridge-mcp cli-bridge-mcp
+  ```
+- **Any other host** (Codex, Cursor, VS Code, Zed, …) — add to its MCP config
+  (`~/.claude.json`, `.mcp.json`, or the host's equivalent):
+  ```json
+  {
+    "mcpServers": {
+      "cli-bridge": {
+        "command": "uvx",
+        "args": ["--from", "git+https://github.com/JoaoBerne/cli-bridge-mcp", "cli-bridge-mcp"]
+      }
+    }
+  }
+  ```
+  Full example with env vars: [`examples/mcp.example.json`](examples/mcp.example.json).
+
+> Note: `cli-bridge-mcp` (the MCP server) is the host entry point; `cli-bridge` (no `-mcp`) is the
+> human terminal CLI you ran for `doctor` in step 1.
+
+**3. Use it.** Restart/reload your host and ask it to consult a lane — e.g. *"use cli-bridge to get a
+second opinion from gpt"* or *"ask gemini to read ./src and find the bug"*.
 
 ### Lanes
 
