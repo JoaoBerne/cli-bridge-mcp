@@ -61,6 +61,44 @@ def test_empty_streak_reset_by_success():
     assert telemetry.cooldown_remaining("gemini") == 0       # streak reset → not cooled on a lone empty
 
 
+def test_empty_cooldown_backs_off_then_caps(monkeypatch):
+    # Each empty past the threshold doubles the cooldown (a daily quota won't return in 30 min),
+    # but the growth is CAPPED so it never runs away and the lane is always re-probed within a day.
+    from cli_bridge import config
+
+    base = config.COOLDOWN_EMPTY_S
+    cap = config.COOLDOWN_EMPTY_MAX_S
+
+    def cd():
+        return telemetry.cooldown_remaining("gemini")
+
+    _run("gemini", False, "empty")                  # ce=1: below threshold, no cooldown
+    assert cd() == 0
+    _run("gemini", False, "empty")                  # ce=2: base
+    assert base - 5 <= cd() <= base
+    _run("gemini", False, "empty")                  # ce=3: 2x base
+    assert 2 * base - 5 <= cd() <= 2 * base
+    _run("gemini", False, "empty")                  # ce=4: 4x base
+    assert 4 * base - 5 <= cd() <= 4 * base
+    for _ in range(8):                               # keep going: must plateau at the cap, not blow up
+        _run("gemini", False, "empty")
+    assert cap - 5 <= cd() <= cap                    # capped, never infinite
+
+
+def test_empty_backoff_resets_to_base_after_success():
+    from cli_bridge import config
+
+    base = config.COOLDOWN_EMPTY_S
+    for _ in range(6):                               # drive the backoff up
+        _run("gemini", False, "empty")
+    assert telemetry.cooldown_remaining("gemini") > base   # backed off above base
+    _run("gemini", True, "ok")                       # quota came back → streak reset
+    _run("gemini", False, "empty")                   # lone empty: below threshold again
+    assert telemetry.cooldown_remaining("gemini") == 0
+    _run("gemini", False, "empty")                   # second empty → BASE again, not the old backoff
+    assert base - 5 <= telemetry.cooldown_remaining("gemini") <= base
+
+
 def test_success_resets_counters():
     _run("opencode", False, "timeout")
     _run("opencode", True, "ok")

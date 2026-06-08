@@ -219,7 +219,11 @@ def _update_lane_state(conn: sqlite3.Connection, lane: str, ok: bool, kind: str,
         elif kind == "empty" and ce >= config.COOLDOWN_EMPTY_THRESHOLD:
             # repeated silent empties on a (free) lane = quota almost surely spent → bench it so
             # fan-out/cascade stop wasting calls, instead of hammering a dead lane every run.
-            cooldown_until = _now() + config.COOLDOWN_EMPTY_S
+            # Each empty past the threshold doubles the wait (a DAILY quota won't return in 30 min),
+            # capped at COOLDOWN_EMPTY_MAX_S so it never grows without bound and is always re-probed
+            # within a day. A single success resets ce → the next cooldown is back to the base.
+            backoff = config.COOLDOWN_EMPTY_S * (2 ** (ce - config.COOLDOWN_EMPTY_THRESHOLD))
+            cooldown_until = _now() + min(backoff, config.COOLDOWN_EMPTY_MAX_S)
 
     conn.execute(
         "INSERT INTO lane_state (lane, consecutive_failures, consecutive_timeouts, "
