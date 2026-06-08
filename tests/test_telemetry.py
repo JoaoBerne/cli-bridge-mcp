@@ -45,6 +45,22 @@ def test_two_timeouts_cool_lane_but_one_does_not():
     assert telemetry.cooldown_remaining("mistral") > 0       # second consecutive: cooled
 
 
+def test_repeated_empties_cool_lane_but_one_does_not():
+    # A silent exit-0 empty (free-tier quota spent, e.g. agy) is a soft fall-through once, but
+    # repeated empties = quota almost surely gone → cool the lane so fan-out stops hammering it.
+    _run("gemini", False, "empty")
+    assert telemetry.cooldown_remaining("gemini") == 0       # one empty: still try it
+    _run("gemini", False, "empty")
+    assert telemetry.cooldown_remaining("gemini") > 0        # second consecutive: benched (quota)
+
+
+def test_empty_streak_reset_by_success():
+    _run("gemini", False, "empty")
+    _run("gemini", True, "ok")                                # quota came back
+    _run("gemini", False, "empty")
+    assert telemetry.cooldown_remaining("gemini") == 0       # streak reset → not cooled on a lone empty
+
+
 def test_success_resets_counters():
     _run("opencode", False, "timeout")
     _run("opencode", True, "ok")

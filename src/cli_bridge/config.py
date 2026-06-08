@@ -364,6 +364,12 @@ COOLDOWN_TIMEOUT_S = int_env("CLI_BRIDGE_COOLDOWN_TIMEOUT_S", 900, 0, 86_400)   
 COOLDOWN_QUOTA_S = int_env("CLI_BRIDGE_COOLDOWN_QUOTA_S", 3600, 0, 86_400)      # 1 h
 COOLDOWN_AUTH_S = int_env("CLI_BRIDGE_COOLDOWN_AUTH_S", 1800, 0, 86_400)        # 30 min
 COOLDOWN_TIMEOUT_THRESHOLD = 2   # consecutive timeouts before a lane is cooled
+# An exit-0 run that returns NOTHING is, on a free tier, almost always SILENT quota/rate-limit
+# exhaustion: the CLI prints no error, it just answers nothing (e.g. gemini/agy once the daily free
+# quota is spent). After this many CONSECUTIVE empties the lane is cooled down so fan-out stops
+# hammering a quota-dead lane; a one-off empty stays a soft per-call fall-through.
+COOLDOWN_EMPTY_S = int_env("CLI_BRIDGE_COOLDOWN_EMPTY_S", 1800, 0, 86_400)       # 30 min
+COOLDOWN_EMPTY_THRESHOLD = 2     # consecutive empty (likely-quota) runs before a lane is cooled
 
 
 # ── cost profile ──────────────────────────────────────────────────────────────────────

@@ -135,7 +135,9 @@ class RunResult:
             "quota": " - this CLI's quota/rate limit is exhausted; try later or another lane",
             "auth": " - log into this CLI in your terminal, then retry",
             "not_found": " - is the CLI installed and on PATH?",
-            "empty": " - this CLI exited cleanly but returned nothing; another lane may answer",
+            "empty": " - this CLI exited cleanly but returned nothing - on a free tier this is "
+                     "almost always silent quota/rate-limit exhaustion; trying another lane (the "
+                     "lane is cooled down after repeated empties)",
             "policy": " - this CLI refused on usage-policy grounds; revise the request or skip "
                       "this lane",
             "stalled": " - this CLI produced no output for a long stretch and was killed; "
@@ -173,12 +175,14 @@ async def pace(key: str, min_interval_s: float) -> float:
 def _ok_or_empty(out: str, err: str, argv: list[str]) -> RunResult:
     """Map an exit-0 run to a result. stdout is the answer; stderr is usually banner/progress
     noise, but a few CLIs put a short answer there, so fall back to it. An exit-0 with NO output
-    at all is a SOFT failure ("empty") — some CLIs (e.g. `agy` in print mode) exit clean yet say
-    nothing — so ask_cascade/ask_best fall THROUGH to a lane that actually answers instead of
-    stopping on a blank. Not retried, not cached, not a cooldown (it's per-call, not lane health)."""
+    at all is a SOFT failure ("empty") — some CLIs (e.g. `agy`/gemini in print mode) exit clean yet
+    say nothing, which on a free tier is almost always silent quota exhaustion — so ask_cascade/
+    ask_best fall THROUGH to a lane that actually answers. A single empty is per-call (fall-through,
+    not cached); telemetry cools the lane down only after REPEATED consecutive empties (quota)."""
     text = out or err
     if not text:
-        return RunResult(False, f"`{argv[0]}` returned no output (exit 0)", "empty", 0)
+        return RunResult(False, f"`{argv[0]}` returned no output (exit 0) - likely quota/rate-limit "
+                         "exhausted on a free tier", "empty", 0)
     # Exit 0 but the delegate REFUSED on policy grounds — a soft failure, like "empty":
     # cascade/ask_best fall through to a lane that answers, and it is never cached. Check both
     # streams AND the combined blob so a refusal split across stdout+stderr is still caught.
