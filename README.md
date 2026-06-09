@@ -15,22 +15,32 @@
 ![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-server-purple)
 ![ban--safe](https://img.shields.io/badge/ban--safe-no%20token%20extraction-orange)
 
-**Your assistant, with the powers of every CLI you already have.**
+**An MCP server that lets your AI assistant call the *other* AI CLIs you already have installed.**
 
 > **No API keys · no token extraction · no Node · no daemon · stdlib + `mcp` only.**
 
-The assistant you're talking to can't read a 2M-token repo in one pass, can't see a screenshot,
-can't generate an image, and can't check its own work without bias. The other AI CLIs you've
-**already installed and logged into** — Claude Code, Codex, Gemini, opencode, plus local models via
-Ollama — each do something yours can't. `cli-bridge` is a [Model Context Protocol](https://modelcontextprotocol.io)
-server that lets your assistant **borrow them**: it spawns the official CLI as a subprocess (exactly
-as you'd run it by hand — no keys, no token extraction) and hands the result back.
+### In one sentence
+
+You're talking to one AI assistant. You've also installed and logged into others — Claude Code,
+Codex, Gemini, opencode, Ollama. **cli-bridge connects them**: when your assistant needs something
+it can't do alone, it asks one of the other CLIs and hands you the result.
+
+### The problem it solves
+
+Whatever assistant you're using has hard limits. It can't read a 2M-token repo in one pass, can't
+see a screenshot, can't generate an image, and can't check its own work without bias — but *some
+other CLI on your machine can do each of those*. cli-bridge is the bridge between them: it spawns the
+official CLI as a subprocess (exactly as you'd run it by hand — no keys, no token extraction) and
+returns the answer to your assistant.
+
+The result: one assistant whose ceiling on every axis is the *best* tool in your toolbox, not the
+one you happened to open.
 
 ---
 
-## The four levers
+## What you get — the four levers
 
-cli-bridge isn't one feature — it's four things your assistant gains. Every tool below maps to one:
+cli-bridge isn't one feature — it's four abilities your assistant gains. Every tool below maps to one:
 
 1. **Borrow** — reach a capability your host lacks (vision, a 1M-token window, image generation, a model that's simply better at *this*).
 2. **Spread** — when one subscription caps out, keep going on another lane you already pay for.
