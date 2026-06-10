@@ -6,6 +6,8 @@
 #   at least two free lanes logged in (run `cli-bridge doctor`)
 #
 # Notes:
+#   - Pacing: PlaybackSpeed 1.0 — real time. The non-streaming review wait is cut with
+#     Hide/Show instead of speeding everything up; the report payoff holds 14s.
 #   - Lanes are auto-detected; hide any flaky one with CLI_BRIDGE_<LANE>_ENABLED=false.
 #   - CLI_BRIDGE_STATE_DB points at a scratch file so `usage` shows only this demo's runs.
 #   - Plain Sleeps (not Wait): vhs's Wait+Screen misses matches on long scrolled bursts.
@@ -16,40 +18,49 @@ Set Shell "bash"
 Set FontSize 28
 Set Width 2400
 Set Height 1600
-Set TypingSpeed 35ms
-Set PlaybackSpeed 2.2
+Set TypingSpeed 30ms
+Set PlaybackSpeed 1.0
 Set Theme "Catppuccin Mocha"
 
 Hide
-# Disable two lanes for a snappy demo: gemini's free tier is spent (silent empty) and one Mistral
-# call straggled to 70s today. The remaining council (claude/gpt/opencode/ollama) still catches it.
+# Disable two lanes for a reliable demo: gemini's free tier is spent (silent empty) and Mistral
+# straggles. The remaining council (claude/gpt/opencode/ollama) still catches the bypass.
 Type "export CLI_BRIDGE_STATE_DB=/tmp/demo-state.sqlite CLI_BRIDGE_TRACE_FOOTER=off CLI_BRIDGE_GEMINI_ENABLED=false CLI_BRIDGE_MISTRAL_ENABLED=false && cd /tmp/demo-authz && clear"
 Enter
 Sleep 1s
 Show
 
-Type "# a committed auth bypass — can your reviewer catch it?"
+Type "# someone committed an auth bypass. would YOUR reviewer catch it?"
 Enter
+Sleep 1.5s
 Type "git diff HEAD~1 auth.py"
 Enter
-Sleep 6s
+# hold: the viewer needs time to spot `if user is None: return True`
+Sleep 9s
 
 Type "clear"
 Enter
 Sleep 500ms
-Type "# one command — several AI models review it in parallel, findings merged + severity-ranked"
+Type "# one command — several AI models (different vendors) review it in parallel."
 Enter
+Sleep 1.5s
 Type "cli-bridge security-review --base HEAD~1"
 Enter
-# security-review is non-streaming: nothing prints until every lane finishes. Sleep must comfortably
-# exceed the slowest lane (~14s here) or the next command gets typed over a still-running review.
-Sleep 24s
+# show it genuinely starts…
+Sleep 3s
+# …cut the non-streaming wait (nothing prints until every lane finishes; generous margin)
+Hide
+Sleep 45s
+Show
+# payoff: hold the merged severity-ranked report long enough to read the top finding
+Sleep 14s
 
 Type "clear"
 Enter
 Sleep 500ms
-Type "# zero API keys, local-only log, $0 on free lanes — receipts:"
+Type "# no API keys, local-only log, $0 on the free lanes — the receipts:"
 Enter
-Type "cli-bridge usage --since 5m"
+Sleep 1s
+Type "cli-bridge usage --since 10m"
 Enter
-Sleep 8s
+Sleep 7s

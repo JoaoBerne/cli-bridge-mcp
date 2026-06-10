@@ -6,14 +6,16 @@
 #   cli-bridge on PATH           # uv tool install cli-bridge-mcp
 #   one build-capable lane logged in (opencode/gpt/…) — run `cli-bridge doctor`
 #
+# Pacing: PlaybackSpeed 1.0 — real time, viewers must be able to READ the diff. The dead
+# build wait is cut with Hide/Show instead of speeding everything up; payoff frames hold 10s+.
 # Rendered at 2x (Width/Height/FontSize doubled) so it stays crisp on retina/mobile.
 Output borrow.mp4
 Set Shell "bash"
 Set FontSize 28
 Set Width 2400
 Set Height 1600
-Set TypingSpeed 35ms
-Set PlaybackSpeed 2.0
+Set TypingSpeed 30ms
+Set PlaybackSpeed 1.0
 Set Theme "Catppuccin Mocha"
 
 Hide
@@ -22,19 +24,29 @@ Enter
 Sleep 1s
 Show
 
-Type "# borrow ANOTHER model to do real work — safely."
+Type "# delegate real work to ANOTHER model — safely."
 Enter
-Type "# it builds in a throwaway worktree; you get a DIFF back, your repo is never touched."
+Sleep 1.5s
+Type "# it edits a throwaway copy of the repo; you get a reviewable DIFF back."
 Enter
-Sleep 1s
-Type "cli-bridge build opencode 'add a subtract(a, b) function with a docstring to calc.py'"
+Sleep 2s
+Type "cli-bridge build opencode 'add a divide(a, b) function that raises ValueError on b == 0, to calc.py'"
 Enter
-Sleep 18s
+# show that the build genuinely starts…
+Sleep 3s
+# …then cut the dead wait (the lane works off-camera; generous so slow runs still finish)
+Hide
+Sleep 40s
+Show
+# payoff: hold the diff long enough to actually read it
+Sleep 12s
 
 Type "clear"
 Enter
-Type "# proof: your real repo was never modified —"
+Sleep 500ms
+Type "# and your real repo was never touched —"
 Enter
-Type "git status --short ; echo '<clean — nothing staged, nothing changed>'"
+Sleep 1s
+Type "git status --short && echo '<clean — nothing changes until YOU apply the diff>'"
 Enter
-Sleep 6s
+Sleep 7s
