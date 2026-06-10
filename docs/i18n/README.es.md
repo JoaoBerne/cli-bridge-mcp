@@ -17,17 +17,26 @@ _El README en inglés es la fuente autoritativa; esta traducción puede ir por d
 ![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-server-purple)
 ![ban--safe](https://img.shields.io/badge/ban--safe-no%20token%20extraction-orange)
 
-**Tu asistente, con los poderes de todas las CLI que ya tienes.**
+**Un servidor [Model Context Protocol](https://modelcontextprotocol.io) que permite a tu asistente de IA llamar a las *otras* CLI de IA que ya tienes instaladas.**
 
 > **Sin claves API · sin extracción de tokens · sin Node · sin demonio · solo stdlib + `mcp`.**
 
-El asistente con el que hablas no puede leer un repo de 2 M de tokens de una vez, no puede ver una
-captura de pantalla, no puede entregarte una imagen generada, y no puede revisar su propio trabajo sin
-sesgo. Las otras CLI de IA que **ya instalaste y donde ya iniciaste sesión** — Claude Code, Codex,
-Gemini, opencode, además de modelos locales vía Ollama — hacen cada una algo que la tuya no. `cli-bridge`
-es un servidor [Model Context Protocol](https://modelcontextprotocol.io) que permite a tu asistente
-**tomarlas prestadas**: lanza la CLI oficial como subproceso (exactamente como la ejecutarías a mano —
-sin claves, sin extracción de tokens) y te devuelve el resultado.
+### En una frase
+
+Hablas con un asistente de IA. También instalaste otros, donde ya iniciaste sesión — Claude Code,
+Codex, Gemini, opencode, Ollama. **cli-bridge los conecta**: cuando tu asistente necesita algo que
+no puede hacer solo, se lo pide a otra CLI y te entrega el resultado.
+
+### El problema que resuelve
+
+Sea cual sea tu asistente, tiene límites duros. No puede leer un repo de 2 M de tokens de una vez,
+no puede ver una captura de pantalla, no puede entregarte una imagen generada, y no puede revisar su
+propio trabajo sin sesgo — pero *alguna otra CLI en tu máquina sí puede hacer cada una de esas
+cosas*. cli-bridge es el puente entre ellas: lanza la CLI oficial como subproceso (exactamente como
+la ejecutarías a mano — sin claves, sin extracción de tokens) y devuelve la respuesta a tu asistente.
+
+El resultado: un asistente cuyo techo en cada eje es la *mejor* herramienta de tu caja, no la que
+abriste por casualidad.
 
 ---
 
@@ -62,7 +71,7 @@ desechable**, y luego te devuelve un **diff** — tu repo nunca se toca hasta qu
 
 ---
 
-## Cómo pensarlo (el modelo mental)
+## Lo que ganas — las cuatro palancas
 
 cli-bridge no es una función, son **cuatro palancas**. Entiéndelas y cada herramienta de abajo encaja:
 

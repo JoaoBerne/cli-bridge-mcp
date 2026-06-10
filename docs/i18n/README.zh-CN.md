@@ -17,15 +17,22 @@ _英文 README 为准；本翻译可能滞后。欢迎社区校对。_
 ![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-server-purple)
 ![ban--safe](https://img.shields.io/badge/ban--safe-no%20token%20extraction-orange)
 
-**你的助手，拥有你已经装好的每一个 CLI 的能力。**
+**一个 [Model Context Protocol](https://modelcontextprotocol.io) 服务器，让你的 AI 助手调用你已经装好的*其他* AI CLI。**
 
 > **无 API 密钥 · 不抽取令牌 · 无 Node · 无守护进程 · 仅 stdlib + `mcp`。**
 
-与你对话的助手无法一次读完 200 万 token 的仓库，无法查看截图，无法给你一张生成的图片，也无法无偏差地检查自己的
-工作。你**已经安装并登录**的其他 AI CLI —— Claude Code、Codex、Gemini、opencode，外加通过 Ollama 的本地
-模型 —— 每一个都能做你的助手做不到的事。`cli-bridge` 是一个 [Model Context Protocol](https://modelcontextprotocol.io)
-服务器，让你的助手**借用它们**：它把官方 CLI 作为子进程启动（与你手动运行完全相同 —— 无密钥、不抽取令牌），
-并把结果交还给你。
+### 一句话说清
+
+你在和一个 AI 助手对话。你还安装并登录了其他 CLI —— Claude Code、Codex、Gemini、opencode、Ollama。
+**cli-bridge 把它们连起来**：当你的助手遇到自己做不到的事，它会去问另一个 CLI，再把结果交给你。
+
+### 它解决的问题
+
+无论你用哪个助手，它都有硬性限制：无法一次读完 200 万 token 的仓库，无法查看截图，无法给你一张生成的图片，
+也无法无偏差地检查自己的工作 —— 但*你机器上的某个其他 CLI 恰好能做到其中每一件事*。cli-bridge 就是它们之间的
+桥：把官方 CLI 作为子进程启动（与你手动运行完全相同 —— 无密钥、不抽取令牌），再把答案返回给你的助手。
+
+结果：一个助手，它在每个维度上的上限都是你工具箱里*最好*的那个工具，而不是你恰好打开的那个。
 
 ---
 
@@ -56,7 +63,7 @@ artifact-return 传递，而不走文本通道。build lane 在更合适时也�
 
 ---
 
-## 该如何理解它（心智模型）
+## 你得到什么 —— 四个杠杆
 
 cli-bridge 不是一个功能，而是**四个杠杆**。理解它们，下面的每个工具就各归其位：
 
