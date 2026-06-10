@@ -17,18 +17,28 @@ _Le README anglais fait foi ; cette traduction peut être en retard sur lui._
 ![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-server-purple)
 ![ban--safe](https://img.shields.io/badge/ban--safe-no%20token%20extraction-orange)
 
-**Votre assistant, avec les pouvoirs de toutes les CLI que vous avez déjà.**
+**Un serveur [Model Context Protocol](https://modelcontextprotocol.io) qui permet à votre assistant IA d'appeler les *autres* CLI IA déjà installées sur votre machine.**
 
 > **Pas de clés API · pas d'extraction de jetons · pas de Node · pas de démon · stdlib + `mcp` uniquement.**
 
-L'assistant à qui vous parlez ne peut pas lire un dépôt de 2 M de tokens d'un coup, ne peut pas voir
-une capture d'écran, ne peut pas vous fournir une image générée, et ne peut pas vérifier son propre
-travail sans biais. Les autres CLI IA que vous avez **déjà installées et où vous êtes déjà connecté** —
-Claude Code, Codex, Gemini, opencode, plus les modèles locaux via Ollama — font chacune quelque chose
-que la vôtre ne sait pas faire. `cli-bridge` est un serveur [Model Context Protocol](https://modelcontextprotocol.io)
-qui permet à votre assistant de **les emprunter** : il lance la CLI officielle en sous-processus
-(exactement comme vous le feriez à la main — pas de clés, pas d'extraction de jetons) et vous renvoie
-le résultat.
+### En une phrase
+
+Vous parlez à un assistant IA. Vous en avez aussi installé d'autres, où vous êtes déjà connecté —
+Claude Code, Codex, Gemini, opencode, Ollama. **cli-bridge les relie** : quand votre assistant a
+besoin de quelque chose qu'il ne sait pas faire seul, il le demande à une autre CLI et vous remet le
+résultat.
+
+### Le problème que ça résout
+
+Quel que soit votre assistant, il a des limites dures. Il ne peut pas lire un dépôt de 2 M de tokens
+d'un coup, ne peut pas voir une capture d'écran, ne peut pas vous fournir une image générée, et ne
+peut pas vérifier son propre travail sans biais — alors qu'*une autre CLI sur votre machine sait
+faire chacune de ces choses*. cli-bridge est le pont entre elles : il lance la CLI officielle en
+sous-processus (exactement comme vous le feriez à la main — pas de clés, pas d'extraction de jetons)
+et renvoie la réponse à votre assistant.
+
+Résultat : un assistant dont le plafond sur chaque axe est le *meilleur* outil de votre boîte à
+outils, pas celui que vous avez ouvert par hasard.
 
 ---
 
@@ -64,7 +74,7 @@ l'appliquez pas vous-même.
 
 ---
 
-## Comment y penser (le modèle mental)
+## Ce que vous gagnez — les quatre leviers
 
 cli-bridge n'est pas une fonctionnalité, ce sont **quatre leviers**. Comprenez-les et chaque outil
 ci-dessous trouve sa place :

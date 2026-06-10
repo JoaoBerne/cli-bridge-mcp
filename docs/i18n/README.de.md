@@ -17,18 +17,27 @@ _Das englische README ist maßgeblich; diese Übersetzung kann hinterherhinken. 
 ![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-server-purple)
 ![ban--safe](https://img.shields.io/badge/ban--safe-no%20token%20extraction-orange)
 
-**Dein Assistent, mit den Fähigkeiten jeder CLI, die du schon hast.**
+**Ein [Model-Context-Protocol](https://modelcontextprotocol.io)-Server, mit dem dein KI-Assistent die *anderen* KI-CLIs aufrufen kann, die du schon installiert hast.**
 
 > **Keine API-Schlüssel · keine Token-Extraktion · kein Node · kein Daemon · nur stdlib + `mcp`.**
 
-Der Assistent, mit dem du sprichst, kann kein 2-Mio.-Token-Repo in einem Durchgang lesen, kann keinen
-Screenshot sehen, kann dir kein generiertes Bild liefern und kann seine eigene Arbeit nicht
-verzerrungsfrei prüfen. Die anderen KI-CLIs, die du **bereits installiert und eingeloggt hast** —
-Claude Code, Codex, Gemini, opencode, plus lokale Modelle über Ollama — können jeweils etwas, das
-deine nicht kann. `cli-bridge` ist ein [Model-Context-Protocol](https://modelcontextprotocol.io)-Server,
-der deinem Assistenten erlaubt, sie sich **auszuleihen**: Er startet die offizielle CLI als
-Subprozess (genau so, wie du sie von Hand ausführen würdest — keine Schlüssel, keine Token-Extraktion)
-und gibt dir das Ergebnis zurück.
+### In einem Satz
+
+Du sprichst mit einem KI-Assistenten. Du hast auch andere installiert und bist dort eingeloggt —
+Claude Code, Codex, Gemini, opencode, Ollama. **cli-bridge verbindet sie**: Wenn dein Assistent
+etwas braucht, das er allein nicht kann, fragt er eine der anderen CLIs und liefert dir das Ergebnis.
+
+### Das Problem, das es löst
+
+Egal welchen Assistenten du nutzt — er hat harte Grenzen. Er kann kein 2-Mio.-Token-Repo in einem
+Durchgang lesen, keinen Screenshot sehen, dir kein generiertes Bild liefern und seine eigene Arbeit
+nicht verzerrungsfrei prüfen — aber *irgendeine andere CLI auf deinem Rechner kann jede dieser
+Sachen*. cli-bridge ist die Brücke dazwischen: Es startet die offizielle CLI als Subprozess (genau
+so, wie du sie von Hand ausführen würdest — keine Schlüssel, keine Token-Extraktion) und gibt die
+Antwort an deinen Assistenten zurück.
+
+Das Ergebnis: ein Assistent, dessen Obergrenze auf jeder Achse das *beste* Werkzeug deines Kastens
+ist — nicht das, das du zufällig geöffnet hast.
 
 ---
 
@@ -64,7 +73,7 @@ angefasst, bis du ihn selbst anwendest.
 
 ---
 
-## Wie man es denken sollte (das mentale Modell)
+## Was du bekommst — die vier Hebel
 
 cli-bridge ist keine Funktion, sondern **vier Hebel**. Verstehe sie, und jedes Tool unten fügt sich ein:
 
