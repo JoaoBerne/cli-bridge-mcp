@@ -103,7 +103,9 @@ def test_ask_all_output_starts_with_recap(monkeypatch):
 
     out = asyncio.run(server._ask_all([a, b], {"task": "hi"}))
     text = out[0].text
-    assert text.startswith("## Council — 1/2 answered")
+    # The echoed question comes first (CLI_BRIDGE_ECHO_TASK, on by default), then the recap.
+    assert text.startswith('▶ council (ask_all) — asked: "hi"\n\n')
+    assert text.split("\n\n", 1)[1].startswith("## Council — 1/2 answered")
     assert "- ✅ **LaneA** _11ms_ — answer from A" in text   # gist = first line
     assert "- ❌ **LaneB** _22ms_ — quota" in text           # failed lane: latency + reason
     # full blocks still follow the recap

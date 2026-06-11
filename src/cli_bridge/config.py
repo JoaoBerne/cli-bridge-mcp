@@ -365,6 +365,14 @@ def telemetry_enabled() -> bool:
     return os.environ.get("CLI_BRIDGE_TELEMETRY", "").strip().lower() not in {"0", "false", "off", "no"}
 
 
+def echo_task() -> bool:
+    """CLI_BRIDGE_ECHO_TASK=off hides the '▶ lane — asked: …' header prepended to delegation
+    results. On by default: when the user re-reads the conversation in their CLI, each answer
+    shows WHO was asked WHAT without scrolling back to the tool-call arguments."""
+    return os.environ.get("CLI_BRIDGE_ECHO_TASK", "").strip().lower() \
+        not in {"0", "false", "off", "no"}
+
+
 def show_trace() -> bool:
     """CLI_BRIDGE_TRACE_FOOTER=off hides the JSON trace footer in workflow reports
     (terminal-friendly; distinct from CLI_BRIDGE_TRACE_DIR, which dumps raw traces)."""

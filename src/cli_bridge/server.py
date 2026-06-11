@@ -1982,6 +1982,7 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
         out = res.render()
         if cid:
             out = f"[conversation: {cid}] — reuse this id (on any lane) to continue the thread.\n\n{out}"
+        out = _echo_header(lane.key, res.model, _str(args, "task")) + out
         return [_emit(out, label=f"ask_{lane.key}")]
 
     if name == "list_models":
@@ -2090,8 +2091,23 @@ def _set_lane_cost(args: dict) -> list[TextContent]:
         "ask_all / ask_cascade / ask_best route on it from the next call." + caveat))]
 
 
+def _echo_header(lane_key: str, model: str, task: str) -> str:
+    """'▶ gemini · gemini-2.5-pro — asked: "…"' line prepended to delegation results, so the
+    user re-reading the conversation in their CLI sees who was asked what next to the answer
+    (no scrolling back to the tool-call args). CLI_BRIDGE_ECHO_TASK=off disables."""
+    if not config.echo_task() or not task:
+        return ""
+    preview = " ".join(task.split())
+    if len(preview) > 140:
+        preview = preview[:140] + "…"
+    who = f"{lane_key} · {model}" if model else lane_key
+    return f'▶ {who} — asked: "{preview}"\n\n'
+
+
 async def _ask_all(lanes: list[LaneSpec], args: dict) -> list[TextContent]:
-    return [_emit(await _ask_all_body(lanes, args), label="ask_all")]
+    out = await _ask_all_body(lanes, args)
+    return [_emit(_echo_header("council (ask_all)", "", _str(args, "task")) + out,
+                  label="ask_all")]
 
 
 async def _run_workflow_preset(args: dict, lanes: list[LaneSpec]) -> list[TextContent]:
