@@ -7,6 +7,11 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Desktop-app hosts (Claude Desktop, Hermes Desktop, …)**: CLI detection and lane binary
+  resolution now fall back to the common install dirs (`~/.local/bin`, `~/.npm-global/bin`,
+  `/opt/homebrew/bin`, `/usr/local/bin`, …) when plain PATH lookup fails — GUI MCP clients
+  launch servers with a minimal login PATH, which previously made every CLI look
+  "NOT on PATH" from inside the app. README gains a Desktop-apps install section.
 - **Question echo on delegation results** (`CLI_BRIDGE_ECHO_TASK`, on by default): every
   `ask_<lane>` / `ask_all` answer now starts with `▶ <lane> · <model> — asked: "<question>"`,
   so re-reading the conversation in any CLI shows who was asked what right next to each

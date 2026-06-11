@@ -21,6 +21,34 @@ import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+# GUI MCP hosts (Claude Desktop, Hermes Desktop, …) launch their servers with a minimal
+# login PATH that misses Homebrew/npm/user bins — so a CLI that works fine in a terminal
+# is "not installed" from inside the app. When plain PATH lookup fails, retry in the
+# usual install dirs. Order: most specific (user) first.
+_EXTRA_BIN_DIRS = (
+    os.path.expanduser("~/.local/bin"),
+    os.path.expanduser("~/.npm-global/bin"),
+    os.path.expanduser("~/bin"),
+    os.path.expanduser("~/.cargo/bin"),
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+)
+
+
+def which_path(cmd: str) -> str | None:
+    """shutil.which plus the common install dirs above. Returns `cmd` unchanged when PATH
+    already resolves it (keeps argv/display short), the absolute path when it's only found
+    in a fallback dir, or None."""
+    if shutil.which(cmd):
+        return cmd
+    if os.path.basename(cmd) == cmd:           # bare name only — don't remap explicit paths
+        for d in _EXTRA_BIN_DIRS:
+            cand = os.path.join(d, cmd)
+            if shutil.which(cand):
+                return cand
+    return None
+
+
 _EFFORT = {"": "", "minimal": "minimal", "low": "low", "medium": "medium",
            "high": "high", "max": "max"}
 
@@ -90,8 +118,9 @@ class LaneSpec:
         if self.bin_alts and self.sunset_passed():
             order = (*self.bin_alts, self.bin_default)
         for cand in order:
-            if shutil.which(cand):
-                return cand
+            found = which_path(cand)
+            if found:
+                return found
         return self.bin_default
 
     @property
