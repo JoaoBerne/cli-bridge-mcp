@@ -1645,13 +1645,22 @@ async def _run_lane_maybe_convo(lane: LaneSpec, args: dict) -> tuple[runner.RunR
     return res, cid
 
 
+_COMPACT_FAILED_AT: dict[str, float] = {}     # thread id -> monotonic time of last failed fold
+_COMPACT_RETRY_S = 600                        # don't re-pay the failed-summarizer latency every turn
+
+
 async def _maybe_compact_convo(cid: str, lane: LaneSpec) -> None:
     """Rolling summary: once the stored thread outgrows the replay budget, the lane that just
     answered (it had the full history in front of it — no third model to route) condenses the
-    old tail into one summary turn. Best-effort: any failure leaves the thread as it was."""
+    old tail into one summary turn. Best-effort: any failure leaves the thread as it was, and
+    a failed fold isn't retried for a while (a dead summarizer otherwise adds its timeout to
+    EVERY subsequent turn of an over-budget thread)."""
     if not config.convo_summary_enabled():
         return
     try:
+        failed_at = _COMPACT_FAILED_AT.get(cid)
+        if failed_at is not None and time.monotonic() - failed_at < _COMPACT_RETRY_S:
+            return
         upto, excerpt = conversations.compaction_plan(cid, config.convo_max_chars())
         if not upto:
             return
@@ -1659,6 +1668,9 @@ async def _maybe_compact_convo(cid: str, lane: LaneSpec) -> None:
                               tool="convo_summary")
         if res.ok and res.output.strip():
             conversations.apply_compaction(cid, upto, res.output, lane.key)
+            _COMPACT_FAILED_AT.pop(cid, None)
+        else:
+            _COMPACT_FAILED_AT[cid] = time.monotonic()
     except Exception:                          # noqa: BLE001 — never break the user's call
         pass
 

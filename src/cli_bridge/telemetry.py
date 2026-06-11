@@ -828,6 +828,9 @@ def _prune_conversations(conn: sqlite3.Connection) -> None:
             "ORDER BY MAX(created_at) DESC").fetchall()
         for (cid,) in rows[keep:]:
             conn.execute("DELETE FROM conversation_turns WHERE conversation_id=?", (cid,))
+            # cascade: a pruned thread must not leave a native handle behind — a resumed
+            # vendor session would diverge from the (now empty) sqlite source of truth
+            conn.execute("DELETE FROM convo_sessions WHERE conversation_id=?", (cid,))
     except sqlite3.Error:
         pass
 

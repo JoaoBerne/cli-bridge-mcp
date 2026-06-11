@@ -94,7 +94,8 @@ def test_opencode_build_agent_writes():
 
 def test_mistral_arg_order():
     argv = _lane("mistral").build_ask("hi", "", "", "")
-    assert argv == ["-p", "hi", "--agent", "plan", "--trust"]
+    # default agent answers in-chat; vibe's plan agent writes plan FILES instead
+    assert argv == ["-p", "hi", "--agent", "default", "--trust"]
 
 
 # ── build (write) mode: read-only stays the default; build flips the verified write flag ──
