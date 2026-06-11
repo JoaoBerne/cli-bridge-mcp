@@ -43,9 +43,11 @@ def which_path(cmd: str) -> str | None:
         return cmd
     if os.path.basename(cmd) == cmd:           # bare name only — don't remap explicit paths
         for d in _EXTRA_BIN_DIRS:
-            cand = os.path.join(d, cmd)
-            if shutil.which(cand):
-                return cand
+            # path= keeps shutil's own PATHEXT handling (`gemini` → gemini.exe/.cmd on
+            # Windows); joining the path by hand skips that on Python < 3.12.
+            found = shutil.which(cmd, path=d)
+            if found:
+                return found
     return None
 
 
