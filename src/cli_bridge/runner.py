@@ -139,6 +139,8 @@ class RunResult:
     exit_code: int | None = None
     latency_ms: int = 0       # wall time of the spawn, filled in by the caller (server._run_lane)
     model: str = ""           # resolved model that ran, filled in by the caller (provenance)
+    err: str = ""             # redacted stderr (success only carries it for handle capture —
+                              # e.g. opencode --print-logs emits its session id there)
 
     def render(self) -> str:
         """One string for the MCP tool result. Errors are prefixed so the caller can tell
@@ -210,10 +212,12 @@ def _finish(returncode, out, err, argv) -> RunResult:
     out = redact((out or "").strip())
     err = redact((err or "").strip())
     if returncode == 0:
-        return _ok_or_empty(out, err, argv)
+        res = _ok_or_empty(out, err, argv)
+        res.err = err
+        return res
     detail = err or out or "(no output)"
     return RunResult(False, _clip(f"{argv[0]} exit {returncode}: {detail}"),
-                     _failure_kind(out, err), returncode)
+                     _failure_kind(out, err), returncode, err=err)
 
 
 async def _terminate(proc) -> None:

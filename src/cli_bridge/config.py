@@ -334,6 +334,14 @@ def convo_max_chars() -> int:
     return int_env("CLI_BRIDGE_CONVO_MAX_CHARS", 32000, 1000, 1_000_000)
 
 
+def native_sessions_enabled() -> bool:
+    """Native session continuity on conversation turns, for lanes that support it (claude mints
+    its own --session-id; opencode's --print-logs names the session for capture). Cuts replayed
+    tokens to the cross-lane delta. CLI_BRIDGE_NATIVE_SESSIONS=off to force pure replay."""
+    return os.environ.get("CLI_BRIDGE_NATIVE_SESSIONS", "").strip().lower() not in (
+        "off", "false", "0", "no")
+
+
 def convo_summary_enabled() -> bool:
     """Rolling summary: when a thread outgrows convo_max_chars(), the lane that just answered
     condenses the oldest turns into one summary turn instead of letting them fall off the

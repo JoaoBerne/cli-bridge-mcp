@@ -1558,7 +1558,9 @@ async def _run_lane(lane: LaneSpec, args: dict, *, tool: str = "ask",
     terse_level = preamble.level() if terse else "off"
     ttl = config.CACHE_TTL_S
     key = ""
-    if ttl > 0 and agent != "build":
+    # Never cache native-session turns: the same prompt means something different inside a
+    # session (the CLI holds prior context the cache key can't see).
+    if ttl > 0 and agent != "build" and not args.get("_native_argv"):
         key = _cache_key(lane, model, effort, agent, expanded or "", task, terse_level)
         hit = telemetry.cache_get(key, ttl)
         if hit is not None:
@@ -1575,6 +1577,11 @@ async def _run_lane(lane: LaneSpec, args: dict, *, tool: str = "ask",
             task = f"{task}\n\n{' '.join(refs)}"
     prompt = preamble.apply(task) if terse else task
     argv = [lane.bin] + lane.build_ask(prompt, model, effort, agent, lane.bin)
+    # Native-session extras (conversation turns only): inserted just before the task — the
+    # last argv element for every built-in lane (custom lanes never set _native_argv).
+    native_extra = args.get("_native_argv")
+    if native_extra and len(argv) > 1:
+        argv = argv[:-1] + [str(a) for a in native_extra] + argv[-1:]
     # Some lanes select the model via ENV (e.g. vibe's VIBE_ACTIVE_MODEL), not a flag. Merge any
     # such overrides onto a COPY of the environment (a bare dict would drop the CLI's own PATH/auth).
     extra_env = lane.env_ask(model, effort, agent) if lane.env_ask else {}
@@ -1611,14 +1618,29 @@ async def _run_lane_maybe_convo(lane: LaneSpec, args: dict) -> tuple[runner.RunR
     elif not conversations.is_valid_id(cid):
         return runner.RunResult(False, f"invalid conversation id: {cid!r}", "failed"), ""
     task = _str(args, "task")
-    prefix, _trimmed = conversations.build_history_prefix(cid, lane.key, config.convo_max_chars())
     sub = dict(args)
+    # Native session continuity (claude mint / opencode capture …): the lane's own session
+    # carries the turns it has already seen, so the prompt replays only the DELTA other lanes
+    # added since. Replay stays the cross-lane source of truth (sqlite records every turn).
+    ns = lane.native_session if config.native_sessions_enabled() else None
+    sid, last_seen = "", 0
+    if ns:
+        extra, sid, last_seen = conversations.native_step(ns, cid, lane.key)
+        if extra:
+            sub["_native_argv"] = extra
+    prefix, _trimmed = conversations.build_history_prefix(
+        cid, lane.key, config.convo_max_chars(), since_turn=last_seen)
     if prefix:
         sub["task"] = f"{prefix}\n{task}"
     res = await _run_lane(lane, sub)
+    if ns and not res.ok and last_seen:        # broken resume → fall back to replay next turn
+        conversations.native_drop(cid, lane.key)
     if task and res.ok:                        # only record a real exchange
         conversations.record_turn(cid, lane.key, "user", task)
-        conversations.record_turn(cid, lane.key, "assistant", res.output)
+        n = conversations.record_turn(cid, lane.key, "assistant", res.output)
+        if ns:
+            conversations.native_commit(ns, cid, lane.key, sid,
+                                        f"{res.err}\n{res.output}", n)
         await _maybe_compact_convo(cid, lane)
     return res, cid
 

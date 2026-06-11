@@ -15,6 +15,7 @@ Pure logic + thin telemetry calls; no import of server.py, so server.py stays th
 from __future__ import annotations
 
 import os
+import re
 import uuid
 
 from . import config, telemetry
@@ -122,8 +123,40 @@ def apply_compaction(conversation_id: str, upto_n: int, summary: str, lane: str)
     return telemetry.convo_compact(conversation_id, upto_n, summary, lane)
 
 
+def native_step(ns: dict, conversation_id: str, lane_key: str) -> tuple[list[str], str, int]:
+    """Pre-spawn half of native session continuity. Returns (extra_argv, sid, last_seen_turn):
+    a known handle → resume argv + the last turn this lane's native session already contains
+    (so the prompt replays only the DELTA — turns other lanes added since). No handle yet →
+    mint one ourselves (mode=mint) or spawn with the CLI's officially-flagged verbose output
+    and capture it after the run (mode=capture)."""
+    sid, last = telemetry.convo_session(conversation_id, lane_key)
+    if sid:
+        return [a.replace("{sid}", sid) for a in ns.get("resume", [])], sid, last
+    if ns.get("mode") == "mint":
+        sid = str(uuid.uuid4())
+        return [a.replace("{sid}", sid) for a in ns.get("first", [])], sid, 0
+    return list(ns.get("spawn", [])), "", 0
+
+
+def native_commit(ns: dict, conversation_id: str, lane_key: str, sid: str,
+                  raw_streams: str, last_turn: int) -> None:
+    """Post-spawn half: capture the handle from the CLI's output if we don't hold one yet
+    (mode=capture), then record handle + high-water turn so the next same-lane turn resumes
+    natively and replays only the delta. Best-effort."""
+    if not sid and ns.get("pattern"):
+        m = re.search(ns["pattern"], raw_streams or "")
+        sid = m.group(0) if m else ""
+    if sid:
+        telemetry.convo_session_set(conversation_id, lane_key, sid, last_turn)
+
+
+def native_drop(conversation_id: str, lane_key: str) -> None:
+    """A resume turn failed — forget the handle; the next turn falls back to full replay."""
+    telemetry.convo_session_drop(conversation_id, lane_key)
+
+
 def build_history_prefix(conversation_id: str, recipient_lane: str,
-                         max_chars: int) -> tuple[str, bool]:
+                         max_chars: int, since_turn: int = 0) -> tuple[str, bool]:
     """Build the recipient-aware transcript to prepend before the next turn to `recipient_lane`.
 
     Dual-phase windowing (the technique zen uses): collect turns newest-first until the char
@@ -135,6 +168,8 @@ def build_history_prefix(conversation_id: str, recipient_lane: str,
     first turn behaves exactly like a normal one-shot ask (zero regression).
     """
     turns = telemetry.convo_turns(conversation_id)
+    if since_turn:                 # native resume: the lane's own session already holds the rest
+        turns = [t for t in turns if int(t.get("turn_number", 0)) > since_turn]
     if not turns:
         return "", False
 

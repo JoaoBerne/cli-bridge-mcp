@@ -114,6 +114,13 @@ CREATE TABLE IF NOT EXISTS conversation_turns (
   created_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_convo_turns ON conversation_turns(conversation_id, turn_number);
+CREATE TABLE IF NOT EXISTS convo_sessions (
+  conversation_id TEXT NOT NULL,
+  lane TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  last_turn INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (conversation_id, lane)
+);
 CREATE TABLE IF NOT EXISTS lane_ratings (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   lane TEXT NOT NULL,
@@ -741,6 +748,53 @@ def convo_list(limit: int = 30) -> list[dict]:
             return out
     except sqlite3.Error:
         return []
+
+
+def convo_session(conversation_id: str, lane: str) -> tuple[str, int]:
+    """The lane's native session handle for this thread + the last turn_number it has seen.
+    ("", 0) when none / on any error."""
+    conn = _connect()
+    if conn is None or not conversation_id:
+        return "", 0
+    try:
+        with _LOCK:
+            row = conn.execute(
+                "SELECT session_id, last_turn FROM convo_sessions "
+                "WHERE conversation_id=? AND lane=?", (conversation_id, lane)).fetchone()
+        return (row[0], int(row[1])) if row else ("", 0)
+    except sqlite3.Error:
+        return "", 0
+
+
+def convo_session_set(conversation_id: str, lane: str, session_id: str, last_turn: int) -> None:
+    """Record/refresh the lane's native handle for this thread. Best-effort."""
+    conn = _connect()
+    if conn is None or not (conversation_id and lane and session_id):
+        return
+    try:
+        with _LOCK:
+            conn.execute(
+                "INSERT INTO convo_sessions (conversation_id, lane, session_id, last_turn) "
+                "VALUES (?,?,?,?) ON CONFLICT(conversation_id, lane) DO UPDATE SET "
+                "session_id=excluded.session_id, last_turn=excluded.last_turn",
+                (conversation_id, lane, session_id, int(last_turn)))
+            conn.commit()
+    except sqlite3.Error:
+        pass
+
+
+def convo_session_drop(conversation_id: str, lane: str) -> None:
+    """Forget a broken native handle so the next turn falls back to transcript replay."""
+    conn = _connect()
+    if conn is None:
+        return
+    try:
+        with _LOCK:
+            conn.execute("DELETE FROM convo_sessions WHERE conversation_id=? AND lane=?",
+                         (conversation_id, lane))
+            conn.commit()
+    except sqlite3.Error:
+        pass
 
 
 def convo_compact(conversation_id: str, upto_n: int, summary: str, lane: str = "") -> bool:
