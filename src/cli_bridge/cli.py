@@ -2,6 +2,7 @@
 
   cli-bridge doctor [--deep]
   cli-bridge ask <lane> <task...> [--model M] [--cwd DIR]
+  cli-bridge chat [lane] [--model M] [--resume ID]   # interactive multi-turn, /lane switches
   cli-bridge ask-all <task...> [--synthesize] [--include-paid]
   cli-bridge ask-best <task...> [--mode fast|cheap|deep|code|review|security]
   cli-bridge build <lane> <task...> [--architect L] [--model M] [--cwd DIR]
@@ -23,7 +24,7 @@ import os
 import shutil
 import sys
 
-from . import config, server, telemetry, workflows, worktrees
+from . import config, conversations, server, telemetry, workflows, worktrees
 from . import eval as evals
 from . import jobs as jobs_mod
 from .detect import is_installed
@@ -54,6 +55,72 @@ def _cmd_ask(a):
     print(res.render())
 
 
+_CHAT_HELP = "commands: /lane <key> · /model <id> · /new · /id · /quit"
+
+
+def _cmd_chat(a):
+    """Interactive multi-turn session with a lane — pilot a delegate like a real user. The
+    thread lives in the round-table store (sqlite), so /lane switches models MID-thread with
+    full shared memory, and --resume picks a thread back up after quitting."""
+    lanes, _ = _lanes()
+    if a.lane:
+        lane = server._lane_by_key(a.lane, lanes)
+        if not lane:
+            sys.exit(f"[error] no such lane: {a.lane}. Run `cli-bridge doctor`.")
+    else:
+        free = _targets(False)
+        if not free:
+            sys.exit("[error] no free lane installed. Run `cli-bridge doctor`.")
+        lane = free[0]
+    model = a.model
+    cid = a.resume or conversations.new_id()
+    if a.resume and not conversations.is_valid_id(cid):
+        sys.exit(f"[error] invalid thread id: {cid!r}")
+    print(f"cli-bridge chat — lane: {lane.key}"
+          + (f" · model: {model}" if model else "") + f" · thread: {cid}")
+    print(_CHAT_HELP)
+    while True:
+        try:
+            line = input("you> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+        if not line:
+            continue
+        if line in ("/quit", "/exit", "/q"):
+            break
+        if line == "/id":
+            print(f"thread: {cid} — resume later with `cli-bridge chat --resume {cid}`")
+            continue
+        if line == "/new":
+            cid = conversations.new_id()
+            print(f"new thread: {cid}")
+            continue
+        if line.startswith("/lane"):
+            key = line.split(None, 1)[1].strip() if " " in line else ""
+            nl = server._lane_by_key(key, lanes)
+            if nl:
+                lane = nl
+                print(f"→ lane: {lane.key} (same thread — it sees the prior turns)")
+            else:
+                print(f"[error] no such lane: {key or '(missing)'}. "
+                      f"Installed: {', '.join(ln.key for ln in lanes)}")
+            continue
+        if line.startswith("/model"):
+            model = line.split(None, 1)[1].strip() if " " in line else ""
+            print(f"→ model: {model or '(lane default)'}")
+            continue
+        if line.startswith("/"):
+            print(_CHAT_HELP)
+            continue
+        res, cid = asyncio.run(server._run_lane_maybe_convo(
+            lane, {"task": line, "model": model, "cwd": a.cwd, "timeout_s": a.timeout,
+                   "conversation": cid}))
+        body = res.output.strip() if res.ok else res.render().strip()
+        print(f"{lane.key}> {body}\n")
+    print(f"thread saved: {cid} — resume with `cli-bridge chat --resume {cid}`")
+
+
 def _cmd_ask_all(a):
     lanes, _ = _lanes()
     print(asyncio.run(server._ask_all_body(
@@ -79,7 +146,8 @@ def _cmd_build(a):
         architect = server._lane_by_key(a.architect, lanes)
         if not architect:
             sys.exit(f"[error] no such architect lane: {a.architect}.")
-    args = {"task": " ".join(a.task), "cwd": a.cwd, "model": a.model, "timeout_s": a.timeout}
+    args = {"task": " ".join(a.task), "cwd": a.cwd, "model": a.model, "timeout_s": a.timeout,
+            "apply": a.apply}
     print(asyncio.run(worktrees.ask_build_isolated(lane, args, server._run_lane, architect)))
 
 
@@ -355,6 +423,15 @@ def build_parser() -> argparse.ArgumentParser:
     ask.add_argument("--timeout", type=int, default=None)
     ask.set_defaults(func=_cmd_ask)
 
+    ch = sub.add_parser("chat", help="interactive multi-turn chat with a lane (round-table "
+                                     "thread; /lane switches models MID-thread)")
+    ch.add_argument("lane", nargs="?", default="", help="lane to start with (default: first free)")
+    ch.add_argument("--model", default="")
+    ch.add_argument("--cwd", default="")
+    ch.add_argument("--timeout", type=int, default=None)
+    ch.add_argument("--resume", default="", help="continue an existing thread id")
+    ch.set_defaults(func=_cmd_chat)
+
     aa = sub.add_parser("ask-all", help="ask every free lane in parallel")
     aa.add_argument("task", nargs="+")
     aa.add_argument("--synthesize", action="store_true")
@@ -370,7 +447,7 @@ def build_parser() -> argparse.ArgumentParser:
     ab.set_defaults(func=_cmd_ask_best)
 
     bd = sub.add_parser("build", help="delegate a real build to a lane in a throwaway worktree → "
-                                      "diff (your repo is NEVER modified)")
+                                      "diff (repo untouched unless --apply)")
     bd.add_argument("lane")
     bd.add_argument("task", nargs="+")
     bd.add_argument("--architect", default="",
@@ -378,6 +455,9 @@ def build_parser() -> argparse.ArgumentParser:
     bd.add_argument("--model", default="")
     bd.add_argument("--cwd", default="")
     bd.add_argument("--timeout", type=int, default=None)
+    bd.add_argument("--apply", action="store_true",
+                    help="apply the diff to your repo as unstaged changes (git apply --check "
+                         "first; a conflict applies nothing)")
     bd.set_defaults(func=_cmd_build)
 
     for nm, fn, h in (("review-diff", _cmd_review, "multi-model code review of a git diff"),

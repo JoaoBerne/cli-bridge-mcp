@@ -792,7 +792,12 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                     "properties": {
                         "task": {"type": "string", "description": "What the agent should build."},
                         "lane": {"type": "string", "enum": [ln.key for ln in build_lanes],
-                                 "description": "The build-capable lane that does the work."},
+                                 "description": "The build-capable lane that does the work "
+                                 "(empty = the first free build-capable lane, router order)."},
+                        "apply": {"type": "boolean",
+                                  "description": "isolated: apply the resulting diff to YOUR repo "
+                                  "as unstaged changes (git apply --check first — a conflict "
+                                  "applies NOTHING). Default false: review the diff yourself."},
                         "mode": {"type": "string", "enum": ["isolated", "direct"],
                                  "description": "isolated (default, safe diff) or direct (writes "
                                  "real files in the zone)."},
@@ -846,7 +851,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                         "timeout_s": {"type": "integer",
                                       "description": f"Timeout (max {MAX_TIMEOUT_S})."},
                     },
-                    "required": ["task", "lane"],
+                    "required": ["task"],
                 },
                 annotations=_ann(readOnlyHint=False, openWorldHint=True,
                                  destructiveHint=True),   # direct mode writes the real repo
@@ -1845,10 +1850,14 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
 
     if name in ("ask_build", "ask_build_isolated"):
         key = _str(args, "lane")
-        lane = _lane_by_key(key, lanes)
+        if key:
+            lane = _lane_by_key(key, lanes)
+        else:                                        # no lane named → first free build-capable
+            lane = next((ln for ln in _ask_all_targets(lanes, False) if "agent" in ln.caps), None)
         if not lane:
-            return [TextContent(type="text", text=(
-                f"[error] no such lane: {key or '(none)'}. Pass a build-capable `lane`."))]
+            msg = (f"[error] no such lane: {key}." if key else
+                   "[error] no free build-capable lane available.")
+            return [TextContent(type="text", text=msg + " Pass a build-capable `lane`.")]
         if "agent" not in lane.caps:
             return [TextContent(type="text", text=(
                 f"[error] lane '{key}' has no build/write mode."))]
