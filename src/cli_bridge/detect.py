@@ -1,15 +1,15 @@
 """CLI detection — only expose lanes whose binary actually exists on this machine."""
 from __future__ import annotations
 
-import shutil
-
 from . import config
-from .lanes import LaneSpec
+from .lanes import LaneSpec, which_path
 
 
 def is_installed(lane: LaneSpec) -> bool:
     # Dry-run mode reports every lane installed so the whole tool is explorable with no CLIs.
-    return True if config.mock() else shutil.which(lane.bin) is not None
+    # which_path also searches the usual install dirs — GUI MCP hosts (Claude Desktop,
+    # Hermes Desktop, …) run with a minimal PATH that misses Homebrew/npm/user bins.
+    return True if config.mock() else which_path(lane.bin) is not None
 
 
 def installed_lanes(lanes: list[LaneSpec]) -> list[LaneSpec]:

@@ -271,6 +271,16 @@ hand. Point the host at the same command:
   ```bash
   claude mcp add cli-bridge -- uvx cli-bridge-mcp
   ```
+- **Desktop apps — Claude Desktop, Hermes Desktop, …** cli-bridge is a plain stdio MCP
+  server, so any desktop MCP client runs it:
+  - **Claude Desktop**: Settings → Developer → Edit Config (`claude_desktop_config.json`),
+    add the `mcpServers` block below, restart the app.
+  - **Hermes Desktop** (Nous Research): Settings → MCP servers → Add → command `uvx`,
+    args `cli-bridge-mcp`.
+  - GUI apps launch servers with a **minimal PATH** — cli-bridge compensates by also
+    searching the usual install dirs (`/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin`,
+    `~/.npm-global/bin`, …) for your CLIs. If a lane still shows "NOT on PATH" in `doctor`,
+    point it directly: `CLI_BRIDGE_<LANE>_BIN=/full/path/to/cli` in the server's `env`.
 - **Any other host** (Codex, Cursor, VS Code, Zed, …) — add to its MCP config
   (`~/.claude.json`, `.mcp.json`, or the host's equivalent):
   ```json
