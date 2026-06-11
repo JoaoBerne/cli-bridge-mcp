@@ -28,3 +28,4 @@ htmlcov/
 .idea/
 .vscode/
 TESTING.md
+uv.lock

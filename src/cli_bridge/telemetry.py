@@ -468,6 +468,22 @@ def _utc_day_start() -> float:
     return t - (g.tm_hour * 3600 + g.tm_min * 60 + g.tm_sec)
 
 
+def lane_runs_today(lane: str) -> int:
+    """Run count for one lane since UTC midnight. Returns 0 when telemetry is off or the
+    DB errors — the budget gate fails open, never blocking a spawn on a broken sqlite."""
+    conn = _connect()
+    if conn is None:
+        return 0
+    try:
+        with _LOCK:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM runs WHERE lane = ? AND started_at >= ?",
+                (lane, _utc_day_start())).fetchone()
+        return int(row[0] or 0)
+    except sqlite3.Error:
+        return 0
+
+
 def est_credits_today() -> float:
     """Total ESTIMATED paid credits spent since UTC midnight (for the hard budget cap)."""
     rep = usage_budget()
@@ -477,8 +493,9 @@ def est_credits_today() -> float:
 
 
 def usage_budget() -> dict:
-    """Per-lane runs since UTC midnight vs an optional CLI_BRIDGE_<LANE>_DAILY_LIMIT, plus the
-    estimated credits spent today. All token/credit figures are estimates."""
+    """Per-lane runs since UTC midnight vs an optional CLI_BRIDGE_<LANE>_DAILY_LIMIT (enforced
+    at spawn by budget.check_spawn once reached), plus the estimated credits spent today. All
+    token/credit figures are estimates."""
     conn = _connect()
     if conn is None:
         return {"enabled": False}
@@ -497,7 +514,7 @@ def usage_budget() -> dict:
         tok = int(((inc or 0) + (outc or 0)) / cpt)
         lanes.append({
             "lane": lane, "runs_today": n, "daily_limit": limit,
-            "over_limit": bool(limit is not None and n > limit),
+            "over_limit": bool(limit is not None and n >= limit),
             "est_tokens_today": tok, "est_credits_today": _est_credits(lane, tok),
         })
     return {"enabled": True, "day_start_utc": start, "by_lane": lanes}

@@ -4,6 +4,30 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project aims for
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed (budget coherence: one enforced spend guard)
+- **`CLI_BRIDGE_<LANE>_DAILY_LIMIT` is now ENFORCED at spawn** (it was reported by
+  `usage_budget` but never applied). The run limit is the universal cap: exact (runs are
+  counted, not estimated), zero credit math, works for every lane including free quotas.
+- **The daily credit cap now gates any credit-spending lane**, not just `paid` ones: a
+  `limited` lane with a `CREDITS_PER_1K` rate spends credits, so the cap sees it.
+- Both gates live in one chokepoint (`budget.check_spawn`) every delegate spawn passes
+  through; they fail open if local telemetry is unavailable (a broken sqlite never takes
+  the council down).
+- `doctor` now annotates each lane's cost tier with its real source (`default` / `set by
+  you: config file` / `set by you: host env — wins over the config file`), shows enforced
+  daily limits with today's count, and flags a user-set `cost=free` that predates a
+  vendor sunset.
+- `usage_budget` flags "LIMIT REACHED (further spawns blocked today)" at the limit
+  (previously only past it, and nothing was blocked anyway).
+
+### Added
+- **`docs/BUDGET.md`** — the whole cost model on one page: the three layers
+  (tiers / profile / caps), exactly what is enforced where, the estimation pipeline and
+  its honesty caveats, profile semantics incl. saver's fan-out-vs-direct rule,
+  config precedence (host env > config file > default), units cheat-sheet, recipes.
+
 ## [0.1.1] - 2026-06-11
 
 ### Changed (cost-truth: verified-audit fixes)
