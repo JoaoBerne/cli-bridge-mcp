@@ -134,8 +134,8 @@ _ENV_TEMPLATE = """# cli-bridge configuration (source this, or set in your MCP s
 # CLI_BRIDGE_<LANE>_COST=free|limited|paid
 # CLI_BRIDGE_<LANE>_ENABLED=false
 # CLI_BRIDGE_<LANE>_MODEL=<model-id>
-# CLI_BRIDGE_<LANE>_CREDITS_PER_1K=<credits per 1k tokens>   # for usage estimates
-# CLI_BRIDGE_<LANE>_DAILY_LIMIT=<max runs/day>
+# CLI_BRIDGE_<LANE>_CREDITS_PER_1K=<credits per 1k tokens>   # makes the credit cap enforceable
+# CLI_BRIDGE_<LANE>_DAILY_LIMIT=<max runs/day>   # ENFORCED at spawn — simplest cap, any lane
 # CLI_BRIDGE_<LANE>_MIN_INTERVAL_S=2   # anti-burst spawn pacing (free tier that rate-limits)
 # Behaviour
 CLI_BRIDGE_TERSE={terse}        # off|lite|full|ultra

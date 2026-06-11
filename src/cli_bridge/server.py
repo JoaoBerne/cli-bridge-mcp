@@ -33,6 +33,7 @@ from mcp.types import (
 )
 
 from . import (
+    budget,
     buildloop,
     config,
     conversations,
@@ -560,8 +561,8 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
     ))
     tools.append(Tool(
         name="usage_budget",
-        description="Per-lane runs since UTC midnight vs an optional CLI_BRIDGE_<LANE>_DAILY_LIMIT, "
-                    "plus estimated tokens/credits spent today. Flags lanes over their limit. "
+        description="Per-lane runs since UTC midnight vs an optional CLI_BRIDGE_<LANE>_DAILY_LIMIT "
+                    "(ENFORCED at spawn once reached), plus estimated tokens/credits spent today. "
                     "Estimates only.",
         inputSchema={"type": "object", "properties": {}},
         annotations=_ann(readOnlyHint=True, destructiveHint=False),
@@ -1518,15 +1519,11 @@ async def _run_lane(lane: LaneSpec, args: dict, *, tool: str = "ask",
             f"{config.max_depth()}); refusing to spawn another to avoid recursion. Raise "
             "CLI_BRIDGE_MAX_DEPTH only if you deliberately want nested delegation."),
             "blocked")
-    # Hard budget cap: refuse a PAID lane once today's estimated spend hits the ceiling.
-    cap = config.daily_credit_cap()
-    if cap > 0 and lane.is_paid:
-        spent = telemetry.est_credits_today()
-        if spent >= cap:
-            return runner.RunResult(False, (
-                f"daily credit cap reached (~{spent}/{cap} est. credits today); paid lane "
-                f"'{lane.key}' refused. Raise CLI_BRIDGE_DAILY_CREDIT_CAP or use a free lane."),
-                "blocked")
+    # Spend guard (budget.py): the one pre-spawn chokepoint — per-lane daily run limit
+    # (any lane) + daily credit cap (paid or CREDITS_PER_1K-rated lanes).
+    block_reason = budget.check_spawn(lane)
+    if block_reason:
+        return runner.RunResult(False, block_reason, "blocked")
     agent = _str(args, "agent").lower()
     if agent not in {"", "plan", "build"}:    # never let a hallucinated value enable writes
         agent = "plan"
@@ -2290,9 +2287,10 @@ def _render_budget(rep: dict) -> str:
         limit = (f"{r['runs_today']}/{r['daily_limit']}" if r["daily_limit"] is not None
                  else f"{r['runs_today']} (no limit set)")
         cred = f", ~{r['est_credits_today']} credits" if r.get("est_credits_today") is not None else ""
-        flag = "  ⚠️ OVER LIMIT" if r["over_limit"] else ""
+        flag = "  ⚠️ LIMIT REACHED (further spawns blocked today)" if r["over_limit"] else ""
         lines.append(f"- **{r['lane']}**: {limit} runs, ~{r['est_tokens_today']} tok{cred}{flag}")
-    lines.append("\n_Set CLI_BRIDGE_<LANE>_DAILY_LIMIT and _CREDITS_PER_1K to track budgets._")
+    lines.append("\n_CLI_BRIDGE_<LANE>_DAILY_LIMIT is enforced at spawn (any lane). "
+                 "_CREDITS_PER_1K makes CLI_BRIDGE_DAILY_CREDIT_CAP enforceable — docs/BUDGET.md._")
     return "\n".join(lines)
 
 
@@ -2398,7 +2396,13 @@ def _doctor(host: str) -> str:
         hidden = ((" - hidden (this is the host)" if config.hide_host()
                    else " - this is the host (shown; never in fan-out)")
                   if _is_host(lane, host) else "")
-        src = "set by you" if lane.cost_is_configured else "default — yours may differ"
+        cost_env_key = f"CLI_BRIDGE_{lane.key.upper()}_COST"
+        if not lane.cost_is_configured:
+            src = "default — yours may differ"
+        elif cost_env_key in config.ENV_PRESET_KEYS:
+            src = "set by you: host env — wins over the config file"
+        else:
+            src = "set by you: config file"
         paid = f" - {lane.cost_label} ({src})"
         exp = " - experimental" if lane.experimental else ""
         model = lane.model_for("")
@@ -2416,6 +2420,10 @@ def _doctor(host: str) -> str:
                              f"degrades to 'limited' and the spawn prefers `{alts}` over "
                              f"`{lane.bin_default}`. Set CLI_BRIDGE_{lane.key.upper()}_COST "
                              "to override._")
+                if lane.cost_is_configured and lane.cost_label == "free":
+                    lines.append(f"  - ⚠️ _your CLI_BRIDGE_{lane.key.upper()}_COST=free may "
+                                 "predate this sunset — re-check that the free tier still "
+                                 "exists on your plan._")
             elif left is not None and left <= 14:
                 lines.append(f"  - ⚠️ _free tier sunsets {lane.sunset} (in {left} day"
                              f"{'s' if left != 1 else ''}) — after that the lane degrades to "
@@ -2424,6 +2432,10 @@ def _doctor(host: str) -> str:
             lines.append(f"  - _install: {lane.install_hint}_")
         if installed and lane.cost_note_effective:
             lines.append(f"  - _{lane.cost_note_effective}_")
+        daily_limit = config.lane_env_int(lane.key, "DAILY_LIMIT")
+        if installed and daily_limit is not None:
+            lines.append(f"  - _daily run limit: {telemetry.lane_runs_today(lane.key)}/"
+                         f"{daily_limit} today (UTC; enforced at spawn)_")
         if not lane.is_paid and lanes_mod.is_paid_opencode_model(model):
             lines.append(f"  - ⚠️ **cost mismatch**: lane is '{lane.cost_label}' but its model "
                          f"`{model}` spends money/credits — set `CLI_BRIDGE_"
@@ -2436,7 +2448,8 @@ def _doctor(host: str) -> str:
                      "\"Authorization: Bearer {{MY_KEY}}\"` keeps the secret out of argv — "
                      "see examples/free-apis.json.")
     lines.append("\nPer-lane config (your plan): CLI_BRIDGE_<LANE>_COST=free|limited|paid, "
-                 "_ENABLED=false, _BIN=<path>, _MODEL=<id>.")
+                 "_ENABLED=false, _BIN=<path>, _MODEL=<id>, _DAILY_LIMIT=<runs/day> "
+                 "(enforced at spawn — the simplest cap, works for every lane).")
     lines.append("Add your own CLI via a JSON file in CLI_BRIDGE_LANES_FILE - no code changes.")
     return "\n".join(lines)
 
