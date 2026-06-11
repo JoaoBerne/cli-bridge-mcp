@@ -7,6 +7,10 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Question echo on delegation results** (`CLI_BRIDGE_ECHO_TASK`, on by default): every
+  `ask_<lane>` / `ask_all` answer now starts with `▶ <lane> · <model> — asked: "<question>"`,
+  so re-reading the conversation in any CLI shows who was asked what right next to each
+  answer — no scrolling back to the tool-call arguments.
 - **Claude Code plugin** (in-repo marketplace): `claude plugin marketplace add
   JoaoBerne/cli-bridge-mcp` + `claude plugin install cli-bridge@cli-bridge-mcp` wires the
   MCP server (via `uvx cli-bridge-mcp`) and ships five skills — `/cli-bridge:council`,
