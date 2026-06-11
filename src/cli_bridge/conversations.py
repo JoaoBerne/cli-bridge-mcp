@@ -130,12 +130,29 @@ def native_step(ns: dict, conversation_id: str, lane_key: str) -> tuple[list[str
     mint one ourselves (mode=mint) or spawn with the CLI's officially-flagged verbose output
     and capture it after the run (mode=capture)."""
     sid, last = telemetry.convo_session(conversation_id, lane_key)
+    if sid and _fold_overlaps(conversation_id, last):
+        # Compaction folded turns this lane's native session already holds verbatim — resuming
+        # would hand it the summary AGAIN (duplicate context). Drop the handle: this turn runs
+        # on a fresh session backed by a full replay (summary included exactly once).
+        telemetry.convo_session_drop(conversation_id, lane_key)
+        sid, last = "", 0
     if sid:
         return [a.replace("{sid}", sid) for a in ns.get("resume", [])], sid, last
     if ns.get("mode") == "mint":
         sid = str(uuid.uuid4())
         return [a.replace("{sid}", sid) for a in ns.get("first", [])], sid, 0
     return list(ns.get("spawn", [])), "", 0
+
+
+def _fold_overlaps(conversation_id: str, last_seen: int) -> bool:
+    """True when the thread's leading summary turn folds turns the native session has already
+    seen verbatim (summary turn_number > last_seen ≥ a folded turn): the delta would duplicate
+    context the vendor session already holds."""
+    if not last_seen:
+        return False
+    turns = telemetry.convo_turns(conversation_id)
+    return bool(turns) and turns[0].get("role") == "summary" \
+        and int(turns[0].get("turn_number", 0)) > last_seen
 
 
 def native_commit(ns: dict, conversation_id: str, lane_key: str, sid: str,

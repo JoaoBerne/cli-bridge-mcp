@@ -289,8 +289,11 @@ def _gemini_ask(task, model, effort, agent, bin=""):
 
 def _mistral_ask(task, model, effort, agent, bin=""):
     # vibe: prompt before --agent; --trust skips the per-dir trust prompt. accept-edits agent
-    # auto-applies edits for build; plan stays read-only. Model isn't a flag — see _mistral_env.
-    ag = "accept-edits" if _is_build(agent) else "plan"
+    # auto-applies edits for build. Read-only asks use the DEFAULT agent, not 'plan': vibe's
+    # plan agent is built to write a plan FILE ("Plan written to … Switch modes to execute")
+    # instead of answering, while default in -p enforces a read-only policy anyway (verified
+    # live: a write attempt is refused with "Current policy: read-only").
+    ag = "accept-edits" if _is_build(agent) else "default"
     return ["-p", task, "--agent", ag, "--trust"]
 
 

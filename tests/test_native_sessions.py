@@ -134,3 +134,50 @@ def test_native_argv_inserted_before_task():
     extra = ["--resume", "abc"]
     argv = argv[:-1] + extra + argv[-1:]
     assert argv == ["echo", "--print", "--resume", "abc", "the task"]
+
+
+def test_fold_overlap_invalidates_native_handle(monkeypatch):
+    # Lane's native session saw turns 1..2; compaction then folded 1..4 into a summary turn
+    # (turn_number=4 > last_seen=2). Resuming would duplicate context — handle must drop.
+    lane = LaneSpec("claude", "Claude", "echo", lambda *a: [], native_session=MINT)
+    seen = []
+
+    async def fake_run_lane(ln, args, *, tool="ask", terse=True):
+        seen.append(args.get("_native_argv"))
+        return RunResult(True, "answer", "ok")
+    monkeypatch.setattr(server, "_run_lane", fake_run_lane)
+
+    _res, cid = _convo(lane, {"task": "t1", "conversation": "new"})     # turns 1-2, last_seen=2
+    for i in range(3, 5):
+        telemetry.convo_append(cid, "ollama", "user", f"q{i}")
+        telemetry.convo_append(cid, "ollama", "assistant", f"a{i}")
+    assert telemetry.convo_compact(cid, 4, "FOLDED 1-4", "ollama")      # fold past last_seen
+    _convo(lane, {"task": "t2", "conversation": cid})
+    assert seen[1][0] == "--session-id"            # re-minted, NOT --resume
+    sid1 = seen[0][1]
+    assert seen[1][1] != sid1                      # fresh session
+
+
+def test_fold_behind_last_seen_keeps_handle(monkeypatch):
+    # Fold point ≤ last_seen: the lane already saw everything folded — resume stays valid.
+    lane = LaneSpec("claude", "Claude", "echo", lambda *a: [], native_session=MINT)
+    seen = []
+
+    async def fake_run_lane(ln, args, *, tool="ask", terse=True):
+        seen.append(args.get("_native_argv"))
+        return RunResult(True, "answer", "ok")
+    monkeypatch.setattr(server, "_run_lane", fake_run_lane)
+
+    _res, cid = _convo(lane, {"task": "t1", "conversation": "new"})
+    _convo(lane, {"task": "t2", "conversation": cid})                   # last_seen=4
+    assert telemetry.convo_compact(cid, 2, "FOLDED 1-2", "claude")      # fold ≤ last_seen
+    _convo(lane, {"task": "t3", "conversation": cid})
+    assert seen[2][0] == "--resume"                # handle kept
+
+
+def test_prune_cascades_native_sessions(monkeypatch):
+    monkeypatch.setenv("CLI_BRIDGE_CONVO_MAX_STORED", "1")
+    telemetry.convo_append("old-thread", "claude", "user", "x")
+    telemetry.convo_session_set("old-thread", "claude", "uuid-old", 1)
+    telemetry.convo_append("new-thread", "claude", "user", "y")        # prunes old-thread
+    assert telemetry.convo_session("old-thread", "claude") == ("", 0)  # cascaded

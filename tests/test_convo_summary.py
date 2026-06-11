@@ -130,3 +130,24 @@ def test_summary_disabled_by_env(monkeypatch):
         _res, cid = asyncio.run(server._run_lane_maybe_convo(
             lane, {"task": f"q{i} " + "w" * 500, "conversation": cid or "new"}))
     assert "convo_summary" not in calls
+
+
+def test_failed_summarizer_not_retried_every_turn(monkeypatch):
+    monkeypatch.setenv("CLI_BRIDGE_CONVO_MAX_CHARS", "3000")
+    server._COMPACT_FAILED_AT.clear()
+    lane = LaneSpec("opencode", "Opencode", "echo", lambda *a: [])
+    summary_calls = []
+
+    async def fake_run_lane(ln, args, *, tool="ask", terse=True):
+        if tool == "convo_summary":
+            summary_calls.append(1)
+            return RunResult(False, "", "empty")
+        return RunResult(True, "answer " + "z" * 500, "ok")
+    monkeypatch.setattr(server, "_run_lane", fake_run_lane)
+
+    cid = ""
+    for i in range(10):
+        _res, cid = asyncio.run(server._run_lane_maybe_convo(
+            lane, {"task": f"q{i} " + "w" * 500, "conversation": cid or "new"}))
+    assert len(summary_calls) == 1                 # one failure → cooldown, no per-turn retry
+    server._COMPACT_FAILED_AT.clear()
