@@ -98,7 +98,7 @@ Borrow the one your host lacks (it must be installed + logged in):
 | **Vision** | Gemini (`images=[…]`) ⚗️ | analyse a screenshot or diagram |
 | **A free second opinion** | Gemini (free daily tier) · opencode · Ollama (local, $0) | a $0 cross-check |
 | **Generated files** | any build lane → artifact-return | get a chart / PDF / diagram back **by path** |
-| **Video** ⚗️ | Gemini (Veo) · Grok (Imagine) — *if your installed CLI exposes it* | you need a generated clip |
+| **Video** ⚗️ | Grok (Imagine) — *if your installed CLI exposes it* (Veo isn't exposed by any official Gemini CLI extension) | you need a generated clip |
 
 ```
 ask_build(lane="gpt", task="generate a 1200×630 social card to assets/card.png", zone="assets")   # Codex image → file by path, no API key (paid ChatGPT plan)
@@ -169,7 +169,7 @@ There's also a **human CLI** — `cli-bridge doctor|ask|build|review-diff|eval|�
 ## What you actually get when you combine them
 
 One assistant whose ceiling on **every axis is the ecosystem's best** — not the tool you opened this
-morning: code with the strongest model, read 1–2M tokens when yours is too short, answer with fresh
+morning: code with the strongest model, read ~1M tokens when yours is too short, answer with fresh
 knowledge past a stale cutoff, generate images/video, see screenshots, and fall back to a free/local
 lane when you're capped — spread across the subscriptions you already pay for.
 
@@ -287,8 +287,8 @@ second opinion from gpt"* or *"ask gemini to read ./src and find the bug"*.
 
 ### Lanes
 
-**Built-in:** Claude Code, Codex, Gemini (+ Antigravity `agy`), opencode, **Ollama (local models, $0,
-offline)**, Qwen Code, Copilot, Grok.
+**Built-in:** Claude Code, Codex, Gemini (+ Antigravity `agy`), Mistral (Vibe), opencode, **Ollama
+(local models, $0, offline)**, Qwen Code, Copilot, Grok.
 
 **Local runtimes** beyond Ollama — **LM Studio · MLX · llama.cpp** — ship as zero-code recipes:
 point `CLI_BRIDGE_LANES_FILE` at [`examples/lmstudio.lane.json`](examples/lmstudio.lane.json),

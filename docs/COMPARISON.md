@@ -12,9 +12,9 @@ vendor optimised a *different* axis — which is exactly why combining them pays
 | CLI (lane) | Best at / what it does uniquely | Real limit |
 |---|---|---|
 | **Claude Code** (`claude`) | Strongest tooled reasoning; a programmable platform — subagents (parallel delegation), hooks (deterministic enforcement), reusable skills | subagents are **same-family** (self-confirmation), and tied to one machine / one checkout |
-| **Codex** (`gpt`) | Image generation (`gpt-image-2`, **no API key** — paid ChatGPT plan, not Free); the strongest sandboxing (container by default) | smaller context (~400K) ⚗️ |
-| **Gemini** (`gemini` / `agy`) | 1M-token context; Google-Search grounding; web fetch; free 1000 req/day; image (Nano Banana) + video (Veo) ⚗️ | personal CLI moves to **Antigravity on 2026-06-18** (the `agy` lane already covers it) |
-| **Grok** (`grok`) ⚗️ | Real-time data from X + the web (native, not an add-on); context up to 2M; video (Imagine) | CLI is **beta** (SuperGrok Heavy) |
+| **Codex** (`gpt`) | Image generation (`gpt-image-2`, **no API key** — paid ChatGPT plan, not Free); the strongest sandboxing (container by default); ~1M-token context (GPT‑5.5 default since 2026-04) | quotas shared with your ChatGPT plan |
+| **Gemini** (`gemini` / `agy`) | 1M-token context; Google-Search grounding; web fetch; free 1000 req/day; image gen via the official Nano Banana extension (needs a separate Gemini API key) ⚗️ | personal CLI moves to **Antigravity on 2026-06-18** (the `agy` lane already covers it); no official video extension (Veo = paid API only) |
+| **Grok** (`grok`) ⚗️ | Real-time X + web data via xAI's server-side search tools (must be enabled); context up to 1M (grok‑4.3) — the CLI's grok‑build‑0.1 is 256k; video (Imagine) | CLI is **beta** (needs SuperGrok or X Premium+; no free tier) |
 | **Qwen Code** (`qwen`) ⚗️ | Open source; self-hostable locally via Ollama (offline, $0); strong agentic coding | below the top proprietary models on the hardest tasks |
 | **opencode** (`opencode`) | Terminal-first, open source; 75+ providers via Models.dev, local models, LSP, multi-session — the most model-flexible | no model of its own; lost the Claude Pro/Max login after a dispute with Anthropic |
 | **Ollama** (`ollama`) | Fully local, $0, offline, private | quality + speed bounded by your own hardware |
@@ -25,9 +25,9 @@ The capability envelope becomes the **union**. You drive a single assistant whos
 axis is the ecosystem's best — not the limit of whichever tool you happened to open this morning:
 
 - **code** with the strongest model for the task (route to Claude / Codex / Qwen),
-- **read 1–2M tokens** (Grok / Gemini) when your own context is too short,
-- answer with **fresh knowledge** (Gemini's Search grounding, Grok's live X/web) past a stale cutoff,
-- **generate** images (Codex / Gemini) and video (Gemini / Grok ⚗️), **see** screenshots (Gemini),
+- **read ~1M tokens** (Gemini / Codex / Grok) when your own context is too short,
+- answer with **fresh knowledge** (Gemini's Search grounding, Grok's X/web search tools) past a stale cutoff,
+- **generate** images (Codex; Gemini via extension) and video (Grok Imagine ⚗️), **see** screenshots (Gemini),
 - fall back to a **free or local** lane (Gemini free tier, Qwen / Ollama) when you're capped or cost-bound,
 - **spread** the load across the subscriptions you already pay for — no single quota wall.
 
@@ -56,7 +56,7 @@ cli-bridge unites **capabilities, not mind**. Be clear-eyed about what it is *no
 
 The ⚗️ lanes are **not run live by cli-bridge's test suite**, so they stay flagged experimental. The
 headless invocation each lane builds was, however, **verified against the vendor's official docs
-(2026-06)** — it's the documented non-interactive command, not a guess. Run `cli-bridge doctor deep`
+(2026-06)** — it's the documented non-interactive command, not a guess. Run `cli-bridge doctor --deep`
 to check the flags against the installed CLI's `--help` and warn on drift.
 
 | Lane | Invocation cli-bridge builds | Verified against (2026-06) |
