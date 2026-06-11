@@ -1,0 +1,16 @@
+{
+  "name": "cli-bridge",
+  "displayName": "cli-bridge — council of AI CLIs",
+  "description": "Consult your already-installed AI CLIs (Gemini, GPT/Codex, Mistral, opencode, Ollama…) as a council: second opinions, multi-model review, safe delegated builds. Ban-safe (spawns official CLIs, no API keys, no token extraction), with enforced spend caps.",
+  "author": { "name": "JoaoBerné" },
+  "homepage": "https://github.com/JoaoBerne/cli-bridge-mcp",
+  "repository": "https://github.com/JoaoBerne/cli-bridge-mcp",
+  "license": "MIT",
+  "keywords": ["mcp", "multi-model", "council", "code-review", "delegation"],
+  "mcpServers": {
+    "cli-bridge": {
+      "command": "uvx",
+      "args": ["cli-bridge-mcp"]
+    }
+  }
+}

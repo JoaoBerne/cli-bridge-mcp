@@ -1,0 +1,17 @@
+{
+  "name": "cli-bridge-mcp",
+  "owner": { "name": "JoaoBerné" },
+  "description": "Consult a council of AI CLIs (Gemini, GPT, Mistral, opencode, Ollama…) — ban-safe, no API keys, budget-capped.",
+  "plugins": [
+    {
+      "name": "cli-bridge",
+      "source": "./plugin",
+      "description": "Your already-installed AI CLIs as a council inside Claude Code: second opinions, multi-model code review, safe delegated builds (worktree → diff), enforced spend caps.",
+      "author": { "name": "JoaoBerné" },
+      "homepage": "https://github.com/JoaoBerne/cli-bridge-mcp",
+      "repository": "https://github.com/JoaoBerne/cli-bridge-mcp",
+      "license": "MIT",
+      "keywords": ["mcp", "multi-model", "council", "code-review", "delegation", "gemini", "gpt", "ollama"]
+    }
+  ]
+}

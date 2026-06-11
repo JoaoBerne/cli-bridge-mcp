@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Claude Code plugin** (in-repo marketplace): `claude plugin marketplace add
+  JoaoBerne/cli-bridge-mcp` + `claude plugin install cli-bridge@cli-bridge-mcp` wires the
+  MCP server (via `uvx cli-bridge-mcp`) and ships five skills — `/cli-bridge:council`,
+  `/cli-bridge:review`, `/cli-bridge:security`, `/cli-bridge:build`, `/cli-bridge:setup`.
+  Manifest validity is CI-tested (`tests/test_plugin_manifest.py`).
+
 ### Changed (budget coherence: one enforced spend guard)
 - **`CLI_BRIDGE_<LANE>_DAILY_LIMIT` is now ENFORCED at spawn** (it was reported by
   `usage_budget` but never applied). The run limit is the universal cap: exact (runs are
