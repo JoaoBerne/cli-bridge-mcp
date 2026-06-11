@@ -50,6 +50,9 @@ class LaneSpec:
     caps: frozenset[str] = field(default_factory=frozenset)        # {"model","effort","agent"}
     client_ids: frozenset[str] = field(default_factory=frozenset)  # MCP clientInfo.name == host
     bin_alts: tuple[str, ...] = ()        # fallback binaries if the default isn't on PATH
+    sunset: str = ""                      # ISO date the lane's free service dies (vendor-announced).
+                                          # Once passed: a 'free' default degrades to 'limited' and
+                                          # bin resolution prefers bin_alts (the successor CLI).
     experimental: bool = False            # flags not verified live — caller is warned
     install_hint: str = ""                # shown by doctor when the CLI isn't installed
     note: str = ""
@@ -63,14 +66,30 @@ class LaneSpec:
         env_key = self.key.upper().replace("-", "_")
         return os.environ.get(f"CLI_BRIDGE_{env_key}_{suffix}", "").strip()
 
+    def sunset_passed(self, today=None) -> bool:
+        """True once the vendor-announced sunset date for this lane's free service is reached.
+        `today` injectable for tests (same pattern as cost_facts_age_days)."""
+        if not self.sunset:
+            return False
+        from datetime import date
+        try:
+            return (today or date.today()) >= date.fromisoformat(self.sunset)
+        except ValueError:
+            return False
+
     @property
     def bin(self) -> str:
         """Explicit override wins; else the default, or an installed alternative
-        (so a `gemini` lane auto-uses `agy` when only Antigravity is installed)."""
+        (so a `gemini` lane auto-uses `agy` when only Antigravity is installed). After a
+        sunset the alternatives are preferred — the old binary may still be on PATH long
+        after its service died, and trying it first would spawn a dead CLI forever."""
         override = self._env("BIN")
         if override:
             return override
-        for cand in (self.bin_default, *self.bin_alts):
+        order = (self.bin_default, *self.bin_alts)
+        if self.bin_alts and self.sunset_passed():
+            order = (*self.bin_alts, self.bin_default)
+        for cand in order:
             if shutil.which(cand):
                 return cand
         return self.bin_default
@@ -89,7 +108,10 @@ class LaneSpec:
             return "limited"
         if cost in {"free", "0"}:
             return "free"
-        return "paid" if self.paid else self.cost_default
+        default = "paid" if self.paid else self.cost_default
+        if default == "free" and self.sunset_passed():
+            return "limited"    # the free tier is dead — keep it out of default fan-out
+        return default
 
     @property
     def cost_note_effective(self) -> str:
@@ -427,6 +449,7 @@ BUILTIN_LANES: list[LaneSpec] = [
                        "2026-06-18 (official sunset) — migrate to Antigravity (`agy`); this lane "
                        "falls back to `agy` automatically when installed.",
              help_args=["--help"], caps=frozenset({"model", "agent"}), bin_alts=("agy",),
+             sunset="2026-06-18",   # free personal tier dies; past this, prefer agy + degrade cost
              probe_flags=("-p",),   # common to gemini & agy; -m differs by binary, so not probed
              client_ids=frozenset({"gemini-cli-mcp-client", "gemini", "antigravity"}),
              install_hint="npm i -g @google/gemini-cli  (free tier; then log in)",

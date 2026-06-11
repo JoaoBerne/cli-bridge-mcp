@@ -2400,6 +2400,22 @@ def _doctor(host: str) -> str:
         model = lane.model_for("")
         default = f" - default model: {model}" if model else ""
         lines.append(f"- **{lane.key}** ({lane.bin}) - {mark}{paid}{exp}{hidden}{default}")
+        if installed and lane.sunset:
+            from datetime import date
+            try:
+                left = (date.fromisoformat(lane.sunset) - date.today()).days
+            except ValueError:
+                left = None
+            if lane.sunset_passed():
+                alts = " / ".join(lane.bin_alts) or "none"
+                lines.append(f"  - ⚠️ _free tier SUNSET {lane.sunset}: a 'free' default now "
+                             f"degrades to 'limited' and the spawn prefers `{alts}` over "
+                             f"`{lane.bin_default}`. Set CLI_BRIDGE_{lane.key.upper()}_COST "
+                             "to override._")
+            elif left is not None and left <= 14:
+                lines.append(f"  - ⚠️ _free tier sunsets {lane.sunset} (in {left} day"
+                             f"{'s' if left != 1 else ''}) — after that the lane degrades to "
+                             "'limited' and prefers its successor binary automatically._")
         if not installed and lane.install_hint:
             lines.append(f"  - _install: {lane.install_hint}_")
         if installed and lane.cost_note_effective:

@@ -322,3 +322,38 @@ def test_custom_lane_rejects_reserved_key(tmp_path, monkeypatch):
     cfg.write_text(json.dumps([{"key": "all", "ask": ["{task}"]}]))
     monkeypatch.setenv("CLI_BRIDGE_LANES_FILE", str(cfg))
     assert "all" not in {ln.key for ln in lanes.all_lanes()}
+
+
+# ── sunset gating (vendor-announced free-tier death dates) ─────────────────────────────────
+
+def _sunset_lane(sunset, **kw):
+    from cli_bridge.lanes import LaneSpec
+    return LaneSpec("sun", "Sun", "oldbin", lambda *a: [], sunset=sunset, **kw)
+
+
+def test_sunset_passed_boundaries():
+    from datetime import date
+    ln = _sunset_lane("2026-06-18")
+    assert ln.sunset_passed(today=date(2026, 6, 17)) is False
+    assert ln.sunset_passed(today=date(2026, 6, 18)) is True   # on the day = dead
+    assert _sunset_lane("").sunset_passed() is False
+    assert _sunset_lane("not-a-date").sunset_passed() is False  # malformed = never trips
+
+
+def test_sunset_degrades_free_default_to_limited(monkeypatch):
+    monkeypatch.delenv("CLI_BRIDGE_SUN_COST", raising=False)
+    dead = _sunset_lane("2000-01-01", cost_default="free")
+    assert dead.cost_label == "limited"               # free tier is gone -> out of fan-out
+    alive = _sunset_lane("2999-01-01", cost_default="free")
+    assert alive.cost_label == "free"
+    monkeypatch.setenv("CLI_BRIDGE_SUN_COST", "free")  # user override always wins
+    assert dead.cost_label == "free"
+
+
+def test_sunset_prefers_alt_binary(monkeypatch):
+    import shutil
+    monkeypatch.setattr(shutil, "which", lambda c: f"/bin/{c}" if c in ("oldbin", "newbin") else None)
+    dead = _sunset_lane("2000-01-01", bin_alts=("newbin",))
+    assert dead.bin == "newbin"                        # successor first once the service died
+    alive = _sunset_lane("2999-01-01", bin_alts=("newbin",))
+    assert alive.bin == "oldbin"                       # default order before the sunset
