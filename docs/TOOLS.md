@@ -50,7 +50,7 @@ of success is *tested*, not trusted.
 | `rate_lane` / `route_plan` | Score a lane 1–5 for a mode so `ask_best` learns your stack / preview the order a cascade would try. | You want the router to improve over time. |
 | `lane_stats` / `reset_lane_state` | Per-lane health, cooldowns, and the "earn their seat" jury signal / clear a lane's counters. | A lane is misbehaving, or you want the seat report. |
 | `set_lane_cost` | Record what a lane costs *you* ("Codex is free on my plan") — persisted, no `setup` needed. | You tell it a pricing fact in passing. |
-| `doctor` / `setup` | Detect installed CLIs + resolved paths; `doctor deep` validates each lane against its own `--help` on your machine. | First run, or when a lane breaks. |
+| `doctor` / `setup` | Detect installed CLIs + resolved paths; `doctor` with `deep=true` (CLI: `doctor --deep`) validates each lane against its own `--help` on your machine. | First run, or when a lane breaks. |
 | `list_models` / `list_<lane>_models` | List a lane's models where the CLI exposes them. | You want to pick a specific model. |
 
 There's also a **human CLI** (`cli-bridge doctor|ask|ask-all|ask-best|build|review-diff|eval|…`) — the

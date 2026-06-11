@@ -107,7 +107,7 @@ ask_gemini(task="what's the current recommended API for <lib>? check the latest 
 ask_gemini(task="what's wrong in this UI?", images=["screenshot.png"])                             # vision (experimental)
 ```
 
-⚗️ = experimental / depends on the installed CLI's current build (e.g. Grok Build is beta) — verify with `doctor deep`.
+⚗️ = experimental / depends on the installed CLI's current build (e.g. Grok Build is beta) — verify with `doctor --deep`.
 
 ### Never stop working when you hit a limit
 When your main subscription caps out mid-task. `ask_cascade` falls through to another lane you already
@@ -189,7 +189,9 @@ conduct specialists, you don't get one brain with every power.
 - 💸 **Cost-safe defaults you tune to your plan.** Out of the box `ask_all` / `ask_cascade` build a
   *free* council and never touch paid quota unless you ask. Each lane ships a tier sourced from the
   vendor's published plans (dated in [docs/COSTS.md](docs/COSTS.md), **never detected from your
-  account**); override per lane with `CLI_BRIDGE_<LANE>_COST=free|limited|paid`.
+  account**); override per lane with `CLI_BRIDGE_<LANE>_COST=free|limited|paid`. Two caps are
+  **enforced at spawn** — `CLI_BRIDGE_<LANE>_DAILY_LIMIT` (runs/day, any lane) and
+  `CLI_BRIDGE_DAILY_CREDIT_CAP` — full model in [docs/BUDGET.md](docs/BUDGET.md).
 - 🔌 **Works from any host.** Claude Code, Codex, opencode, Cursor, VS Code (Cline/Continue), Zed —
   anything that speaks MCP over stdio. The host's own lane is kept out of fan-out; hide it with
   `CLI_BRIDGE_HIDE_HOST=1`. Even a **local model can be the host** — see
@@ -238,8 +240,8 @@ working directory, and hands the answer back.
 
 <img src="https://raw.githubusercontent.com/JoaoBerne/cli-bridge-mcp/main/assets/demo.gif" width="860" alt="cli-bridge security-review demo: a committed auth bypass is caught by a cross-vendor council, merged into one severity-ranked report, $0 on free lanes">
 
-_Real run (2.2× speed): the Verify lever — `security-review` fans OWASP roles across free models in
-parallel (claude/gpt/opencode/ollama here); they flag a committed auth bypass **blocker**, and
+_Real run, real-time: the Verify lever — `security-review` fans OWASP roles across several models
+in parallel (claude/gpt/opencode/ollama here); they flag a committed auth bypass **blocker**, and
 `usage` shows the receipts._
 
 </div>
@@ -276,8 +278,8 @@ can't fork-bomb the council.
 uvx --from cli-bridge-mcp cli-bridge doctor
 ```
 
-`doctor` lists which CLIs are detected, their resolved paths, and cost tiers. `doctor deep` validates
-each lane against its own `--help`.
+`doctor` lists which CLIs are detected, their resolved paths, and cost tiers. `doctor --deep`
+validates each lane against its own `--help`.
 
 **2. Add it to your MCP host.** cli-bridge is an MCP server — it runs *inside* your assistant, not by
 hand. Point the host at the same command:
@@ -365,7 +367,7 @@ recall.** The harness ships, so you can confirm it on *your* CLIs — numbers ei
 - **Cost tiers are sourced defaults, not detection** — vendor-plan facts are dated; `doctor` warns
   when the snapshot is stale.
 - **Experimental** (`qwen`, `copilot`, `grok`, community lanes, Gemini `images=`): flags aren't
-  verified live — `doctor deep` checks them against each CLI's `--help` on your machine.
+  verified live — `doctor --deep` checks them against each CLI's `--help` on your machine.
 
 ---
 
