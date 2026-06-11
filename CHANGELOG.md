@@ -7,10 +7,6 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
-- **`cli-bridge chat` — pilot a delegate like a real user**: an interactive multi-turn REPL
-  over the round-table store. `/lane <key>` switches models MID-thread (the shared transcript
-  follows), `/model` overrides the model, `/new` starts a fresh thread, `--resume <id>` picks
-  a thread back up after quitting (it survives — sqlite). Default lane = first free one.
 - **`ask_build` `apply=true` (isolated mode)**: opt-in, lands the worktree diff in YOUR repo as
   unstaged changes — `git apply --check` first, so a conflict with your tree applies NOTHING
   (all-or-nothing; the diff stays in the report either way). Default unchanged: review-only.
