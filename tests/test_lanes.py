@@ -305,8 +305,10 @@ def test_enabled_env(monkeypatch):
 def test_gemini_bin_falls_back_to_agy(monkeypatch):
     import shutil
     real = shutil.which
-    monkeypatch.setattr(lanes.shutil, "which",
-                        lambda b: "/x/agy" if b == "agy" else (None if b == "gemini" else real(b)))
+    monkeypatch.setattr(
+        lanes.shutil, "which",
+        lambda b, path=None: "/x/agy" if b == "agy"
+        else (None if b == "gemini" else real(b, path=path)))
     assert _lane("gemini").bin == "agy"               # gemini absent -> agy fallback
 
 
@@ -352,7 +354,8 @@ def test_sunset_degrades_free_default_to_limited(monkeypatch):
 
 def test_sunset_prefers_alt_binary(monkeypatch):
     import shutil
-    monkeypatch.setattr(shutil, "which", lambda c: f"/bin/{c}" if c in ("oldbin", "newbin") else None)
+    monkeypatch.setattr(shutil, "which",
+                        lambda c, path=None: f"/bin/{c}" if c in ("oldbin", "newbin") else None)
     dead = _sunset_lane("2000-01-01", bin_alts=("newbin",))
     assert dead.bin == "newbin"                        # successor first once the service died
     alive = _sunset_lane("2999-01-01", bin_alts=("newbin",))
