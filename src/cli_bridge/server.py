@@ -249,9 +249,12 @@ def _ask_schema(lane: LaneSpec) -> dict:
     if "agent" in lane.caps:
         props["agent"] = {"type": "string", "enum": ["plan", "build"],
                           "description": "'plan' (read-only, default) or 'build' (EDITS FILES directly)."}
-    props["role"] = {"type": "string", "enum": ["", *sorted(preamble.ROLES)],
-                     "description": "Optional persona prepended to the task: reviewer / security / "
-                     "planner / devil (devil's-advocate)."}
+    props["role"] = {"type": "string",
+                     "description": "Optional persona prepended to the task. A name — "
+                     + " / ".join(sorted(preamble.roles())) +
+                     " (extend via CLI_BRIDGE_ROLES_FILE) — or write a one-sentence persona "
+                     "INLINE, tailored to this exact task (dynamic role assignment; an unknown "
+                     "single word is ignored as a probable typo)."}
     if lane.key == "gemini":
         props["images"] = {"type": "array", "items": {"type": "string"},
                            "description": "Image file paths to include (vision, ban-safe — passed to "
@@ -1567,7 +1570,7 @@ async def _run_lane(lane: LaneSpec, args: dict, *, tool: str = "ask",
     # the re-entry guard above. Merge onto a COPY of the env (a bare dict drops the CLI's PATH/auth).
     spawn_env = {**base_env, **extra_env, "CLI_BRIDGE_DEPTH": str(depth + 1)}
     await runner.pace(lane.key, lane.min_interval_s)   # anti-burst (opt-in, per lane)
-    rec = telemetry.start(tool, lane.key, model, task)
+    rec = telemetry.start(tool, lane.key, model, task, role=_str(args, "role"))
     timeout = _timeout(args.get("timeout_s"))
     t0 = time.monotonic()
     res = await _spawn_with_retry(argv, timeout, expanded, spawn_env)
@@ -2456,6 +2459,19 @@ def _doctor(host: str) -> str:
             lines.append(f"  - ⚠️ **cost mismatch**: lane is '{lane.cost_label}' but its model "
                          f"`{model}` spends money/credits — set `CLI_BRIDGE_"
                          f"{lane.key.upper()}_COST=paid` or pick an `opencode/*-free` model.")
+    rstat = preamble.roles_file_status()
+    if rstat["path"]:
+        if rstat["error"]:
+            lines.append(f"\n⚠️ **Roles file NOT loaded** ({rstat['path']}): {rstat['error']} — "
+                         "running with built-in roles only.")
+        else:
+            note = f"\nRoles file: {len(rstat['roles'])} custom role(s) loaded from {rstat['path']}"
+            if rstat["overrides"]:
+                note += f" (overriding built-in: {', '.join(sorted(rstat['overrides']))})"
+            if rstat["dropped"]:
+                note += f" — ⚠️ dropped non-string entr{'ies' if len(rstat['dropped']) != 1 else 'y'}: " \
+                        f"{', '.join(rstat['dropped'])}"
+            lines.append(note + ".")
     risky = lanes_mod.LANES_LOAD_STATUS.get("argv_secret_risk") or []
     if risky:
         lines.append(f"\n⚠️ **Secret in argv** — custom lane(s) {', '.join(risky)} expand a "

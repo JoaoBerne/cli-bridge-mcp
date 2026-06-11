@@ -20,6 +20,7 @@ CLI_BRIDGE_TERSE_MIN_CHARS: skip the preamble on tiny tasks where it can't pay f
 """
 from __future__ import annotations
 
+import json
 import os
 
 from . import config
@@ -65,9 +66,11 @@ def preamble(lvl: str | None = None) -> str:
     return _PREFIX + _RULES[lvl] + "\n\n"
 
 
-# Named role personas (V.2): a small, hardcoded set prepended to a delegate's task via `role=`.
-# Deliberately NOT a declarative registry (the council's anti-bloat note) — a flat dict of the few
-# roles that earn their keep. Unknown role = no-op.
+# Named role personas (V.2): a small curated set prepended to a delegate's task via `role=`.
+# Curated SHORT on purpose (the council's anti-bloat note): perspective diversity decorrelates
+# council errors (Du et al. 2305.14325, ReConcile 2309.13007) but plateaus fast — a 32-persona
+# catalog is prompt theater, not signal. Each entry exists to catch a DISTINCT failure mode.
+# Unknown role = no-op. Users add their own via CLI_BRIDGE_ROLES_FILE (see roles()).
 ROLES = {
     "reviewer": "Act as a rigorous code reviewer. Find concrete bugs, edge cases and risks; be "
                 "specific (file/line/why); no praise.",
@@ -77,12 +80,69 @@ ROLES = {
                "verifiable steps; no code, just the plan.",
     "devil": "Act as devil's advocate. Argue the STRONGEST case AGAINST the proposal; surface "
              "failure modes and hidden assumptions before agreeing.",
+    "architect": "Act as a software architect. Weigh 2-3 viable designs with explicit tradeoffs "
+                 "(complexity, coupling, migration cost), then commit to ONE recommendation and "
+                 "say what would change your mind.",
+    "oracle": "Act as a test designer working ONLY from the stated requirements — deliberately "
+              "ignore any implementation shown. Specify inputs, expected outputs and edge cases "
+              "an implementation must satisfy; a test that mirrors the implementation is a "
+              "failure.",
+    "simplifier": "Act as a simplicity enforcer. Identify what can be DELETED or collapsed: "
+                  "speculative abstractions, unused flexibility, dead code paths, over-general "
+                  "interfaces. Propose the smallest design that still meets the stated need.",
 }
 
 
+def roles_file_status() -> dict:
+    """Load CLI_BRIDGE_ROLES_FILE and report what happened — surfaced by `doctor` so a
+    malformed file never fails SILENTLY into built-ins (the custom-lanes lesson). Keys:
+    path, roles (the parsed dict), error ('' = ok), dropped (non-string entries),
+    overrides (names that shadow a built-in). Read per call on purpose: the file is tiny
+    next to a multi-second CLI spawn, and edits apply without a server restart."""
+    path = os.environ.get("CLI_BRIDGE_ROLES_FILE", "").strip()
+    out: dict = {"path": path, "roles": {}, "error": "", "dropped": [], "overrides": []}
+    if not path:
+        return out
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError) as exc:
+        out["error"] = f"{type(exc).__name__}: {exc}"
+        return out
+    if not isinstance(data, dict):
+        out["error"] = "top level must be a JSON object {\"name\": \"persona text\"}"
+        return out
+    for k, v in data.items():
+        if isinstance(k, str) and isinstance(v, str) and k.strip() and v.strip():
+            name = k.strip().lower()
+            out["roles"][name] = v.strip()
+            if name in ROLES:
+                out["overrides"].append(name)
+        else:
+            out["dropped"].append(str(k))
+    return out
+
+
+def roles() -> dict[str, str]:
+    """All available roles: curated built-ins + the user's file. The file wins on a name
+    clash, so a team can re-word a built-in without forking."""
+    return {**ROLES, **roles_file_status()["roles"]}
+
+
 def with_role(role: str, task: str) -> str:
-    """Prepend a named persona to the task (V.2). Unknown/empty role = task unchanged."""
-    persona = ROLES.get((role or "").strip().lower())
+    """Prepend a persona to the task. Three forms:
+    - a registry name (built-in or roles-file) -> that persona;
+    - free text WITH whitespace -> used verbatim as an inline persona. This is dynamic
+      role assignment (arXiv 2601.17152): the HOST writes a role tailored to this exact
+      task instead of picking from a fixed list — the host is the selector;
+    - unknown single word -> no-op (a typo'd name must not silently become the persona).
+    """
+    raw = (role or "").strip()
+    if not raw:
+        return task
+    persona = roles().get(raw.lower())
+    if persona is None and any(ch.isspace() for ch in raw):
+        persona = raw
     return f"[role] {persona}\n\n{task}" if persona else task
 
 

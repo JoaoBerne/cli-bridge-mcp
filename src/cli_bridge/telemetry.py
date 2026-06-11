@@ -63,7 +63,8 @@ CREATE TABLE IF NOT EXISTS runs (
   duration_ms INTEGER,
   output_chars INTEGER,
   input_chars INTEGER NOT NULL DEFAULT 0,
-  started_at REAL NOT NULL
+  started_at REAL NOT NULL,
+  role TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS lane_state (
   lane TEXT PRIMARY KEY,
@@ -140,6 +141,7 @@ CREATE INDEX IF NOT EXISTS idx_jury_outcomes ON jury_outcomes(lane, source);
 _MIGRATIONS = (
     ("runs", "input_chars", "INTEGER NOT NULL DEFAULT 0"),
     ("lane_state", "consecutive_empties", "INTEGER NOT NULL DEFAULT 0"),
+    ("runs", "role", "TEXT NOT NULL DEFAULT ''"),
 )
 
 
@@ -158,10 +160,14 @@ class RunStart:
     model: str
     task: str
     started_at: float
+    role: str = ""
 
 
-def start(tool: str, lane: str, model: str, task: str) -> RunStart:
-    return RunStart(tool=tool, lane=lane, model=model, task=task, started_at=_now())
+def start(tool: str, lane: str, model: str, task: str, role: str = "") -> RunStart:
+    # `role` is RECORDED, not acted on: at typical local volumes a (lane, role) bucket gets
+    # ~1-2 observations/week — far below the statistical power a routing decision needs. The
+    # column exists so long-horizon users can inspect their own data; no recommender on top.
+    return RunStart(tool=tool, lane=lane, model=model, task=task, started_at=_now(), role=role)
 
 
 def _store_transcripts() -> bool:
@@ -181,9 +187,10 @@ def record(run: RunStart, ok: bool, kind: str, output_chars: int, input_chars: i
         with _LOCK:
             conn.execute(
                 "INSERT INTO runs (tool, lane, model, status, kind, task_hash, task_preview, "
-                "duration_ms, output_chars, input_chars, started_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                "duration_ms, output_chars, input_chars, started_at, role) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (run.tool, run.lane, run.model, status, kind, task_hash, preview,
-                 duration_ms, output_chars, input_chars, run.started_at))
+                 duration_ms, output_chars, input_chars, run.started_at, run.role))
             _update_lane_state(conn, run.lane, ok, kind, run.model)
             conn.commit()
     except sqlite3.Error:

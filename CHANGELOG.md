@@ -7,6 +7,17 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Roles v2 — extensible + dynamic** (council-reviewed design, adjusted on its verdict):
+  curated built-ins grow to 7 (adds `architect`, `oracle` — tests from the spec, blind to
+  the implementation —, `simplifier`), each catching a distinct failure mode, with an
+  anti-bloat test capping the set at 8; **`CLI_BRIDGE_ROLES_FILE`** (JSON
+  `{"name": "persona"}`, file wins on a clash) extends or re-words them without forking —
+  `doctor` reports the file's load status so a malformed file never fails silently;
+  **inline personas**: `role=` also accepts a one-sentence persona written for the exact
+  task (dynamic role assignment, arXiv 2601.17152) — an unknown single word stays a no-op.
+  Runs now record their `role` in telemetry (recorded, not acted on: at local volumes a
+  (lane, role) bucket lacks the statistical power for routing decisions — honest data, no
+  recommender).
 - **Desktop-app hosts (Claude Desktop, Hermes Desktop, …)**: CLI detection and lane binary
   resolution now fall back to the common install dirs (`~/.local/bin`, `~/.npm-global/bin`,
   `/opt/homebrew/bin`, `/usr/local/bin`, …) when plain PATH lookup fails — GUI MCP clients
