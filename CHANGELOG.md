@@ -4,7 +4,44 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project aims for
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.1] - 2026-06-11
+
+### Changed (cost-truth: verified-audit fixes)
+- **`saver` profile is enforced**: `include_paid=true` is refused under saver (one shared rule,
+  `config.include_paid_resolved`, used by `ask_all`/`ask_cascade`/`ask_best`). Previously saver
+  was behaviorally identical to balanced while the setup copy promised "never spends".
+- **mistral cost default `free` → `limited`** — its free-tier quotas are unverified and Mistral
+  sells paid plans; consistent with the conservative gpt/claude defaults. Free-tier users
+  override with `set_lane_cost` / `CLI_BRIDGE_MISTRAL_COST=free`.
+- **Vendor sunsets are date-gated** (`LaneSpec.sunset`): once past, a `free` default degrades to
+  `limited`, bin resolution prefers the successor binary, and `doctor` shows a countdown.
+  Applied to gemini (free personal tier ends **2026-06-18**, successor `agy`).
+- `doctor` warns when `CLI_BRIDGE_DAILY_CREDIT_CAP` is set but unenforceable (a paid lane
+  without `CREDITS_PER_1K` always estimates 0 spend); onboarding copy stops overselling the cap.
+- `set_lane_cost` warns when a host-config env var will shadow the persisted value at restart;
+  config-file round-trip fixed for hyphenated lane keys (`-` → `_` in env names).
+- First-run nudge keys on `cost_config_is_set()` (profile OR per-lane costs) — no more false
+  "run `setup`" hint for users configured lane-by-lane.
+- `ask_all`'s schema stops advertising a 900 s per-lane timeout while clamping to 60 s.
+- Ollama lane shipped French user-facing strings in the English package — translated.
+
+### Added
+- **`cli-bridge set-cost <lane> <free|limited|paid> --note '…'`** — persists a cost fact from
+  the terminal (the path the setup text recommends finally exists outside MCP).
+
+### Fixed (docs)
+- Vendor facts re-verified against official docs: Codex context ~400K → ~1M (GPT-5.5); Grok 2M
+  → 1M (CLI model 256k), live X/web = server-side tools, SuperGrok-Heavy gating outdated;
+  Gemini Nano Banana needs its own API key and no official Veo extension exists; Cerebras free
+  context 8k → 65k/64k; `doctor deep` → `doctor --deep`; README Built-in list was missing Mistral.
+- gpt-image-2 claim corrected (real text-to-image in Codex CLI, paid ChatGPT plans only) —
+  EN + all six translations.
+- Demo GIFs re-rendered at real-time speed with readable payoffs; the 30-tool reference moved
+  to `docs/TOOLS.md` (slimmer README); step-by-step Installation section; plain-English opener.
+
+## [0.1.0] - 2026-06-08
+
+First public release on PyPI (`pip install cli-bridge-mcp`).
 
 ### Added (local lane + council quality + quota resilience)
 - **`cli-bridge build <lane> "<task>"` (human CLI)** — terminal entry point for the flagship safe-build
@@ -518,7 +555,7 @@ All notable changes to this project are documented here. The format follows
 - CI test matrix runs on **macOS and Windows** as well as Linux (portability is a stated
   invariant; now it's actually exercised). POSIX-shell-only runner tests skip on Windows.
 
-## [0.1.0]
+### Initial prototype (pre-PyPI scaffold)
 - Initial MCP server: per-host self-hide, PATH detection, lane registry (claude/gpt/gemini/
   mistral/opencode/qwen/copilot) + custom lanes via JSON + BYO-API via curl, `ask_<lane>`,
   `ask_all` (+ synthesize), `ask_cascade`, `doctor`, cost profiles, telemetry + cooldown,
