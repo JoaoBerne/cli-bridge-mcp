@@ -20,7 +20,7 @@ surface; hide/show any with `CLI_BRIDGE_DISABLED_TOOLS` / `CLI_BRIDGE_ENABLED_TO
 ### Build (opt-in write)
 | Tool | What it does | Reach for it when |
 |------|--------------|-------------------|
-| `ask_build` | Delegates a real build. `mode=isolated` (default) edits a throwaway worktree → **diff**; `mode=direct` writes into a declared `zone` (per-zone lock + post-turn zone-violation check). `async=true` runs it as a steerable job. Non-text outputs come back **by path** (artifact-return). | You want work *done*, not just suggested — review-gated or hands-off. |
+| `ask_build` | Delegates a real build. `mode=isolated` (default) edits a throwaway worktree → **diff** (`apply=true` lands it in your tree as unstaged changes, all-or-nothing via `git apply --check`); `lane` is optional (default: first free build-capable); `mode=direct` writes into a declared `zone` (per-zone lock + post-turn zone-violation check). `async=true` runs it as a steerable job. Non-text outputs come back **by path** (artifact-return). | You want work *done*, not just suggested — review-gated or hands-off. |
 | `ask_build_isolated` | Convenience alias for `ask_build` with `mode=isolated` — always returns a diff, never touches your tree. | You want the safe diff path by name, without setting `mode`. |
 | `job_tail` | Streams a running build's progress log (byte-offset). | You want to watch a delegate work. |
 | `build_steer` | Queues a steering instruction for the next turn, or `interrupt=true` cuts the current turn (files kept). | You need to course-correct mid-build without restarting. |

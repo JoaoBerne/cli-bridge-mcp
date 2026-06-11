@@ -129,22 +129,52 @@ async def ask_build_isolated(lane: LaneSpec, args: dict, run_lane,
             shutil.rmtree(parent, ignore_errors=True)
             kept = None
 
-    return _report(lane, res, diff, root, kept, plan=plan, plan_note=plan_note)
+    apply_note = ""
+    if bool(args.get("apply")) and res.ok and diff.strip():
+        apply_note = _apply_diff(root, diff)
+    return _report(lane, res, diff, root, kept, plan=plan, plan_note=plan_note,
+                   apply_note=apply_note)
+
+
+def _apply_diff(root: str, diff: str) -> str:
+    """Opt-in: apply the worktree diff to the host repo as UNSTAGED changes. `git apply --check`
+    first — a conflict with the user's tree means NOTHING is applied (all-or-nothing, never a
+    partial patch). The diff stays in the report either way, so a refused apply loses nothing."""
+    fd, path = tempfile.mkstemp(prefix="cli-bridge-diff-", suffix=".patch")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
+            fh.write(diff if diff.endswith("\n") else diff + "\n")
+        rc, _o, cerr = _git(["-C", root, "apply", "--check", path])
+        if rc != 0:
+            return ("⚠️ NOT applied — `git apply --check` found a conflict with your working "
+                    f"tree (nothing was changed): {cerr.strip()[:300]}")
+        rc, _o, aerr = _git(["-C", root, "apply", path])
+        if rc != 0:
+            return f"⚠️ NOT applied — `git apply` failed (nothing was changed): {aerr.strip()[:300]}"
+        return ("✅ APPLIED to your working tree as unstaged changes — review with `git diff`, "
+                "undo with `git checkout -- <files>` (and `git clean` for new files)")
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(path)
 
 
 def _report(lane: LaneSpec, res, diff: str, root: str, kept: str | None,
-            *, plan: str = "", plan_note: str = "") -> str:
+            *, plan: str = "", plan_note: str = "", apply_note: str = "") -> str:
     where = f"kept at `{kept}`" if kept else "discarded"
+    touched = "see Apply below" if apply_note else "your repo was NOT modified"
     lines = ["# Isolated build (worktree)",
              f"_Agent: {lane.display} (build){plan_note} · repo: `{root}` · worktree {where} · "
-             "your repo was NOT modified_\n"]
+             f"{touched}_\n"]
+    if apply_note:
+        lines.append(f"**Apply:** {apply_note}\n")
     if plan:
         lines.append("## Plan (architect)\n")
         lines.append(plan.strip())
         lines.append("")
     lines.append("## Agent output\n")
     lines.append(res.render().strip() or "_(no output)_")
-    lines.append("\n## Proposed diff (review before applying — NOT applied)\n")
+    lines.append("\n## Proposed diff" +
+                 ("\n" if apply_note else " (review before applying — NOT applied)\n"))
     if diff.strip():
         lines.append("```diff\n" + diff.rstrip() + "\n```")
     else:

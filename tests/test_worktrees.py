@@ -141,3 +141,40 @@ def test_architect_failure_falls_back_to_solo_editor(repo):
     assert "architect GPT FAILED" in report
     assert "## Plan (architect)" not in report
     assert "built solo" in report
+
+
+# ── apply=true: opt-in application of the diff to the host repo ───────────────────────────────
+
+
+def test_apply_lands_diff_as_unstaged_changes(repo):
+    rl = _writer_run_lane("applied.py", "print('applied')\n")
+    report = asyncio.run(worktrees.ask_build_isolated(
+        _build_lane(), {"task": "t", "cwd": str(repo), "apply": True}, rl))
+    assert "APPLIED to your working tree" in report
+    assert (repo / "applied.py").read_text() == "print('applied')\n"
+    # unstaged, never committed
+    status = subprocess.run(["git", "status", "--porcelain"], cwd=repo,
+                            capture_output=True, text=True).stdout
+    assert "applied.py" in status
+
+
+def test_apply_conflict_applies_nothing(repo):
+    async def run_lane(lane, args, *, tool="ask", terse=True):
+        with open(os.path.join(args["cwd"], "a.txt"), "w") as fh:
+            fh.write("delegate version\n")
+        return RunResult(True, "edited a.txt", "ok", latency_ms=10)
+    (repo / "a.txt").write_text("user's local edit\n")     # conflicting working-tree change
+    report = asyncio.run(worktrees.ask_build_isolated(
+        _build_lane(), {"task": "t", "cwd": str(repo), "apply": True}, rl := run_lane))
+    assert rl is run_lane
+    assert "NOT applied" in report and "nothing was changed" in report
+    assert (repo / "a.txt").read_text() == "user's local edit\n"    # untouched
+    assert "delegate version" in report                              # diff still in the report
+
+
+def test_apply_default_off_keeps_repo_untouched(repo):
+    rl = _writer_run_lane("x.py", "x\n")
+    report = asyncio.run(worktrees.ask_build_isolated(
+        _build_lane(), {"task": "t", "cwd": str(repo)}, rl))
+    assert "NOT applied" in report or "NOT modified" in report
+    assert not (repo / "x.py").exists()

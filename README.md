@@ -162,7 +162,7 @@ workflow(preset="fanout_compare", task="fix this failing test", lanes=["gpt","ge
 
 **Full reference — every tool, every flag: [`docs/TOOLS.md`](docs/TOOLS.md)** (or `cli-bridge --help`). Run `CLI_BRIDGE_LEAN=1` for a curated ~12-tool surface.
 
-There's also a **human CLI** — `cli-bridge doctor|ask|build|review-diff|eval|…` — the same engine from your terminal or CI (`--json` everywhere); `cli-bridge build <lane> "<task>"` returns a reviewable **diff** without touching your repo.
+There's also a **human CLI** — `cli-bridge doctor|ask|chat|build|review-diff|eval|…` — the same engine from your terminal or CI (`--json` everywhere); `cli-bridge build <lane> "<task>"` returns a reviewable **diff** without touching your repo (`--apply` to land it as unstaged changes), and `cli-bridge chat` opens an interactive multi-turn session with any lane — switch models MID-thread with `/lane`, the shared round-table memory follows.
 
 ---
 
