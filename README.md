@@ -261,7 +261,13 @@ each lane against its own `--help`.
 **2. Add it to your MCP host.** cli-bridge is an MCP server — it runs *inside* your assistant, not by
 hand. Point the host at the same command:
 
-- **Claude Code** (writes the config for you):
+- **Claude Code — as a plugin** (one-time, adds `/cli-bridge:council`, `/cli-bridge:review`,
+  `/cli-bridge:security`, `/cli-bridge:build`, `/cli-bridge:setup` and wires the MCP server):
+  ```bash
+  claude plugin marketplace add JoaoBerne/cli-bridge-mcp
+  claude plugin install cli-bridge@cli-bridge-mcp
+  ```
+- **Claude Code — MCP only** (no slash commands):
   ```bash
   claude mcp add cli-bridge -- uvx cli-bridge-mcp
   ```
