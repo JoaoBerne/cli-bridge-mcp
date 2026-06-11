@@ -334,6 +334,15 @@ def convo_max_chars() -> int:
     return int_env("CLI_BRIDGE_CONVO_MAX_CHARS", 32000, 1000, 1_000_000)
 
 
+def convo_summary_enabled() -> bool:
+    """Rolling summary: when a thread outgrows convo_max_chars(), the lane that just answered
+    condenses the oldest turns into one summary turn instead of letting them fall off the
+    replay window. Costs one extra (usually free) lane call when the threshold is crossed.
+    CLI_BRIDGE_CONVO_SUMMARY=off to disable (old turns then just slide out, as before)."""
+    return os.environ.get("CLI_BRIDGE_CONVO_SUMMARY", "").strip().lower() not in (
+        "off", "false", "0", "no")
+
+
 def convo_max_stored() -> int:
     """Keep at most this many conversations in the local DB (oldest pruned whole). Threads are
     session-scoped in spirit — no need to hoard old ones forever. Clamped 1..100000."""

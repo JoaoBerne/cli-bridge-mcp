@@ -7,6 +7,12 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Rolling summary on round-table threads**: when a thread outgrows the replay budget
+  (`CLI_BRIDGE_CONVO_MAX_CHARS`), the oldest turns are no longer silently dropped off the
+  window — the lane that just answered (it had the full history in front of it; no third
+  model to route) condenses them into one `summary` turn that keeps sorting first, so a long
+  thread stays usable by ANY lane. Best-effort: a failed summarizer leaves the thread
+  untouched. `CLI_BRIDGE_CONVO_SUMMARY=off` restores the old slide-out behaviour.
 - **`ask_build` `apply=true` (isolated mode)**: opt-in, lands the worktree diff in YOUR repo as
   unstaged changes — `git apply --check` first, so a conflict with your tree applies NOTHING
   (all-or-nothing; the diff stays in the report either way). Default unchanged: review-only.
