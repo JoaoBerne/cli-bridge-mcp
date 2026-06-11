@@ -1619,7 +1619,26 @@ async def _run_lane_maybe_convo(lane: LaneSpec, args: dict) -> tuple[runner.RunR
     if task and res.ok:                        # only record a real exchange
         conversations.record_turn(cid, lane.key, "user", task)
         conversations.record_turn(cid, lane.key, "assistant", res.output)
+        await _maybe_compact_convo(cid, lane)
     return res, cid
+
+
+async def _maybe_compact_convo(cid: str, lane: LaneSpec) -> None:
+    """Rolling summary: once the stored thread outgrows the replay budget, the lane that just
+    answered (it had the full history in front of it — no third model to route) condenses the
+    old tail into one summary turn. Best-effort: any failure leaves the thread as it was."""
+    if not config.convo_summary_enabled():
+        return
+    try:
+        upto, excerpt = conversations.compaction_plan(cid, config.convo_max_chars())
+        if not upto:
+            return
+        res = await _run_lane(lane, {"task": conversations.SUMMARY_PROMPT + excerpt},
+                              tool="convo_summary")
+        if res.ok and res.output.strip():
+            conversations.apply_compaction(cid, upto, res.output, lane.key)
+    except Exception:                          # noqa: BLE001 — never break the user's call
+        pass
 
 
 def _rel_time(ts: float | None) -> str:
@@ -1977,7 +1996,10 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
                           label="conversation_show", guard=False)]
         parts = [f"# Conversation {cid}", ""]
         for t in turns:
-            who = "User" if t["role"] == "user" else (t["lane"] or "assistant")
+            if t["role"] == "summary":
+                who = f"Summary of earlier turns (by {t['lane'] or 'a lane'})"
+            else:
+                who = "User" if t["role"] == "user" else (t["lane"] or "assistant")
             parts.append(f"## Turn {t['turn_number']} — {who}\n{t['content']}")
         return [_emit("\n\n".join(parts), label="conversation_show")]
 

@@ -743,6 +743,28 @@ def convo_list(limit: int = 30) -> list[dict]:
         return []
 
 
+def convo_compact(conversation_id: str, upto_n: int, summary: str, lane: str = "") -> bool:
+    """Replace all turns up to and including `upto_n` with ONE summary turn (role='summary')
+    carrying their condensed content. The summary takes turn_number=upto_n so it still sorts
+    before the kept turns. Best-effort: False (and nothing deleted) on any error."""
+    conn = _connect()
+    if conn is None or not conversation_id or upto_n < 1 or not summary.strip():
+        return False
+    try:
+        with _LOCK:
+            conn.execute(
+                "DELETE FROM conversation_turns WHERE conversation_id=? AND turn_number<=?",
+                (conversation_id, upto_n))
+            conn.execute(
+                "INSERT INTO conversation_turns (conversation_id, turn_number, lane, role, "
+                "content, created_at) VALUES (?,?,?,?,?,?)",
+                (conversation_id, upto_n, lane or "", "summary", summary.strip(), _now()))
+            conn.commit()
+            return True
+    except sqlite3.Error:
+        return False
+
+
 def _prune_conversations(conn: sqlite3.Connection) -> None:
     """Keep only the newest config.convo_max_stored() conversations; delete older ones whole."""
     keep = config.convo_max_stored()

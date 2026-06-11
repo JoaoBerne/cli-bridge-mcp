@@ -69,13 +69,57 @@ def _mirror_log(conversation_id: str, lane: str, role: str, content: str) -> Non
 def _render_turn(turn: dict, recipient_lane: str) -> str:
     role = turn.get("role")
     lane = turn.get("lane") or ""
-    if role == "user":
+    if role == "summary":
+        speaker = "Summary of earlier turns"
+    elif role == "user":
         speaker = "User"
     elif lane and lane == recipient_lane:
         speaker = "You"
     else:
         speaker = lane or "Assistant"
     return f"--- {speaker} ---\n{turn.get('content', '')}"
+
+
+# ── rolling summary: compact old turns instead of silently dropping them ─────────────────────
+# When a thread outgrows the replay budget, the oldest turns used to fall off the window —
+# silently forgotten. Instead, the lane that just answered (it had the full history in front
+# of it anyway — no third model to route) condenses them into ONE summary turn, so a long
+# thread stays usable by ANY lane. Decision logic here is pure; the lane call is the server's.
+
+SUMMARY_PROMPT = (
+    "Condense the conversation excerpt below into a faithful summary another AI assistant can "
+    "rely on as context. Preserve exactly: decisions made, facts and values stated (names, code "
+    "words, numbers, paths), what was asked and what was delivered, and any open points. No "
+    "commentary, no praise — just the substance, compact.\n\nEXCERPT:\n")
+
+
+def compaction_plan(conversation_id: str, max_chars: int) -> tuple[int, str]:
+    """If the stored thread exceeds `max_chars`, return (upto_n, excerpt): the oldest turns to
+    condense — everything except the newest turns that fit in half the budget (recency is kept
+    verbatim; only the old tail is summarized). Returns (0, '') when no compaction is needed.
+    An existing summary turn is included in the excerpt so summaries fold into one."""
+    turns = telemetry.convo_turns(conversation_id)
+    total = sum(len(t.get("content", "")) for t in turns)
+    if not turns or total <= max_chars:
+        return 0, ""
+    keep_budget = max_chars // 2
+    used = 0
+    cut = 0                                       # index of the first KEPT turn
+    for i in range(len(turns) - 1, -1, -1):
+        used += len(turns[i].get("content", ""))
+        if used > keep_budget:
+            cut = i + 1
+            break
+    if cut < 2:                                   # nothing meaningful to fold — keep as is
+        return 0, ""
+    old = turns[:cut]
+    excerpt = "\n\n".join(_render_turn(t, "") for t in old)
+    return int(old[-1]["turn_number"]), excerpt
+
+
+def apply_compaction(conversation_id: str, upto_n: int, summary: str, lane: str) -> bool:
+    """Store the condensed summary in place of the old turns (telemetry, best-effort)."""
+    return telemetry.convo_compact(conversation_id, upto_n, summary, lane)
 
 
 def build_history_prefix(conversation_id: str, recipient_lane: str,
