@@ -469,21 +469,40 @@ def _compare(results: list[dict], task: str) -> str:
              "judge_lane for a recommendation._\n"]
     for i, r in enumerate(results, 1):
         tag = "✅" if r["ok"] else "❌"
-        lines.append(f"## Option {i} — {tag} {r['lane'] or '—'}\n")
+        who = r["lane"] or "—"
+        if r.get("model"):
+            who += f" ({r['model']})"
+        lines.append(f"## Option {i} — {tag} {who}\n")
         lines.append((r["output"].strip() or "_(no output)_") + "\n")
     return "\n".join(lines)
+
+
+def _parse_lane_entries(lane_keys, resolve_lane, default_lanes):
+    """Resolve ['gpt', 'opencode:deepseek-v4-flash-free', …] to (LaneSpec, model) pairs.
+    The 'lane:model' form lets ONE gateway lane field several of its models side by side —
+    e.g. a council of opencode's free models — without hand-writing custom lanes."""
+    if not lane_keys:
+        return [(ln, "") for ln in default_lanes]
+    out = []
+    for entry in lane_keys:
+        key, _, model = str(entry).partition(":")
+        ln = resolve_lane(key.strip())
+        if ln is not None:
+            out.append((ln, model.strip()))
+    return out
 
 
 async def fanout_compare(*, run_lane, resolve_lane, default_lanes, telemetry, task: str,
                          lanes=None, judge_lane=None, cwd: str = "", run_id="", progress=None) -> str:
     """Same task to N lanes, answers rendered SIDE BY SIDE for the host/human to compare and merge
-    (e.g. 'fix this bug' on 3 CLIs -> pick the best diff). Optional judge_lane recommends one."""
-    use = _lanes_or_default(lanes, resolve_lane, default_lanes)
+    (e.g. 'fix this bug' on 3 CLIs -> pick the best diff). Lanes accept 'lane:model' to compare
+    several models of ONE lane (e.g. opencode's free models). Optional judge_lane recommends one."""
+    use = _parse_lane_entries(lanes, resolve_lane, default_lanes)
     if not use:
         return "[error] no lanes available for fanout_compare."
-    tasks = [{"lane": ln.key, "task": task, "cwd": cwd} for ln in use]
+    tasks = [{"lane": ln.key, "model": model, "task": task, "cwd": cwd} for ln, model in use]
     run_id, results = await batch_run(tasks, run_lane=run_lane, resolve_lane=resolve_lane,
-                                      default_lane=use[0], telemetry=telemetry, run_id=run_id,
+                                      default_lane=use[0][0], telemetry=telemetry, run_id=run_id,
                                       progress=progress)
     if judge_lane:
         jl = resolve_lane(judge_lane)

@@ -28,6 +28,9 @@ All notable changes to this project are documented here. The format follows
 ### Added
 - **`cli-bridge set-cost <lane> <free|limited|paid> --note '…'`** — persists a cost fact from
   the terminal (the path the setup text recommends finally exists outside MCP).
+- **`lane:model` entries in `workflow preset=fanout_compare`** — compare several models of ONE
+  lane side by side (e.g. `['opencode:deepseek-v4-flash-free', 'opencode:mimo-v2.5-free']`),
+  no per-model custom lanes needed.
 
 ### Fixed (docs)
 - Vendor facts re-verified against official docs: Codex context ~400K → ~1M (GPT-5.5); Grok 2M

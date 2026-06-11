@@ -457,7 +457,11 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                     "questions": {"type": "array", "items": {"type": "string"},
                                   "description": "research_verify: questions to answer + verify."},
                     "lanes": {"type": "array", "items": {"type": "string"},
-                              "description": "Lane keys to use (default: the free council)."},
+                              "description": "Lane keys to use (default: the free council). "
+                                             "fanout_compare also accepts 'lane:model' entries — "
+                                             "e.g. ['opencode:deepseek-v4-flash-free', "
+                                             "'opencode:mimo-v2.5-free'] compares several models "
+                                             "of ONE lane side by side."},
                     "lane": {"type": "string", "description": "map_review: the single reviewer lane."},
                     "builder_lane": {"type": "string",
                                      "description": "verify_repair: lane that produces (default: "
