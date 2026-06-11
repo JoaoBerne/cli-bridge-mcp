@@ -15,6 +15,7 @@ import difflib
 import json
 
 from . import config, router, runner, telemetry
+from . import lanes as lanes_mod
 from .config import ASK_ALL_SYNTH_TIMEOUT_S
 from .lanes import LaneSpec
 
@@ -88,8 +89,7 @@ async def ask_cascade(lanes: list[LaneSpec], args: dict, *, run_lane, emit) -> l
     task = _s(args, "task")
     if not task:
         return [TextContent(type="text", text="[error] task is required")]
-    include_paid = (bool(args["include_paid"]) if args.get("include_paid") is not None
-                    else config.profile() == "max")
+    include_paid = config.include_paid_resolved(args.get("include_paid"))
     ordered = router.order_lanes(lanes, telemetry.cooldown_remaining, include_paid)
     if not ordered:
         return [TextContent(type="text", text=(
@@ -159,8 +159,7 @@ async def ask_best(lanes: list[LaneSpec], args: dict, *, run_lane, emit) -> list
     if mode not in router.MODES:
         return [TextContent(type="text", text=(
             f"[error] unknown mode '{mode}'. Choose one of: {', '.join(router.MODES)}."))]
-    include_paid = (bool(args["include_paid"]) if args.get("include_paid") is not None
-                    else config.profile() == "max")
+    include_paid = config.include_paid_resolved(args.get("include_paid"))
     perf = telemetry.lane_perf()
     quality = telemetry.lane_quality(mode)
     ordered = router.order_for_mode(lanes, telemetry.cooldown_remaining, lambda k: perf.get(k, {}),
@@ -212,8 +211,10 @@ async def ask_all_body(lanes: list[LaneSpec], args: dict, *, run_lane, progress,
             return ("[error] no FREE lanes to fan out to. Limited/paid lanes available: "
                     f"{', '.join(held)}. Call ask_all with include_paid=true, or mark a lane "
                     "free for your plan via CLI_BRIDGE_<LANE>_COST=free.")
-        return ("[error] no delegate CLIs installed. Run `doctor` to see install hints, "
-                "then install/log into at least one CLI (e.g. gemini, mistral, opencode).")
+        free_keys = ", ".join(ln.key for ln in lanes_mod.BUILTIN_LANES
+                              if ln.cost_label == "free") or "opencode, ollama"
+        return ("[error] no delegate CLIs installed. Run `doctor` to see install hints, then "
+                f"install/log into at least one free-tier CLI (currently: {free_keys}).")
     out_fmt = _s(args, "output_format").lower() or "markdown"
     task = _s(args, "task")
     if bool(args.get("dry_run")):              # preview cost/lanes WITHOUT spawning anything

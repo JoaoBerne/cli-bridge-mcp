@@ -1,8 +1,9 @@
 """Configuration: env parsing, cost profile, timeouts, onboarding text.
 
 Kept separate from server.py so the MCP surface stays thin and the same knobs are reusable
-by the (future) human CLI. Everything is environment-driven — no config file, no machine
-state — so the server behaves identically on any host once the user sets their env.
+by the human CLI. Env-first: every knob is a CLI_BRIDGE_* variable, optionally filled in at
+startup from a JSON config file (~/.config/cli-bridge/config.json — env always wins), which
+is also where the host persists cost facts it learns via set_lane_cost (update_config_file).
 """
 from __future__ import annotations
 
@@ -61,14 +62,26 @@ def _flatten_config(cfg: dict) -> dict:
                 for fk, fv in fields.items():
                     suffix = _LANE_KEYS.get(fk)
                     if suffix:
-                        out[f"CLI_BRIDGE_{lane.upper()}_{suffix}"] = (
+                        # '-' → '_': env names can't carry hyphens, and LaneSpec._env reads
+                        # CLI_BRIDGE_MY_LANE_COST for a 'my-lane' key — must match it here or
+                        # persisted settings for hyphenated custom lanes are silently lost.
+                        env_lane = lane.upper().replace("-", "_")
+                        out[f"CLI_BRIDGE_{env_lane}_{suffix}"] = (
                             "true" if fv is True else ("false" if fv is False else str(fv)))
     return out
+
+
+# CLI_BRIDGE_* names that were ALREADY in the environment when the config file was applied —
+# i.e. set by the MCP host's config / shell, not by the file. Those shadow the file on every
+# restart (env wins), which set_lane_cost uses to warn that its persisted value won't stick.
+ENV_PRESET_KEYS: set[str] = set()
 
 
 def apply_file_config_to_env() -> int:
     """Fill any unset CLI_BRIDGE_* var from the JSON config file. Env wins (setdefault). Returns
     the number of keys applied. Best-effort: a missing/invalid file is silently ignored."""
+    ENV_PRESET_KEYS.clear()
+    ENV_PRESET_KEYS.update(k for k in os.environ if k.startswith("CLI_BRIDGE_"))
     try:
         with open(config_file_path(), encoding="utf-8") as fh:
             cfg = json.load(fh)
@@ -380,10 +393,22 @@ COOLDOWN_EMPTY_MAX_S = int_env("CLI_BRIDGE_COOLDOWN_EMPTY_MAX_S", 21_600, 0, 86_
 # ── cost profile ──────────────────────────────────────────────────────────────────────
 # There is no universal "free is best" — someone on a big plan may want top models by
 # default. Unset => balanced, but the server's instructions tell the host to ASK on first use.
-#   saver    = free lanes only; never spend credits or scarce quota unless explicitly told.
-#   balanced = free by default; limited/paid lanes need explicit include_paid.
+#   saver    = free-only fan-out, ENFORCED: include_paid is refused (a direct ask_<lane> call to
+#              a paid lane is still allowed — that's the explicit case).
+#   balanced = free by default; limited/paid lanes join fan-out only with explicit include_paid.
 #   max      = quality first; ask_all includes free, limited, and paid lanes.
 VALID_PROFILES = ("saver", "balanced", "max")
+
+
+def include_paid_resolved(arg_value) -> bool:
+    """One place for the include_paid decision, so 'saver' means the same thing everywhere:
+    under saver the flag is refused (free-only fan-out, enforced); otherwise an explicit arg
+    wins; otherwise only profile 'max' widens to limited/paid."""
+    if profile() == "saver":
+        return False
+    if arg_value is not None:
+        return bool(arg_value)
+    return profile() == "max"
 
 
 def profile() -> str:
@@ -425,12 +450,16 @@ SETUP_TEXT = (
     "     CLI_BRIDGE_<LANE>_ENABLED = false       (hide a lane they don't want used)\n"
     "     CLI_BRIDGE_<LANE>_MODEL = <id>          (their preferred default model for a lane)\n"
     "     CLI_BRIDGE_PROFILE = saver|balanced|max (optional shorthand if they'd rather not "
-    "go lane-by-lane: saver=free only, balanced=paid when it earns it, max=best by default)\n"
-    "     CLI_BRIDGE_DAILY_CREDIT_CAP = <n>        (hard ceiling on ESTIMATED paid spend/day — "
-    "a safety net so paid lanes can be used WITHOUT agonising over each call)\n"
+    "go lane-by-lane: saver=free-only fan-out, include_paid refused (direct paid calls still "
+    "work) · balanced=paid joins fan-out only when the caller passes include_paid · max=best "
+    "by default)\n"
+    "     CLI_BRIDGE_DAILY_CREDIT_CAP = <n>        (ceiling on ESTIMATED paid spend/day — only "
+    "enforceable for paid lanes that also have CLI_BRIDGE_<LANE>_CREDITS_PER_1K set; `doctor` "
+    "warns when the cap can't enforce)\n"
     "4. Confirm back what you understood. The user stays in control — this just sets your "
     "default behaviour so they don't have to repeat it each call. Once set, spend confidently "
-    "within it; don't ask permission for every paid call — the cap protects them."
+    "within it — but check `doctor` confirms the cap is enforceable before treating it as a "
+    "safety net."
 )
 
 INSTRUCTIONS = (
@@ -460,8 +489,9 @@ INSTRUCTIONS = (
     "particular model is strong at, a debugging dead-end. WHEN NOT TO: trivial edits, simple "
     "library lookups, things you're already sure of — don't convene a council for one-liners.\n\n"
     "COST — spend with confidence, don't agonise: the user sets a profile (saver/balanced/max) "
-    "and an optional hard daily cap; operate freely within it (the cap stops overspend by "
-    "itself). Cost tiers are sourced defaults (docs/COSTS.md), NEVER detected from the user's "
+    "and an optional daily cap; operate freely within it (the cap stops overspend for paid "
+    "lanes that have a CREDITS_PER_1K rate set — `doctor` flags when it can't enforce). Cost "
+    "tiers are sourced defaults (docs/COSTS.md), NEVER detected from the user's "
     "account — treat an unconfigured tier as a guess about a typical plan, not a fact about "
     "theirs. On FIRST use, if no profile/cost is set, call `setup` once — it lists what's "
     "installed and recommends a config to confirm — don't assume 'free is best' (someone on a "

@@ -303,7 +303,10 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                                                     "except CLI_BRIDGE_PROFILE=max."},
                     "cwd": {"type": "string", "description": "Directory the CLIs run in."},
                     "timeout_s": {"type": "integer",
-                                  "description": f"Per-lane timeout (max {MAX_TIMEOUT_S})."},
+                                  "description": f"Per-lane timeout (max {ASK_ALL_MAX_TIMEOUT_S} — "
+                                                 "the fan-out must finish before the host's own "
+                                                 "tool deadline; call one lane directly for a "
+                                                 "longer run)."},
                     "synthesize": {"type": "boolean",
                                    "description": "After collecting answers, have one free lane "
                                    "summarize where the models AGREE and DISAGREE. Default false."},
@@ -1424,9 +1427,8 @@ def _ask_all_timeout(raw) -> int:
 
 
 def _ask_all_include_paid(args: dict) -> bool:
-    if "include_paid" in args and args["include_paid"] is not None:
-        return bool(args["include_paid"])
-    return _profile() == "max"
+    # One shared rule (config.include_paid_resolved): saver = include_paid refused, enforced.
+    return config.include_paid_resolved(args.get("include_paid"))
 
 
 def _ask_all_targets(lanes: list[LaneSpec], include_paid: bool,
@@ -1667,8 +1669,9 @@ def _setup_recommendation(lanes: list[LaneSpec]) -> str:
             "    CLI_BRIDGE_PROFILE=balanced")
     lines += [
         "",
-        "Profiles in plain terms: **saver**=free only, never spends · **balanced**=free by "
-        "default, paid when you ask (include_paid) · **max**=best by default, paid lanes join "
+        "Profiles in plain terms: **saver**=free-only fan-out, include_paid refused (direct "
+        "calls to a paid lane still work) · **balanced**=free by default, paid joins fan-out "
+        "only when the caller passes include_paid · **max**=best by default, paid lanes join "
         "automatically.",
     ]
     return "\n".join(lines)
@@ -2068,6 +2071,7 @@ def _set_lane_cost(args: dict) -> list[TextContent]:
             "[error] note is required — one line saying who/what established this, e.g. "
             "'user: on the Go plan' or 'vendor: free tier sunset 2026-06-18'."))]
     env_key = ln.key.upper().replace("-", "_")
+    shadowed = f"CLI_BRIDGE_{env_key}_COST" in config.ENV_PRESET_KEYS
     os.environ[f"CLI_BRIDGE_{env_key}_COST"] = cost          # effective immediately
     os.environ[f"CLI_BRIDGE_{env_key}_COST_NOTE"] = note
     fields: dict = {"cost": cost, "cost_note": note}
@@ -2075,9 +2079,14 @@ def _set_lane_cost(args: dict) -> list[TextContent]:
     persisted = (f"persisted to `{path}`" if path
                  else "applied for THIS session only — config file not writable")
     why = f" — {note}" if note else ""
+    caveat = ""
+    if shadowed and path:
+        caveat = (f"\n⚠️ Your MCP host config/shell also sets CLI_BRIDGE_{env_key}_COST — env "
+                  "wins at every restart, so that value will override this persisted one. "
+                  "Remove it from the host config to let the config file apply.")
     return [TextContent(type="text", text=(
         f"Lane **{ln.key}** cost set to **{cost}** (set by you){why}. {persisted}. "
-        "ask_all / ask_cascade / ask_best route on it from the next call."))]
+        "ask_all / ask_cascade / ask_best route on it from the next call." + caveat))]
 
 
 async def _ask_all(lanes: list[LaneSpec], args: dict) -> list[TextContent]:
@@ -2355,8 +2364,21 @@ def _doctor(host: str) -> str:
     host_note = ("its own lane is hidden (CLI_BRIDGE_HIDE_HOST)" if config.hide_host()
                  else "its own lane is shown (direct calls only, never in fan-out)")
     lines.append(f"Host (caller): **{host or 'unknown'}** - {host_note}.")
-    prof = _profile() + ("" if _profile_is_set() else " (default — run `setup` to configure)")
+    if _profile_is_set():
+        prof = _profile()
+    elif _cost_config_is_set():
+        prof = _profile() + " (default profile; per-lane costs set)"
+    else:
+        prof = _profile() + " (default — run `setup` to configure)"
     lines.append(f"Cost profile: **{prof}**")
+    cap = config.daily_credit_cap()
+    if cap > 0:
+        unrated = [ln.key for ln in lanes_mod.all_lanes()
+                   if ln.is_paid and config.lane_env_float(ln.key, "CREDITS_PER_1K") is None]
+        if unrated:
+            lines.append(f"⚠️ _CLI_BRIDGE_DAILY_CREDIT_CAP={cap:g} is set but UNENFORCEABLE for "
+                         f"paid lane(s) {', '.join(unrated)} — their spend always estimates to 0. "
+                         "Set CLI_BRIDGE_<LANE>_CREDITS_PER_1K (suggestions in docs/COSTS.md)._")
     lines.append("_Cost tiers are NOT detected from your account — '(default)' = a sourced "
                  "typical-plan default (docs/COSTS.md); '(set by you)' = your own setting._")
     if lanes_mod.cost_facts_stale():
