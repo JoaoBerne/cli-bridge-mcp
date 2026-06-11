@@ -1,5 +1,7 @@
 """P1: realistic cost defaults + per-lane env overrides + first-run detection."""
 
+import os
+
 from cli_bridge import lanes, server
 
 
@@ -117,3 +119,49 @@ def test_int_env_never_crashes(monkeypatch):
 def test_install_hint_present():
     assert _lane("gemini").install_hint
     assert _lane("opencode").install_hint
+
+
+# ── saver semantics + config-file round-trip (cost-truth batch) ────────────────────────────
+
+def test_saver_refuses_include_paid(monkeypatch):
+    from cli_bridge import config
+    monkeypatch.setenv("CLI_BRIDGE_PROFILE", "saver")
+    assert config.include_paid_resolved(True) is False     # enforced, not advisory
+    assert config.include_paid_resolved(None) is False
+    monkeypatch.setenv("CLI_BRIDGE_PROFILE", "balanced")
+    assert config.include_paid_resolved(True) is True       # explicit arg honored
+    assert config.include_paid_resolved(None) is False
+    monkeypatch.setenv("CLI_BRIDGE_PROFILE", "max")
+    assert config.include_paid_resolved(None) is True
+
+
+def test_flatten_config_maps_hyphenated_lane_keys():
+    # 'my-lane' must round-trip to CLI_BRIDGE_MY_LANE_COST (what LaneSpec._env reads) —
+    # a hyphen in the env name would silently lose set_lane_cost persistence on restart.
+    from cli_bridge import config
+    flat = config._flatten_config({"lanes": {"my-lane": {"cost": "paid"}}})
+    assert flat == {"CLI_BRIDGE_MY_LANE_COST": "paid"}
+
+
+def test_apply_file_config_records_preset_env(tmp_path, monkeypatch):
+    from cli_bridge import config
+    cfg = tmp_path / "config.json"
+    cfg.write_text('{"lanes": {"gemini": {"cost": "limited"}}}')
+    monkeypatch.setenv("CLI_BRIDGE_CONFIG_FILE", str(cfg))
+    monkeypatch.setenv("CLI_BRIDGE_GPT_COST", "free")        # host-set, will shadow forever
+    monkeypatch.delenv("CLI_BRIDGE_GEMINI_COST", raising=False)
+    try:
+        config.apply_file_config_to_env()
+        assert "CLI_BRIDGE_GPT_COST" in config.ENV_PRESET_KEYS   # flagged as host-env
+        assert os.environ["CLI_BRIDGE_GEMINI_COST"] == "limited"  # file filled the unset one
+    finally:
+        # apply_file_config_to_env writes os.environ directly — monkeypatch can't undo that
+        os.environ.pop("CLI_BRIDGE_GEMINI_COST", None)
+
+
+def test_no_french_in_shipped_lane_strings():
+    # The published package is English; lane registry strings must not ship in French.
+    import re
+    for ln in lanes.BUILTIN_LANES:
+        for s in (ln.cost_note, ln.install_hint, ln.note):
+            assert not re.search(r"\b(modèles|privé|aucun|puis|sur ta)\b", s or ""), (ln.key, s)

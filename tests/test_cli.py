@@ -170,3 +170,30 @@ def test_eval_live_runs_both_arms(monkeypatch, capsys):
               "--single-lane", "gpt", "--k", "4", "--repeats", "1", "--json"])
     data = json.loads(capsys.readouterr().out)
     assert data["tool"] == "eval" and data["k"] == 4 and data["single_lane"] == "gpt"
+
+
+def test_set_cost_persists_to_config_file(tmp_path, monkeypatch, capsys):
+    cfg = tmp_path / "config.json"
+    monkeypatch.setenv("CLI_BRIDGE_CONFIG_FILE", str(cfg))
+    monkeypatch.delenv("CLI_BRIDGE_OLLAMA_COST", raising=False)
+    cli.main(["set-cost", "ollama", "limited", "--note", "slow on this machine"])
+    out = capsys.readouterr().out
+    assert "persisted" in out
+    data = json.loads(cfg.read_text())
+    assert data["lanes"]["ollama"] == {"cost": "limited", "cost_note": "slow on this machine"}
+
+
+def test_set_cost_warns_when_env_shadows(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("CLI_BRIDGE_CONFIG_FILE", str(tmp_path / "c.json"))
+    monkeypatch.setenv("CLI_BRIDGE_OLLAMA_COST", "free")     # env wins over the file
+    cli.main(["set-cost", "ollama", "limited"])
+    assert "env wins" in capsys.readouterr().out
+
+
+def test_setup_write_keeps_profile_commented(tmp_path, monkeypatch, capsys):
+    # An uncommented CLI_BRIDGE_PROFILE in the template would count as "explicitly chosen"
+    # once sourced, silently disabling the first-run setup guidance.
+    path = tmp_path / "cli-bridge.env"
+    cli.main(["setup", "--write", str(path)])
+    line = next(ln for ln in path.read_text().splitlines() if "CLI_BRIDGE_PROFILE" in ln)
+    assert line.lstrip().startswith("#")

@@ -126,8 +126,10 @@ def _cmd_jobs(a):
 
 
 _ENV_TEMPLATE = """# cli-bridge configuration (source this, or set in your MCP server entry)
-# Cost profile: saver=free only · balanced=paid when asked · max=best by default
-CLI_BRIDGE_PROFILE={profile}
+# Profiles: saver=free-only fan-out (include_paid refused) · balanced=paid when asked · max=best
+# Commented out on purpose: an uncommented value would count as "explicitly chosen" and turn
+# off the first-run setup guidance. Uncomment after picking yours.
+# CLI_BRIDGE_PROFILE={profile}
 # Per-lane overrides (repeat per lane: GEMINI/GPT/CLAUDE/MISTRAL/OPENCODE/QWEN/COPILOT)
 # CLI_BRIDGE_<LANE>_COST=free|limited|paid
 # CLI_BRIDGE_<LANE>_ENABLED=false
@@ -295,8 +297,28 @@ def _cmd_eval(a):
     print(json.dumps(evals.result_dict(res), indent=2) if a.json else evals.render_markdown(res))
 
 
+def _cmd_set_cost(a):
+    if a.cost not in ("free", "limited", "paid"):
+        sys.exit("[error] cost must be free, limited or paid")
+    lane = a.lane.strip().lower()
+    fields = {"cost": a.cost}
+    if a.note:
+        fields["cost_note"] = a.note[:200]
+    path = config.update_config_file({lane: fields})
+    if not path:
+        sys.exit("[error] config file not writable")
+    print(f"Lane '{lane}' cost set to '{a.cost}' — persisted to {path}.")
+    env_key = lane.upper().replace("-", "_")
+    import os
+    if f"CLI_BRIDGE_{env_key}_COST" in os.environ:
+        print(f"⚠️ CLI_BRIDGE_{env_key}_COST is set in your environment — env wins over the "
+              "config file; unset it for this value to apply.")
+
+
 def _cmd_setup(a):
     print(config.SETUP_TEXT)
+    print("\n(From this terminal, persist a tier with: "
+          "cli-bridge set-cost <lane> <free|limited|paid> --note '...')")
     if a.write is None:
         return
     path = a.write or "cli-bridge.env"
@@ -318,6 +340,12 @@ def build_parser() -> argparse.ArgumentParser:
     d = sub.add_parser("doctor", help="show installed CLIs, host, cost profile")
     d.add_argument("--deep", action="store_true", help="live-probe each free lane's auth")
     d.set_defaults(func=_cmd_doctor)
+
+    sc = sub.add_parser("set-cost", help="record what a lane costs YOU (persists to the config file)")
+    sc.add_argument("lane", help="lane key (see doctor)")
+    sc.add_argument("cost", choices=["free", "limited", "paid"])
+    sc.add_argument("--note", default="", help="one line saying who/what established this")
+    sc.set_defaults(func=_cmd_set_cost)
 
     ask = sub.add_parser("ask", help="ask one lane")
     ask.add_argument("lane")

@@ -441,7 +441,7 @@ BUILTIN_LANES: list[LaneSpec] = [
              probe_flags=("-p", "--agent", "--trust"),
              client_ids=frozenset({"vibe", "mistral"}),
              install_hint="see Mistral Vibe CLI docs (`vibe`)",
-             note="Mistral free tier. Lightweight quick takes. model=<id> selects via "
+             note="Mistral (Vibe CLI). Lightweight quick takes. model=<id> selects via "
                   "VIBE_ACTIVE_MODEL (e.g. a devstral coding model, if your vibe exposes it); "
                   "empty = vibe's default. agent='build' EDITS files. Default plan = read-only."),
     LaneSpec("opencode", "OpenCode (gateway to many models)", "opencode", _opencode_ask,
@@ -497,14 +497,14 @@ BUILTIN_LANES: list[LaneSpec] = [
                   "experimental — run `doctor deep` to check flags against `grok --help`."),
     LaneSpec("ollama", "Ollama (local models)", "ollama", _ollama_ask,
              cost_default="free",
-             cost_note="modèles locaux — $0, sur ta machine, privé/offline (aucun appel réseau).",
+             cost_note="local models — $0, on your machine, private/offline (no network calls).",
              models_args=["list"], help_args=["run", "--help"],
              caps=frozenset({"model"}), env_ask=_ollama_env,
              probe_flags=("--hidethinking",),
              client_ids=frozenset({"ollama"}),
              install_hint="macOS: brew install ollama · Linux: curl -fsSL "
-                          "https://ollama.com/install.sh | sh ; puis `ollama pull <model>`",
-             note="Local via ollama. $0, privé, offline. Read-only (no build). Empty model = the "
+                          "https://ollama.com/install.sh | sh ; then `ollama pull <model>`",
+             note="Local via ollama. $0, private, offline. Read-only (no build). Empty model = the "
                   "first model from `ollama list`. Max decorrelation for the jury — but note a "
                   "local runtime of open weights still correlates with OTHER local runtimes of the "
                   "same weights; real jury diversity comes from distinct vendors."),
