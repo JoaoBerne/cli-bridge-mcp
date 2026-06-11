@@ -89,6 +89,14 @@ class LaneSpec:
     # Some CLIs pick a model via an ENV var, not a flag (e.g. vibe reads VIBE_ACTIVE_MODEL). A
     # lane may supply extra env vars for the spawn via this builder; default = none.
     env_ask: Callable[..., dict] | None = None
+    # Native session continuity for round-table turns (an optimization over transcript replay —
+    # replay stays the cross-lane source of truth). Two modes:
+    #   mint:    we generate the handle and hand it to the CLI ({"mode":"mint",
+    #            "first":[...{sid}...], "resume":[...{sid}...]})
+    #   capture: the CLI names its session in officially-flagged output ({"mode":"capture",
+    #            "spawn":[flags...], "pattern": regex, "resume":[...{sid}...]})
+    # Extra argv is inserted just before the task (the last argv element). None = replay only.
+    native_session: dict | None = None
 
     def _env(self, suffix: str) -> str:
         # Env vars can't contain '-', but tool keys can; map so a 'my-lane' key still reads
@@ -462,6 +470,9 @@ BUILTIN_LANES: list[LaneSpec] = [
              probe_flags=("--print", "--permission-mode"),
              client_ids=frozenset({"claude-code", "claude", "claude-desktop"}),
              install_hint="npm i -g @anthropic-ai/claude-code  (then `claude` to log in)",
+             native_session={"mode": "mint",                       # verified live 2026-06-12
+                             "first": ["--session-id", "{sid}"],
+                             "resume": ["--resume", "{sid}"]},
              note="Anthropic. Strong all-round reasoning. model=claude-opus-4-6/claude-sonnet-4-6 "
                   "etc; agent='build' EDITS files (acceptEdits). Default plan = read-only."),
     LaneSpec("gpt", "GPT (OpenAI Codex CLI)", "codex", _codex_ask,
@@ -508,6 +519,10 @@ BUILTIN_LANES: list[LaneSpec] = [
              probe_flags=("--agent", "-m"),
              client_ids=frozenset({"opencode"}),
              install_hint="curl -fsSL https://opencode.ai/install | bash",
+             native_session={"mode": "capture",                    # verified live 2026-06-12
+                             "spawn": ["--print-logs"],            # logs (stderr) name the session
+                             "pattern": r"ses_[A-Za-z0-9]{10,}",
+                             "resume": ["-s", "{sid}"]},
              note=("Gateway to deepseek/qwen/glm/kimi/minimax/... Empty model = a discovered "
                    "'opencode/*-free' model ($0, rate-limited; may train on your data during its "
                    "free period). PAID otherwise: a bare 'opencode/*' Zen model bills per-token "

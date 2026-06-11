@@ -7,6 +7,17 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Native session continuity on round-table turns** (user-driven design): lanes that can hold
+  their own session now resume it natively instead of replaying the whole transcript — the
+  prompt carries only the DELTA other lanes added since. Two mechanisms, both live-verified:
+  **claude** mints its own handle (`--session-id <uuid>` then `--resume`), **opencode**'s
+  session is captured from its officially-flagged `--print-logs` output (stderr) then resumed
+  with `-s`. The sqlite transcript stays the cross-lane source of truth (every turn is still
+  recorded; threads still hop lanes freely); a broken native resume drops the handle and the
+  next turn falls back to full replay. Native turns are never served from the response cache.
+  `CLI_BRIDGE_NATIVE_SESSIONS=off` forces pure replay. vibe/agy/codex print no machine-readable
+  handle in non-interactive mode today — they join automatically the day they do (lane data,
+  no code).
 - **Rolling summary on round-table threads**: when a thread outgrows the replay budget
   (`CLI_BRIDGE_CONVO_MAX_CHARS`), the oldest turns are no longer silently dropped off the
   window — the lane that just answered (it had the full history in front of it; no third
