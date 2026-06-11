@@ -462,10 +462,11 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                                   "description": "research_verify: questions to answer + verify."},
                     "lanes": {"type": "array", "items": {"type": "string"},
                               "description": "Lane keys to use (default: the free council). "
-                                             "fanout_compare also accepts 'lane:model' entries — "
-                                             "e.g. ['opencode:deepseek-v4-flash-free', "
-                                             "'opencode:mimo-v2.5-free'] compares several models "
-                                             "of ONE lane side by side."},
+                                             "fanout_compare also accepts 'lane:model' entries "
+                                             "(model = the FULL id the CLI expects) — e.g. "
+                                             "['opencode:opencode/deepseek-v4-flash-free', "
+                                             "'opencode:opencode/mimo-v2.5-free'] compares several "
+                                             "models of ONE lane side by side."},
                     "lane": {"type": "string", "description": "map_review: the single reviewer lane."},
                     "builder_lane": {"type": "string",
                                      "description": "verify_repair: lane that produces (default: "
@@ -769,14 +770,23 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
         if build_lanes:
             tools.append(Tool(
                 name="ask_build",
-                description=("Commission a build-capable lane to do REAL work. mode=isolated "
-                             "(default) edits a throwaway worktree and returns a diff — your repo "
-                             "is untouched. mode=direct builds straight into a target dir, guarded "
-                             "by git + a ZONE contract: the delegate may write only inside `zone`, "
-                             "all undo is zone-scoped (never a global reset), a per-zone lock stops "
-                             "races, and any file written OUTSIDE the zone is detected and the "
-                             "build rejected — so the host can build other parts in the SAME repo "
-                             "in parallel. Greenfield dirs are created and git-initialised."),
+                description=("DELEGATE real implementation work to another model — a second pair "
+                             "of hands, not just advice. REACH FOR THIS (instead of editing "
+                             "everything yourself) when a task is well-scoped enough to brief — a "
+                             "bug fix, a refactor, a new module, a greenfield scaffold — and you "
+                             "want a reviewable result while you keep working, a cheaper model to "
+                             "do the mechanical part, or an implementation you'll compare against "
+                             "your own. Write the brief like a good ticket: files, constraints, "
+                             "tests to run. mode=isolated (default) edits a throwaway worktree and "
+                             "returns a DIFF to review then apply (git apply) — your repo is "
+                             "untouched. mode=direct builds straight into a target dir, guarded by "
+                             "git + a ZONE contract: the delegate may write only inside `zone`, "
+                             "all undo is zone-scoped (never a global reset), a per-zone lock "
+                             "stops races, and any file written OUTSIDE the zone is detected and "
+                             "the build rejected — so the host can build other parts of the SAME "
+                             "repo in parallel. async=true makes direct builds steerable mid-run "
+                             "(job_tail / build_steer / DoD gate). Greenfield dirs are created "
+                             "and git-initialised."),
                 inputSchema={
                     "type": "object",
                     "properties": {

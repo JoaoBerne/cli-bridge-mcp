@@ -56,6 +56,21 @@ _REDACTIONS = (
      r"\1[redacted]"),
 )
 
+# ANSI escape cleanup — delegate CLIs (notably ollama) write cursor moves / erase / color
+# sequences into captured stdout. CSI must accept private-mode params ('?2026h', '?25l') and
+# intermediate bytes, not just digits; charset selection (ESC ( B) is 3 bytes, not 2.
+_ANSI_RE = re.compile(
+    r"\x1b\[[0-9;?]*[ -/]*[@-~]"     # CSI: ESC [ params intermediates final
+    r"|\x1b\].*?(?:\x1b\\|\x07)"     # OSC: ESC ] … terminated by ST or BEL
+    r"|\x1b[()][0-9A-Za-z]"          # charset selection: ESC ( B etc.
+    r"|\x1b."                        # lone ESC + single byte (DECSC etc.)
+)
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_RE.sub("", text)
+
+
 # stderr fingerprints -> a stable, actionable error kind the caller can branch on.
 _QUOTA = re.compile(r"RESOURCE_EXHAUSTED|quota|rate.?limit|too many requests|\b429\b", re.I)
 _AUTH = re.compile(r"unauthorized|not logged in|authenticat|login required|\b401\b|api key", re.I)
@@ -251,7 +266,8 @@ async def _arun_streamed(proc, argv: list[str], timeout_s: int, on_line, log_pat
             if not raw:                            # EOF
                 break
             last_activity = time.monotonic()
-            text = redact(raw.decode("utf-8", "replace"))   # redact before it leaves the process
+            # strip ANSI then redact, before the text leaves the process
+            text = redact(_strip_ansi(raw.decode("utf-8", "replace")))
             sink.append(text)
             if log_fh:
                 log_fh.write(text)
@@ -366,6 +382,7 @@ async def arun(argv: list[str], timeout_s: int, cwd: str | None = None,
         log.info("%s cancelled by host (process group killed)", argv[0])
         raise
     res = _finish(proc.returncode,
-                  out_b.decode("utf-8", "replace"), err_b.decode("utf-8", "replace"), argv)
+                  _strip_ansi(out_b.decode("utf-8", "replace")),
+                  _strip_ansi(err_b.decode("utf-8", "replace")), argv)
     log.info("%s exit=%s kind=%s out=%dch", argv[0], proc.returncode, res.kind, len(res.output))
     return res

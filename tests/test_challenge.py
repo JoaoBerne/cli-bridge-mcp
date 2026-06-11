@@ -52,3 +52,27 @@ def test_challenge_dispatch_picks_explicit_lane(isolate, monkeypatch):
 
     out = asyncio.run(server.call_tool("challenge", {"task": "claim", "lane": "gpt"}))[0].text
     assert used["lane"] == "gpt" and "skeptic: GPT" in out
+
+
+def test_challenge_falls_back_when_first_lane_fails():
+    a = LaneSpec("gemini", "Gemini", "echo", lambda *x: [])
+    b = LaneSpec("opencode", "Opencode", "echo", lambda *x: [])
+
+    async def run_lane(lane, args, *, tool="ask", terse=True):
+        if lane.key == "gemini":
+            return RunResult(False, "", "empty")
+        return RunResult(True, "solid counter-argument", "ok")
+    out = asyncio.run(workflows.challenge([a, b], {"task": "claim"}, run_lane))
+    assert "skeptic: Opencode" in out and "solid counter-argument" in out
+    assert "fell back after" in out and "Gemini (empty)" in out
+
+
+def test_challenge_reports_all_failures():
+    a = LaneSpec("gemini", "Gemini", "echo", lambda *x: [])
+    b = LaneSpec("opencode", "Opencode", "echo", lambda *x: [])
+
+    async def run_lane(lane, args, *, tool="ask", terse=True):
+        return RunResult(False, "boom", "failed")
+    out = asyncio.run(workflows.challenge([a, b], {"task": "claim"}, run_lane))
+    assert "challenge FAILED" in out
+    assert "Gemini (failed)" in out and "Opencode (failed)" in out

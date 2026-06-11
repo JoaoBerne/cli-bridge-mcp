@@ -909,13 +909,21 @@ async def challenge(targets: list[LaneSpec], args: dict, run_lane) -> str:
         return ("[error] no lane available to challenge. Install/login a CLI, name a `lane`, or "
                 "widen with include_paid=true / CLI_BRIDGE_PROFILE=max.")
     timeout = _timeout(args.get("timeout_s"))
-    lane = targets[0]
-    res = await run_lane(lane, {"task": challenge_prompt(claim), "timeout_s": timeout},
-                         tool="challenge")
-    if not res.ok:
-        return f"[challenge via {lane.display} FAILED ({res.kind})]\n{res.output}".strip()
+    # Try targets in order — a quota-empty free lane fails with empty output, and a single
+    # skeptic that says nothing is worse than falling through to the next available one.
+    res, lane, tried = None, targets[0], []
+    for lane in targets:
+        res = await run_lane(lane, {"task": challenge_prompt(claim), "timeout_s": timeout},
+                             tool="challenge")
+        if res.ok:
+            break
+        tried.append(f"{lane.display} ({res.kind})")
+    if res is None or not res.ok:
+        return (f"[challenge FAILED — tried: {', '.join(tried)}]\n{res.output if res else ''}"
+                .strip())
+    note = f"\n\n_(fell back after: {', '.join(tried)})_" if tried else ""
     return (f"# Challenge — skeptic: {lane.display}\n\n"
-            f"_Claim:_ {one_phrase(claim, 200)}\n\n{res.output.strip()}")
+            f"_Claim:_ {one_phrase(claim, 200)}\n\n{res.output.strip()}{note}")
 
 
 # ── consensus: anonymized peer-ranking + chairman synthesis ───────────────────────────────
