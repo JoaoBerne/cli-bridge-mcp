@@ -462,3 +462,41 @@ def test_fanout_compare_judge_recommends_one():
         telemetry=tel, task="fix", judge_lane="j"))
     assert "sol-a" in captured["task"] and "sol-b" in captured["task"]   # judge sees all options
     assert "Synthesis" in report
+
+
+# ── lane:model entries (multi-model same-lane council) ─────────────────────────────────────
+
+def test_fanout_compare_lane_model_entries(tmp_path, monkeypatch):
+    # Real user need: a council of several FREE models of one gateway lane (e.g. opencode),
+    # without hand-writing one custom lane per model.
+    monkeypatch.setenv("CLI_BRIDGE_STATE_DB", str(tmp_path / "s.sqlite"))
+    from cli_bridge import orchestrate, telemetry
+    from cli_bridge.lanes import LaneSpec
+    oc = LaneSpec("opencode", "OC", "echo", lambda *a: [])
+    seen = []
+
+    async def fake_run_lane(lane, args, *, tool="ask", terse=True):
+        seen.append((lane.key, args.get("model")))
+        return RunResult(True, f"answer from {args.get('model')}", "ok", latency_ms=1)
+
+    out = asyncio.run(orchestrate.fanout_compare(
+        run_lane=fake_run_lane, resolve_lane=lambda k: oc if k == "opencode" else None,
+        default_lanes=[oc], telemetry=telemetry, task="compare me",
+        lanes=["opencode:model-a", "opencode:model-b"]))
+    assert seen == [("opencode", "model-a"), ("opencode", "model-b")]
+    assert "opencode (model-a)" in out and "opencode (model-b)" in out   # labeled per model
+
+
+def test_fanout_compare_plain_lane_entries_unchanged(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLI_BRIDGE_STATE_DB", str(tmp_path / "s.sqlite"))
+    from cli_bridge import orchestrate, telemetry
+    from cli_bridge.lanes import LaneSpec
+    oc = LaneSpec("gemini", "G", "echo", lambda *a: [])
+
+    async def fake_run_lane(lane, args, *, tool="ask", terse=True):
+        return RunResult(True, "hi", "ok", latency_ms=1)
+
+    out = asyncio.run(orchestrate.fanout_compare(
+        run_lane=fake_run_lane, resolve_lane=lambda k: oc if k == "gemini" else None,
+        default_lanes=[oc], telemetry=telemetry, task="t", lanes=["gemini"]))
+    assert "gemini" in out and "(model" not in out                        # no spurious model tag
