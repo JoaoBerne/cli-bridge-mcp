@@ -4,6 +4,29 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project aims for
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **ANSI escape cleanup in the runner**: delegate CLIs (notably ollama) wrote cursor-move /
+  erase / color sequences (`ESC[6D`, `ESC[K`, `ESC[?25l`…) into captured output, polluting
+  council reports. Both the buffered and streaming paths now strip CSI (incl. private-mode
+  params), OSC and charset sequences before redaction. Found by a live full-surface test.
+- **`challenge` falls back across lanes**: when no `lane` is named, a quota-empty skeptic no
+  longer kills the call — the next free lane is tried, and the answer notes the fallback.
+  An explicitly named lane still fails plainly (you chose it; no silent substitution).
+- **Steerable builds: false "changed 0 files" warning**: per-turn change detection compared
+  `git status --porcelain` snapshots only, which cannot see a CONTENT edit of an
+  already-untracked file (`??` before and after). A zone fingerprint (mtime+size) now backs
+  the check, so a turn that edits files it created earlier is no longer flagged as a plan-leak.
+- **`fanout_compare` doc example was wrong**: `lane:model` entries need the FULL model id the
+  CLI expects (`opencode:opencode/mimo-v2.5-free`, not `opencode:mimo-v2.5-free`) — the tool
+  description, schema and docstrings now show working ids.
+
+### Changed
+- **`ask_build` description rewritten for host AIs**: it now leads with WHEN to delegate
+  (well-scoped fixes, mechanical work on a cheaper lane, parallel implementation to compare)
+  instead of only the safety mechanics — observed in live testing that hosts under-used it.
+
 ## [0.1.2] - 2026-06-11
 
 ### Added

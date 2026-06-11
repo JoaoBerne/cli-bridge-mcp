@@ -240,3 +240,23 @@ def test_second_build_same_zone_refused_while_first_holds_lock(repo, tmp_path):
             _state(tmp_path), run_lane=_writer_fake([]), lane=_lane(),
             args={"task": "t", "target_dir": str(repo), "zone": "frontend"}, steer_grace_s=0))
     assert "already running on zone" in report
+
+
+def test_content_edit_of_untracked_file_is_not_a_zero_files_turn(repo, tmp_path):
+    # Porcelain alone is blind here: an untracked file is '??' before AND after a content edit,
+    # so the old per-turn check fired a false "changed 0 files" warning. The fingerprint must see it.
+    pre = repo / "frontend"
+    pre.mkdir()
+    (pre / "f.txt").write_text("old\n")
+
+    async def run_lane(lane, args, *, tool="ask", terse=True):
+        with open(os.path.join(args["cwd"], "frontend", "f.txt"), "w") as fh:
+            fh.write("new, longer content\n")
+        return RunResult(True, "edited", "ok", latency_ms=10)
+
+    state = _state(tmp_path)
+    report = asyncio.run(buildloop.run_build(
+        state, run_lane=run_lane, lane=_lane(),
+        args={"task": "t", "target_dir": str(repo), "zone": "frontend"}, steer_grace_s=0))
+    assert "built" in report
+    assert "changed 0 files" not in open(state.log_path).read()

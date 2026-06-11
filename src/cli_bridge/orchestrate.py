@@ -478,7 +478,7 @@ def _compare(results: list[dict], task: str) -> str:
 
 
 def _parse_lane_entries(lane_keys, resolve_lane, default_lanes):
-    """Resolve ['gpt', 'opencode:deepseek-v4-flash-free', …] to (LaneSpec, model) pairs.
+    """Resolve ['gpt', 'opencode:opencode/deepseek-v4-flash-free', …] to (LaneSpec, model) pairs.
     The 'lane:model' form lets ONE gateway lane field several of its models side by side —
     e.g. a council of opencode's free models — without hand-writing custom lanes."""
     if not lane_keys:

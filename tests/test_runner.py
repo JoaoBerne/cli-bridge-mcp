@@ -209,3 +209,52 @@ def test_streaming_stall_guard_kills_silent_cli():
     r = _run_stream(["sh", "-c", "echo hi; sleep 30"], 30,
                     on_line=lambda *a: None, no_output_timeout=1)
     assert not r.ok and r.kind == "stalled" and "hi" in r.output
+
+
+# ── ANSI strip ────────────────────────────────────────────────────────────────────────────────
+
+
+def test_strip_ansi_removes_cursor_move_and_erase():
+    assert runner._strip_ansi("hello\x1b[6Dworld\x1b[K") == "helloworld"
+
+
+def test_strip_ansi_removes_color_codes():
+    assert runner._strip_ansi("\x1b[31mred\x1b[0m \x1b[38;5;196mhi") == "red hi"
+
+
+def test_strip_ansi_removes_private_mode_csi():
+    # ollama emits private-mode sequences: ESC[?2026h (sync update), ESC[?25l (hide cursor)
+    assert runner._strip_ansi("\x1b[?2026h\x1b[?25l\x1b[1Gok\x1b[?25h\x1b[?2026l") == "ok"
+
+
+def test_strip_ansi_removes_osc_title():
+    assert runner._strip_ansi("\x1b]0;my title\x07text") == "text"
+    assert runner._strip_ansi("\x1b]8;;https://x\x1b\\link") == "link"
+
+
+def test_strip_ansi_removes_charset_and_lone_esc():
+    assert runner._strip_ansi("a\x1b(Bb") == "ab"      # charset selection: 3 bytes, all gone
+    assert runner._strip_ansi("a\x1b7b") == "ab"       # DECSC: 2 bytes
+
+
+def test_strip_ansi_leaves_plain_text():
+    assert runner._strip_ansi("[ok] plain text 123") == "[ok] plain text 123"
+
+
+def test_ansi_stripped_before_redact():
+    # ANSI inside a secret line must be stripped so redaction still matches
+    r = _run(["sh", "-c", r"printf 'api_key=\x1b[31msupersecretvalue123\x1b[0m\n'"], 30)
+    assert "supersecretvalue123" not in r.output
+
+
+def test_ansi_stripped_buffered_path():
+    r = _run(["sh", "-c", r"printf '\x1b[?25l\x1b[31mhello\x1b[0m\x1b[?25h\n'"], 30)
+    assert r.ok and "hello" in r.output and "\x1b" not in r.output
+
+
+def test_ansi_stripped_streaming_path():
+    seen = []
+    r = _run_stream(["sh", "-c", r"printf '\x1b[31mhello\x1b[0m\n'"], 30,
+                    on_line=lambda s, t: seen.append(t))
+    assert r.ok and "hello" in r.output and "\x1b" not in r.output
+    assert all("\x1b" not in line for line in seen)

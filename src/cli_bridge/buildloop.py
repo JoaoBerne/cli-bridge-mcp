@@ -145,6 +145,24 @@ def _changed_in_zone(before: dict, after: dict, zone_rel: str) -> list[str]:
     return sorted(out)
 
 
+def _zone_fingerprint(root: str, zone_rel: str) -> dict[str, tuple[int, int]]:
+    """Map zone-file path -> (mtime_ns, size). Porcelain status alone can't see a CONTENT edit
+    of an already-untracked file ('??' before and after), so the per-turn did-it-act check
+    needs this second signal. Best-effort: stat races just mean a skipped warning."""
+    base = os.path.join(root, zone_rel) if zone_rel else root
+    fp: dict[str, tuple[int, int]] = {}
+    for dirpath, dirnames, filenames in os.walk(base):
+        dirnames[:] = [d for d in dirnames if d != ".git"]
+        for name in filenames:
+            full = os.path.join(dirpath, name)
+            try:
+                st = os.stat(full)
+                fp[os.path.relpath(full, root)] = (st.st_mtime_ns, st.st_size)
+            except OSError:
+                continue
+    return fp
+
+
 def _steer_block(steers: list[str]) -> str:
     body = "\n".join(f"- {s}" for s in steers)
     return ("<<<HOST_STEERING>>>\n"
@@ -267,6 +285,7 @@ async def _loop(state, *, run_lane, lane, task, interface, dod_text, dod_cmd, mo
         state.note = f"running turn {state.turn}"
         prompt = _compose_prompt(task, interface, dod_text, state)
         before = worktrees._porcelain(state.root)
+        before_fp = _zone_fingerprint(state.root, state.zone_rel)
         _append(state.log_path, f"\n=== turn {state.turn}/{state.max_turns} ===\n")
 
         state.turn_task = asyncio.create_task(run_lane(
@@ -302,7 +321,8 @@ async def _loop(state, *, run_lane, lane, task, interface, dod_text, dod_cmd, mo
 
         changed_total = _changed_in_zone(before0, after, state.zone_rel)
         state.files_changed = len(changed_total)
-        if not _changed_in_zone(before, after, state.zone_rel):
+        if (not _changed_in_zone(before, after, state.zone_rel)
+                and _zone_fingerprint(state.root, state.zone_rel) == before_fp):
             _append(state.log_path,
                     "warning: this turn changed 0 files in the zone (planned instead of acting?)\n")
 
