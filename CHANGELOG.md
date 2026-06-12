@@ -18,6 +18,9 @@ All notable changes to this project are documented here. The format follows
   make an agentic host consult the council on its own, with a cost-safety note. Docs only.
 
 ### Changed
+- **README hero is pain-first.** Opens with the user's problem ("your assistant is only as good as
+  the one model you opened") before the mechanism, and names the concrete payoffs (bigger context,
+  vision, cross-vendor second opinion, reviewable-diff build). Adds a GitHub-stars badge. Docs only.
 - **Server `instructions` — "when to consult" wording.** "A second opinion before shipping" →
   "a second opinion before shipping something risky or hard to reverse", removing the internal
   contradiction with the adjacent "don't convene a council for one-liners". Keeps the flagship
