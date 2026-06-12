@@ -430,6 +430,15 @@ async def ask_build_direct(lane: LaneSpec, args: dict, run_lane,
     # expressed relative to the repo ROOT for porcelain comparisons.
     raw_zone = (args.get("zone") or "").strip()
     zone_abs = os.path.abspath(os.path.join(target_dir, raw_zone)) if raw_zone else target_dir
+    if raw_zone:                      # zone must stay UNDER target_dir ('..' / absolute escapes)
+        tgt_abs = os.path.abspath(target_dir)
+        try:
+            inside = os.path.commonpath([tgt_abs, zone_abs]) == tgt_abs
+        except ValueError:            # different drives (Windows) — definitely outside
+            inside = False
+        if not inside:
+            return (f"[error] zone {raw_zone!r} escapes target_dir — the zone contract only "
+                    "holds for a sub-path of the build directory.")
     zone_rel = _relposix(os.path.relpath(zone_abs, root))
     zone_label = os.path.relpath(zone_abs, target_dir)
     if zone_label == ".":

@@ -691,6 +691,18 @@ def load_custom_lanes(path: str | None = None) -> list[LaneSpec]:
             ([model_flag] if model_flag else []) + [t for t in ask if t.startswith("-")]))
         if argv_secret_risk(ask):
             LANES_LOAD_STATUS["argv_secret_risk"].append(key)
+        # Native session continuity is plain lane DATA — a custom lane gets it from config,
+        # no code change ({"mode": "mint"|"capture", "first"/"spawn": [...], "pattern": "...",
+        # "resume": [..."{sid}"...]}). Malformed blocks are dropped (lane still works, replay).
+        ns_raw = item.get("native_session")
+        native = None
+        if (isinstance(ns_raw, dict) and str(ns_raw.get("mode", "")) in {"mint", "capture"}
+                and _str_list(ns_raw.get("resume"))):
+            native = {"mode": str(ns_raw["mode"]),
+                      "first": _str_list(ns_raw.get("first")) or [],
+                      "spawn": _str_list(ns_raw.get("spawn")) or [],
+                      "pattern": str(ns_raw.get("pattern", "")),
+                      "resume": _str_list(ns_raw.get("resume")) or []}
         lanes.append(LaneSpec(
             key=key,
             display=str(item.get("display", key)),
@@ -706,6 +718,7 @@ def load_custom_lanes(path: str | None = None) -> list[LaneSpec]:
             experimental=bool(item.get("experimental", False)),
             install_hint=str(item.get("install_hint", "")),
             note=str(item.get("note", "user-defined lane")),
+            native_session=native,
         ))
     LANES_LOAD_STATUS.update({"loaded": len(lanes), "skipped": skipped})
     return lanes

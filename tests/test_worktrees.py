@@ -178,3 +178,22 @@ def test_apply_default_off_keeps_repo_untouched(repo):
         _build_lane(), {"task": "t", "cwd": str(repo)}, rl))
     assert "NOT applied" in report or "NOT modified" in report
     assert not (repo / "x.py").exists()
+
+
+def test_apply_with_failed_build_applies_nothing(repo):
+    async def run_lane(lane, args, *, tool="ask", terse=True):
+        with open(os.path.join(args["cwd"], "junk.py"), "w") as fh:
+            fh.write("junk\n")
+        return RunResult(False, "build exploded", "failed")
+    report = asyncio.run(worktrees.ask_build_isolated(
+        _build_lane(), {"task": "t", "cwd": str(repo), "apply": True}, run_lane))
+    assert "APPLIED" not in report and "build exploded" in report
+    assert not (repo / "junk.py").exists()
+
+
+def test_direct_zone_escape_rejected(repo):
+    async def run_lane(lane, args, *, tool="ask", terse=True):
+        raise AssertionError("must never spawn")
+    report = asyncio.run(worktrees.ask_build_direct(
+        _build_lane(), {"task": "t", "target_dir": str(repo), "zone": "../outside"}, run_lane))
+    assert "escapes target_dir" in report
