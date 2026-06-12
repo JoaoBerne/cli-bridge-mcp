@@ -232,10 +232,11 @@ def _ask_schema(lane: LaneSpec) -> dict:
                       "description": f"Seconds before kill (default {DEFAULT_TIMEOUT_S}, "
                                      f"max {MAX_TIMEOUT_S})."},
         "conversation": {"type": "string",
-                         "description": "Round-table thread (multi-turn memory). Omit = "
-                         "stateless (default). 'new' = start a thread; the returned id can be "
-                         "reused — even on a DIFFERENT lane — to continue. Or pass an existing "
-                         "id to keep going. Survives the host's context reset (/compact)."},
+                         "description": "Round-table thread (multi-turn memory). Omit = auto-thread: "
+                         "the ask still gets a fresh id you can reuse later to continue (no replay "
+                         "on this turn). 'new' is the same, explicit. Pass an existing id — even from "
+                         "a DIFFERENT lane — to continue that thread. Survives the host's context "
+                         "reset (/compact)."},
     }
     if "model" in lane.caps:
         props["model"] = {"type": "string",
@@ -1612,7 +1613,19 @@ async def _run_lane_maybe_convo(lane: LaneSpec, args: dict) -> tuple[runner.RunR
     Returns (result, conversation_id) where the id is "" when no thread is in play."""
     cid = _str(args, "conversation").strip()
     if not cid:
-        return await _run_lane(lane, args), ""
+        # Auto-thread: run as a plain ask (no replay, no native session — nothing to resume yet),
+        # then record the one exchange under a fresh id so it's resumable later without the caller
+        # having had to pass conversation='new'. Cache/behaviour of the run itself are unchanged.
+        if not config.convo_autothread_enabled():
+            return await _run_lane(lane, args), ""
+        res = await _run_lane(lane, args)
+        task = _str(args, "task")
+        if not (task and res.ok):           # nothing real to record → stay stateless, no dangling id
+            return res, ""
+        cid = conversations.new_id()
+        conversations.record_turn(cid, lane.key, "user", task)
+        conversations.record_turn(cid, lane.key, "assistant", res.output)
+        return res, cid
     if cid.lower() == "new":
         cid = conversations.new_id()
     elif not conversations.is_valid_id(cid):
