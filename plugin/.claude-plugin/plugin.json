@@ -5,7 +5,7 @@
   "author": { "name": "JoaoBerné" },
   "homepage": "https://github.com/JoaoBerne/cli-bridge-mcp",
   "repository": "https://github.com/JoaoBerne/cli-bridge-mcp",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "keywords": ["mcp", "multi-model", "council", "code-review", "delegation"],
   "mcpServers": {
     "cli-bridge": {

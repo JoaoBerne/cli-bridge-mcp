@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project aims for
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **License: MIT → Apache 2.0.** Same permissive terms and zero adoption cost, plus an explicit
+  patent grant and patent-retaliation clause (a contributor's patents can't later be used to sue
+  users of the project). Adds a `NOTICE` file. No code or behavior change.
+
 ## [0.1.3] - 2026-06-12
 
 ### Added
