@@ -181,3 +181,68 @@ def test_prune_cascades_native_sessions(monkeypatch):
     telemetry.convo_session_set("old-thread", "claude", "uuid-old", 1)
     telemetry.convo_append("new-thread", "claude", "user", "y")        # prunes old-thread
     assert telemetry.convo_session("old-thread", "claude") == ("", 0)  # cascaded
+
+
+def test_capture_pattern_no_match_stores_nothing(monkeypatch):
+    lane = LaneSpec("opencode", "Opencode", "echo", lambda *a: [], native_session=CAPTURE)
+
+    async def fake_run_lane(ln, args, *, tool="ask", terse=True):
+        return RunResult(True, "answer", "ok", err="no session marker in these logs")
+    monkeypatch.setattr(server, "_run_lane", fake_run_lane)
+
+    _res, cid = _convo(lane, {"task": "t1", "conversation": "new"})
+    assert telemetry.convo_session(cid, "opencode") == ("", 0)   # nothing captured
+    # next turn retries capture (spawn flags again), never a bogus resume
+    seen = []
+
+    async def fake2(ln, args, *, tool="ask", terse=True):
+        seen.append(args.get("_native_argv"))
+        return RunResult(True, "a", "ok", err="still nothing")
+    monkeypatch.setattr(server, "_run_lane", fake2)
+    _convo(lane, {"task": "t2", "conversation": cid})
+    assert seen[0] == ["--print-logs"]
+
+
+def test_native_turn_never_served_from_cache(monkeypatch):
+    # Same prompt twice on a native-session thread must spawn twice — inside a session the
+    # same text means something different (the vendor holds prior context the key can't see).
+    monkeypatch.setenv("CLI_BRIDGE_CACHE_TTL_S", "3600")
+    import importlib
+
+    from cli_bridge import config as cfg
+    importlib.reload(cfg)
+    try:
+        lane = LaneSpec("claude", "Claude", "echo", lambda *a: [], native_session=MINT)
+        spawns = []
+
+        async def fake_run_lane(ln, args, *, tool="ask", terse=True):
+            spawns.append(args["task"])
+            return RunResult(True, "answer", "ok")
+        monkeypatch.setattr(server, "_run_lane", fake_run_lane)
+        _res, cid = _convo(lane, {"task": "same text", "conversation": "new"})
+        _convo(lane, {"task": "same text", "conversation": cid})
+        assert len(spawns) == 2                      # no cache hit on the second turn
+    finally:
+        monkeypatch.delenv("CLI_BRIDGE_CACHE_TTL_S")
+        importlib.reload(cfg)
+
+
+def test_custom_lane_json_native_session(tmp_path):
+    import json as _json
+
+    from cli_bridge import lanes as lanes_mod
+    path = tmp_path / "lanes.json"
+    path.write_text(_json.dumps([{
+        "key": "mycli", "bin": "echo", "ask": ["run", "{task}"],
+        "native_session": {"mode": "capture", "spawn": ["--vs"],
+                           "pattern": "sess-[0-9]+", "resume": ["--resume", "{sid}"]},
+    }, {
+        "key": "badns", "bin": "echo", "ask": ["{task}"],
+        "native_session": {"mode": "weird"},
+    }]))
+    loaded = lanes_mod.load_custom_lanes(str(path))
+    by_key = {ln.key: ln for ln in loaded}
+    assert by_key["mycli"].native_session == {
+        "mode": "capture", "first": [], "spawn": ["--vs"],
+        "pattern": "sess-[0-9]+", "resume": ["--resume", "{sid}"]}
+    assert by_key["badns"].native_session is None    # malformed block dropped, lane kept

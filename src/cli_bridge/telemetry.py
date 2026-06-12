@@ -11,6 +11,7 @@ every call is best-effort and must NEVER break a delegation if the DB is unavail
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
 import sqlite3
@@ -703,6 +704,8 @@ def convo_append(conversation_id: str, lane: str, role: str, content: str) -> in
             conn.commit()
             return turn_number
     except sqlite3.Error:
+        with contextlib.suppress(sqlite3.Error):   # multi-statement: don't leak half a txn
+            conn.rollback()
         return 0
 
 
@@ -816,6 +819,10 @@ def convo_compact(conversation_id: str, upto_n: int, summary: str, lane: str = "
             conn.commit()
             return True
     except sqlite3.Error:
+        # roll back the open transaction: without this, the DELETE half of an interrupted
+        # fold would ride along with the NEXT successful commit on this shared connection
+        with contextlib.suppress(sqlite3.Error):
+            conn.rollback()
         return False
 
 

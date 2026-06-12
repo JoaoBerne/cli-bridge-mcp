@@ -1,0 +1,31 @@
+[
+  {
+    "//": "Custom lane WITH native session continuity — pure config, no code change.",
+    "//1": "native_session lets a round-table thread resume the CLI's own session instead of",
+    "//2": "replaying the whole transcript (the prompt then carries only the cross-lane delta).",
+    "//3": "Two modes:",
+    "//4": "  mint    — cli-bridge generates the handle and hands it to the CLI ('first' argv",
+    "//5": "            on the thread's first turn, 'resume' argv after; {sid} = the handle).",
+    "//6": "  capture — the CLI names its session in officially-flagged output: spawn with the",
+    "//7": "            'spawn' argv, capture the first 'pattern' regex match (stdout+stderr),",
+    "//8": "            resume with the 'resume' argv.",
+    "//9": "The sqlite transcript stays the cross-lane source of truth either way; a broken",
+    "//10": "resume falls back to full replay automatically. Built-in references:",
+    "//11": "  claude   = mint:    first ['--session-id','{sid}'], resume ['--resume','{sid}']",
+    "//12": "  opencode = capture: spawn ['--print-logs'], pattern 'ses_[A-Za-z0-9]{10,}', resume ['-s','{sid}']",
+    "//13": "IMPORTANT: keep {task} as the LAST element of 'ask' — session argv is inserted just before it.",
+
+    "key": "mycli",
+    "display": "My CLI (sessions)",
+    "bin": "mycli",
+    "model_flag": "--model",
+    "cost": "free",
+    "ask": ["run", "-p", "{task}"],
+    "native_session": {
+      "mode": "capture",
+      "spawn": ["--verbose-session"],
+      "pattern": "session-[a-f0-9]{12}",
+      "resume": ["--resume", "{sid}"]
+    }
+  }
+]

@@ -111,6 +111,10 @@ def compaction_plan(conversation_id: str, max_chars: int) -> tuple[int, str]:
         if used > keep_budget:
             cut = i + 1
             break
+    # The newest exchange (user + assistant) must survive verbatim even when it alone blows
+    # the keep budget — otherwise a single huge turn would fold the ENTIRE thread, including
+    # the answer the caller just received.
+    cut = min(cut, len(turns) - 2)
     if cut < 2:                                   # nothing meaningful to fold — keep as is
         return 0, ""
     old = turns[:cut]

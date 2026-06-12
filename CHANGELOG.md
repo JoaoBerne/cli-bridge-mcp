@@ -7,6 +7,10 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Custom lanes can declare `native_session` in JSON** (`CLI_BRIDGE_LANES_FILE`): adding
+  session continuity to your own CLI is config, not code — see
+  `examples/native-session.lane.json` (mint/capture, same contract as the built-ins;
+  malformed blocks are dropped and the lane falls back to replay).
 - **Native session continuity on round-table turns** (user-driven design): lanes that can hold
   their own session now resume it natively instead of replaying the whole transcript — the
   prompt carries only the DELTA other lanes added since. Two mechanisms, both live-verified:
@@ -32,6 +36,15 @@ All notable changes to this project are documented here. The format follows
   order — one less decision when any free builder will do; an explicit lane still wins.
 
 ### Fixed
+- **Full-review pass (multi-model, hand-triaged)** over everything above:
+  a huge newest turn no longer folds the ENTIRE thread (the latest exchange always survives
+  compaction verbatim); the buildloop fingerprint stats only porcelain-listed paths instead
+  of walking the zone (no more node_modules/.venv scans — and content edits of tracked-dirty
+  files are now caught too); interrupted multi-statement telemetry writes roll back instead
+  of leaking half a transaction into the next commit; a `zone` containing `..`/absolute
+  escapes of `target_dir` is rejected before any filesystem work; vibe read-only asks use the
+  `default` agent (answers in-chat; vibe's `plan` agent writes plan files instead of
+  answering — and `-p` enforces read-only regardless, verified live).
 - **ANSI escape cleanup in the runner**: delegate CLIs (notably ollama) wrote cursor-move /
   erase / color sequences (`ESC[6D`, `ESC[K`, `ESC[?25l`…) into captured output, polluting
   council reports. Both the buffered and streaming paths now strip CSI (incl. private-mode

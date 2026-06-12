@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from cli_bridge import conversations, server, telemetry
+from cli_bridge import config, conversations, server, telemetry
 from cli_bridge.lanes import LaneSpec
 from cli_bridge.runner import RunResult
 
@@ -151,3 +151,40 @@ def test_failed_summarizer_not_retried_every_turn(monkeypatch):
             lane, {"task": f"q{i} " + "w" * 500, "conversation": cid or "new"}))
     assert len(summary_calls) == 1                 # one failure → cooldown, no per-turn retry
     server._COMPACT_FAILED_AT.clear()
+
+
+def test_huge_newest_turn_never_folds_the_whole_thread():
+    # Review finding (high): when the newest turn alone exceeds keep_budget, cut reached
+    # len(turns) and the WHOLE thread — including the exchange just made — got folded.
+    telemetry.convo_append("c6", "opencode", "user", "early question")
+    telemetry.convo_append("c6", "opencode", "assistant", "early answer")
+    telemetry.convo_append("c6", "opencode", "user", "latest question")
+    telemetry.convo_append("c6", "opencode", "assistant", "HUGE " + "x" * 9000)
+    upto, excerpt = conversations.compaction_plan("c6", 4000)
+    if upto:                                       # if it folds at all…
+        turns = telemetry.convo_turns("c6")
+        kept = [t for t in turns if t["turn_number"] > upto]
+        assert any("HUGE" in t["content"] for t in kept)      # …newest answer stays verbatim
+        assert any(t["role"] == "user" and "latest" in t["content"] for t in kept)
+    assert "HUGE" not in excerpt
+
+
+def test_second_compaction_folds_existing_summary(monkeypatch):
+    # Long-lived thread: fold once, grow past the budget again — the next plan's excerpt must
+    # include the previous summary turn (summaries fold into one, never stack or vanish).
+    _fill("c7", 6)
+    upto, _ = conversations.compaction_plan("c7", 2000)
+    assert upto and telemetry.convo_compact("c7", upto, "FIRST-SUMMARY", "opencode")
+    _fill("c7", 6)                                 # grow again
+    upto2, excerpt2 = conversations.compaction_plan("c7", 2000)
+    assert upto2 > upto
+    assert "FIRST-SUMMARY" in excerpt2             # old summary folds into the next one
+
+
+def test_summary_env_parsing(monkeypatch):
+    for val, expected in [("", True), ("on", True), ("OFF", False), ("false", False),
+                          ("0", False), ("no", False), (" off ", False), ("disabled", True)]:
+        monkeypatch.setenv("CLI_BRIDGE_CONVO_SUMMARY", val)
+        assert config.convo_summary_enabled() is expected, val
+    monkeypatch.delenv("CLI_BRIDGE_CONVO_SUMMARY")
+    assert config.convo_summary_enabled() is True
