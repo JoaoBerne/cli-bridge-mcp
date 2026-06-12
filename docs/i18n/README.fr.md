@@ -12,12 +12,13 @@ _Le README anglais fait foi ; cette traduction peut être en retard sur lui._
 
 ![CI](https://github.com/JoaoBerne/cli-bridge-mcp/actions/workflows/tests.yml/badge.svg)
 ![PyPI](https://img.shields.io/pypi/v/cli-bridge-mcp)
+![stars](https://img.shields.io/github/stars/JoaoBerne/cli-bridge-mcp?style=flat&color=yellow)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![license](https://img.shields.io/badge/license-Apache%202.0-green)
 ![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-server-purple)
 ![ban--safe](https://img.shields.io/badge/ban--safe-no%20token%20extraction-orange)
 
-**Un serveur [Model Context Protocol](https://modelcontextprotocol.io) qui permet à votre assistant IA d'appeler les *autres* CLI IA déjà installées sur votre machine.**
+**Votre assistant ne vaut que le seul modèle que vous avez ouvert.** cli-bridge est un serveur [Model Context Protocol](https://modelcontextprotocol.io) qui lui permet d'emprunter les *autres* CLI IA que vous avez déjà — un contexte plus grand, la vision, un second avis gratuit d'un *autre éditeur*, ou un build délégué qui revient sous forme de diff relisible.
 
 > **Pas de clés API · pas d'extraction de jetons · pas de Node · pas de démon · stdlib + `mcp` uniquement.**
 

@@ -12,12 +12,13 @@ _Das englische README ist maßgeblich; diese Übersetzung kann hinterherhinken. 
 
 ![CI](https://github.com/JoaoBerne/cli-bridge-mcp/actions/workflows/tests.yml/badge.svg)
 ![PyPI](https://img.shields.io/pypi/v/cli-bridge-mcp)
+![stars](https://img.shields.io/github/stars/JoaoBerne/cli-bridge-mcp?style=flat&color=yellow)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![license](https://img.shields.io/badge/license-Apache%202.0-green)
 ![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-server-purple)
 ![ban--safe](https://img.shields.io/badge/ban--safe-no%20token%20extraction-orange)
 
-**Ein [Model-Context-Protocol](https://modelcontextprotocol.io)-Server, mit dem dein KI-Assistent die *anderen* KI-CLIs aufrufen kann, die du schon installiert hast.**
+**Dein Assistent ist nur so gut wie das eine Modell, das du geöffnet hast.** cli-bridge ist ein [Model Context Protocol](https://modelcontextprotocol.io)-Server, der ihn die *anderen* KI-CLIs ausleihen lässt, die du ohnehin schon nutzt — ein größeres Kontextfenster, Vision, eine kostenlose Zweitmeinung von einem *anderen Anbieter* oder ein delegierter Build, der als prüfbares Diff zurückkommt.
 
 > **Keine API-Schlüssel · keine Token-Extraktion · kein Node · kein Daemon · nur stdlib + `mcp`.**
 
