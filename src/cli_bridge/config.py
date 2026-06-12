@@ -351,6 +351,17 @@ def convo_summary_enabled() -> bool:
         "off", "false", "0", "no")
 
 
+def convo_autothread_enabled() -> bool:
+    """Auto-thread direct asks: an `ask_<lane>` call with no `conversation` still records its one
+    exchange under a fresh thread id and returns it, so ANY ask is resumable later (the round-table
+    feature, without having to remember conversation='new' up front). No replay and no native
+    session on the first turn — it runs exactly like a plain ask, just persisted. Only a real,
+    successful exchange is recorded. CLI_BRIDGE_CONVO_AUTOTHREAD=off restores pure-stateless asks
+    (nothing stored, no id returned)."""
+    return os.environ.get("CLI_BRIDGE_CONVO_AUTOTHREAD", "").strip().lower() not in (
+        "off", "false", "0", "no")
+
+
 def convo_max_stored() -> int:
     """Keep at most this many conversations in the local DB (oldest pruned whole). Threads are
     session-scoped in spirit — no need to hoard old ones forever. Clamped 1..100000."""

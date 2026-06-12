@@ -52,17 +52,45 @@ def test_thread_memory_crosses_lanes(monkeypatch):
     assert cid in listed
 
 
-def test_no_conversation_is_stateless(monkeypatch):
+def test_no_conversation_autothreads_by_default(monkeypatch):
     seen: dict[str, str] = {}
+
+    async def fake_run_lane(lane, args, *, tool="ask", terse=True):
+        seen[lane.key] = args["task"]
+        return RunResult(True, "gemini-says: hi", "ok", latency_ms=1)
+    monkeypatch.setattr(server, "_run_lane", fake_run_lane)
+
+    out = asyncio.run(server.call_tool("ask_gemini", {"task": "plain ask"}))[0].text
+    assert seen["gemini"] == "plain ask"          # ran exactly like a plain ask (no prefix)
+    cid = re.search(r"\[conversation: (\w+)\]", out).group(1)   # id surfaced → resumable
+    rows = telemetry.convo_turns(cid)             # the one exchange was recorded under it
+    assert [r["role"] for r in rows] == ["user", "assistant"]
+    assert rows[1]["content"] == "gemini-says: hi"
+
+
+def test_autothread_off_is_stateless(monkeypatch):
+    seen: dict[str, str] = {}
+    monkeypatch.setenv("CLI_BRIDGE_CONVO_AUTOTHREAD", "off")
 
     async def fake_run_lane(lane, args, *, tool="ask", terse=True):
         seen[lane.key] = args["task"]
         return RunResult(True, "ok", "ok", latency_ms=1)
     monkeypatch.setattr(server, "_run_lane", fake_run_lane)
 
-    asyncio.run(server.call_tool("ask_gemini", {"task": "plain ask"}))
+    out = asyncio.run(server.call_tool("ask_gemini", {"task": "plain ask"}))[0].text
     assert seen["gemini"] == "plain ask"          # no prefix, no thread
+    assert "[conversation:" not in out            # no id returned
     assert telemetry.convo_list() == []           # nothing recorded
+
+
+def test_failed_ask_records_nothing(monkeypatch):
+    async def fake_run_lane(lane, args, *, tool="ask", terse=True):
+        return RunResult(False, "boom", "failed", latency_ms=1)
+    monkeypatch.setattr(server, "_run_lane", fake_run_lane)
+
+    out = asyncio.run(server.call_tool("ask_gemini", {"task": "plain ask"}))[0].text
+    assert "[conversation:" not in out            # no dangling id on a failed exchange
+    assert telemetry.convo_list() == []
 
 
 def test_bad_conversation_id_rejected(monkeypatch):

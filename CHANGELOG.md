@@ -7,6 +7,12 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Auto-threaded asks — every direct `ask_<lane>` is resumable.** An ask with no `conversation`
+  now records its one exchange under a fresh thread id and returns it, so you can continue it later
+  (on any lane) without having had to pass `conversation='new'` up front. It runs exactly like a
+  plain ask (no replay, no native session on that first turn — cache/behaviour unchanged); only a
+  real, successful exchange is stored. `CLI_BRIDGE_CONVO_AUTOTHREAD=off` restores pure-stateless
+  asks (nothing stored, no id returned).
 - **`docs/HOSTS.md`** — per-host MCP config locations (Claude Code, Cursor, VS Code, Cline,
   Windsurf, Continue.dev, Zed, Visual Studio 2026, Neovim, Xcode) and a drop-in rules snippet to
   make an agentic host consult the council on its own, with a cost-safety note. Docs only.
