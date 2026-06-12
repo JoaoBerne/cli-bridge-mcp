@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **`docs/HOSTS.md`** — per-host MCP config locations (Claude Code, Cursor, VS Code, Cline,
+  Windsurf, Continue.dev, Zed, Visual Studio 2026, Neovim, Xcode) and a drop-in rules snippet to
+  make an agentic host consult the council on its own, with a cost-safety note. Docs only.
+
 ### Changed
 - **License: MIT → Apache 2.0.** Same permissive terms and zero adoption cost, plus an explicit
   patent grant and patent-retaliation clause (a contributor's patents can't later be used to sue
