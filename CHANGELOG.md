@@ -12,6 +12,10 @@ All notable changes to this project are documented here. The format follows
   make an agentic host consult the council on its own, with a cost-safety note. Docs only.
 
 ### Changed
+- **Server `instructions` — "when to consult" wording.** "A second opinion before shipping" →
+  "a second opinion before shipping something risky or hard to reverse", removing the internal
+  contradiction with the adjacent "don't convene a council for one-liners". Keeps the flagship
+  pre-ship review trigger; no behavioral posture change.
 - **License: MIT → Apache 2.0.** Same permissive terms and zero adoption cost, plus an explicit
   patent grant and patent-retaliation clause (a contributor's patents can't later be used to sue
   users of the project). Adds a `NOTICE` file. No code or behavior change.
