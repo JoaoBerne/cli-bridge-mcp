@@ -317,6 +317,8 @@ hand. Point the host at the same command:
   }
   ```
   Full example with env vars: [`examples/mcp.example.json`](examples/mcp.example.json).
+  Per-host config paths (Cursor, VS Code, Cline, Windsurf, Continue, Zed, Visual Studio, Neovim,
+  Xcode) and how to make your agent consult it on its own: [`docs/HOSTS.md`](docs/HOSTS.md).
 
 > Note: `cli-bridge-mcp` (the MCP server) is the host entry point; `cli-bridge` (no `-mcp`) is the
 > human terminal CLI you ran for `doctor` in step 1.
