@@ -23,6 +23,14 @@ All notable changes to this project are documented here. The format follows
   make an agentic host consult the council on its own, with a cost-safety note. Docs only.
 
 ### Changed
+- **`server.py` split into focused modules (internal; no behavior change).** The 2,589-line
+  dispatch module was carved down to ~1,110 by moving the tool-schema assembly to `schemas.py`,
+  the markdown reports + `doctor` diagnostics to `reports.py`, the MCP prompt builders to
+  `prompts.py`, and the resource payloads to `resources.py` — each a pure module that never imports
+  `server`. The hot path (`_run_lane`), the `call_tool` dispatch tree and the request-context glue
+  stay in `server.py`; the moved symbols are re-exported so the MCP surface and the test-pinned
+  `server.*` names are byte-identical. `doctor`/`doctor_deep` take their host-detection + lane-runner
+  couplings injected (the same pattern as `council.py`). 648 tests, ruff and mypy unchanged.
 - **README hero is pain-first.** Opens with the user's problem ("your assistant is only as good as
   the one model you opened") before the mechanism, and names the concrete payoffs (bigger context,
   vision, cross-vendor second opinion, reviewable-diff build). Adds a GitHub-stars badge. Docs only.

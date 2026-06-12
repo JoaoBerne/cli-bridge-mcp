@@ -13,7 +13,11 @@ default. Pure-stdlib + `mcp` only.
 
 ```
 src/cli_bridge/
-  server.py     # MCP surface: tool list, dispatch, doctor/setup. Keep thin.
+  server.py     # MCP surface: @decorators, call_tool dispatch, hot path (_run_lane), request-context glue. Keep thin.
+  schemas.py    # tool-schema assembly (_tools_for/_ask_schema/_filter_tools) — pure, re-exported by server
+  reports.py    # doctor/doctor_deep + _render_* markdown + setup recommendation (injected is_host/run_lane)
+  prompts.py    # MCP prompt builders + _PROMPTS registry (host-native slash commands, pure)
+  resources.py  # MCP resource payloads: config snapshot + review-result JSON schema (pure)
   lanes.py      # LaneSpec registry + argv builders + custom-lane JSON loader
   runner.py     # subprocess exec, redaction, process-tree kill, error classification
   config.py     # env parsing, cost profile, timeouts, onboarding text
