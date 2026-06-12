@@ -1,36 +1,38 @@
 {
-  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.JoaoBerne/cli-bridge-mcp",
-  "description": "Consult a council of AI CLIs (Gemini, GPT, Claude, Mistral, Qwen, Copilot, OpenCode\u2026) from inside any MCP client \u2014 free and ban-safe.",
-  "version": "0.1.3",
+  "description": "A council of other AI CLIs (Gemini, GPT, Claude, opencode, Ollama) for any MCP host — ban-safe, no API keys.",
+  "version": "0.1.4",
+  "websiteUrl": "https://github.com/JoaoBerne/cli-bridge-mcp",
   "repository": {
     "url": "https://github.com/JoaoBerne/cli-bridge-mcp",
     "source": "github"
   },
   "packages": [
     {
-      "registry_name": "pypi",
-      "name": "cli-bridge-mcp",
-      "version": "0.1.3",
-      "runtime_hint": "uvx",
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "cli-bridge-mcp",
+      "version": "0.1.4",
+      "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"
       },
-      "environment_variables": [
+      "environmentVariables": [
         {
           "name": "CLI_BRIDGE_PROFILE",
           "description": "Cost profile: saver (free-only fan-out, include_paid refused) | balanced (paid only with include_paid) | max (limited/paid join fan-out).",
-          "is_required": false
+          "isRequired": false
         },
         {
           "name": "CLI_BRIDGE_TERSE",
           "description": "Response-style preamble level: off | lite (default) | full | ultra.",
-          "is_required": false
+          "isRequired": false
         },
         {
           "name": "CLI_BRIDGE_CACHE_TTL_S",
           "description": "Response cache TTL in seconds. 0 = off (default).",
-          "is_required": false
+          "isRequired": false
         }
       ]
     }

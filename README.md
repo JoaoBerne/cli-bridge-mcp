@@ -1,3 +1,4 @@
+<!-- mcp-name: io.github.JoaoBerne/cli-bridge-mcp -->
 <div align="center">
 
 <img src="https://raw.githubusercontent.com/JoaoBerne/cli-bridge-mcp/main/assets/banner.gif" width="860" alt="cli-bridge — your assistant borrows the powers of every AI CLI you already have: huge-context reads, vision, parallel builds, cross-vendor checks">

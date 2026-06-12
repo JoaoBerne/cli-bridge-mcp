@@ -7,6 +7,11 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Official MCP registry manifest.** `server.json` updated to the current `2025-12-11` schema
+  (`registryType`/`identifier`/`runtimeHint` field names) and an invisible `mcp-name` ownership
+  marker added to the README, so the server can be published to registry.modelcontextprotocol.io
+  with `mcp-publisher`. The registry validates the marker against the *published* PyPI README, so
+  this lands with the next PyPI release.
 - **Auto-threaded asks — every direct `ask_<lane>` is resumable.** An ask with no `conversation`
   now records its one exchange under a fresh thread id and returns it, so you can continue it later
   (on any lane) without having had to pass `conversation='new'` up front. It runs exactly like a
