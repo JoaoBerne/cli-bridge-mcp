@@ -13,7 +13,7 @@ _Le README anglais fait foi ; cette traduction peut être en retard sur lui._
 ![CI](https://github.com/JoaoBerne/cli-bridge-mcp/actions/workflows/tests.yml/badge.svg)
 ![PyPI](https://img.shields.io/pypi/v/cli-bridge-mcp)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
-![license](https://img.shields.io/badge/license-MIT-green)
+![license](https://img.shields.io/badge/license-Apache%202.0-green)
 ![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-server-purple)
 ![ban--safe](https://img.shields.io/badge/ban--safe-no%20token%20extraction-orange)
 
@@ -356,7 +356,7 @@ pytest -q          # unit + integration (cross-host) tests; no real CLI or netwo
 
 ## Licence
 
-MIT
+Apache 2.0
 
 ---
 

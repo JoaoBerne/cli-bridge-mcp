@@ -46,4 +46,4 @@ injected `run_lane` so it's testable with fakes.
 - Describe the *why*, not just the *what*. Note any new env var or tool.
 - Update `CHANGELOG.md` under "Unreleased".
 
-By contributing you agree your work is licensed under the project's MIT license.
+By contributing you agree your work is licensed under the project's Apache 2.0 license.
