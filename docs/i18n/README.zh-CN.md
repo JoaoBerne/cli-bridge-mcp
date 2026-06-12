@@ -12,12 +12,13 @@ _英文 README 为准；本翻译可能滞后。欢迎社区校对。_
 
 ![CI](https://github.com/JoaoBerne/cli-bridge-mcp/actions/workflows/tests.yml/badge.svg)
 ![PyPI](https://img.shields.io/pypi/v/cli-bridge-mcp)
+![stars](https://img.shields.io/github/stars/JoaoBerne/cli-bridge-mcp?style=flat&color=yellow)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![license](https://img.shields.io/badge/license-Apache%202.0-green)
 ![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-server-purple)
 ![ban--safe](https://img.shields.io/badge/ban--safe-no%20token%20extraction-orange)
 
-**一个 [Model Context Protocol](https://modelcontextprotocol.io) 服务器，让你的 AI 助手调用你已经装好的*其他* AI CLI。**
+**你的助手再强，也只等于你打开的那一个模型。** cli-bridge 是一个 [Model Context Protocol](https://modelcontextprotocol.io) 服务器，让它借用你已经在用的*其他* AI CLI——更大的上下文、视觉、来自*另一家厂商*的免费第二意见，或一个以可审查 diff 形式返回的委托构建。
 
 > **无 API 密钥 · 不抽取令牌 · 无 Node · 无守护进程 · 仅 stdlib + `mcp`。**
 

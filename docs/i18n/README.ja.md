@@ -12,12 +12,13 @@ _英語版 README が正本です。この翻訳は遅れている場合があ�
 
 ![CI](https://github.com/JoaoBerne/cli-bridge-mcp/actions/workflows/tests.yml/badge.svg)
 ![PyPI](https://img.shields.io/pypi/v/cli-bridge-mcp)
+![stars](https://img.shields.io/github/stars/JoaoBerne/cli-bridge-mcp?style=flat&color=yellow)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![license](https://img.shields.io/badge/license-Apache%202.0-green)
 ![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-server-purple)
 ![ban--safe](https://img.shields.io/badge/ban--safe-no%20token%20extraction-orange)
 
-**インストール済みの*他の* AI CLI を、あなたの AI アシスタントから呼び出せるようにする [Model Context Protocol](https://modelcontextprotocol.io) サーバー。**
+**あなたのアシスタントは、開いたその一つのモデル以上にはなれません。** cli-bridge は [Model Context Protocol](https://modelcontextprotocol.io) サーバーで、すでに使っている*他の* AI CLI を借りられるようにします — より大きなコンテキスト、ビジョン、*別ベンダー*からの無料のセカンドオピニオン、あるいはレビュー可能な diff として返ってくる委譲ビルド。
 
 > **API キー不要 · トークン抽出なし · Node 不要 · デーモン不要 · stdlib + `mcp` のみ。**
 
