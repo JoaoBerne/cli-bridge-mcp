@@ -7,6 +7,21 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **`workflow preset=converge` — governance converge-loop (flagship).** An author lane drafts a
+  plan; an independent **arbiter** commits a **blind verdict** *before* seeing any peer; **anonymized
+  cross-family** peers review; the arbiter **adjudicates every issue with a mandatory reason**; then
+  revise-or-converge, bounded by `max_rounds` (default 5, capped at 6). Three governance guarantees
+  are enforced *in code* by a pure state machine (`consensus_loop.py`), not by trusting the host:
+  **blind-verdict-first**, **no-silent-dismissal** (dismiss/defer require a reason; an un-ruled issue
+  fails closed to an accepted blocker), and **no-self-approval** (the peers must carry it — ≥1
+  responding peer, all APPROVE, none REJECT, zero accepted blockers, and the arbiter's own blind
+  verdict APPROVE). Confidence is read off the settling round. Fully tested with no network (pure
+  machine + fake-lane driver).
+- **Optional issue-category taxonomy on findings.** `review_diff` / `security_review` reviewers now
+  tag each finding with a category from a closed set `{security, correctness, scope, ambiguity,
+  performance, ops}` — orthogonal to severity. The markdown report gains a per-type breakdown line
+  and an inline tag; the JSON result carries `category`. Backward-compatible: an unrecognised or
+  absent category stays null (we classify, we never invent). Reused by the converge-loop above.
 - **Official MCP registry manifest.** `server.json` updated to the current `2025-12-11` schema
   (`registryType`/`identifier`/`runtimeHint` field names) and an invisible `mcp-name` ownership
   marker added to the README, so the server can be published to registry.modelcontextprotocol.io

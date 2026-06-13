@@ -234,14 +234,18 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                          "questions then adversarially cross-check them. verify_repair: one lane "
                          "builds, a DIFFERENT model reviews, repair loop until approved (cross-model "
                          "= uncorrelated blind spots). fanout_compare: same task to N lanes, answers "
-                         "side by side to pick/merge. All resumable (resume_id) and async-able."),
+                         "side by side to pick/merge. converge: governance loop — an author drafts, "
+                         "an independent ARBITER commits a BLIND verdict, anonymized cross-family "
+                         "peers review, the arbiter adjudicates every issue WITH A REASON, then "
+                         "revise-or-converge; converges only if the peers (not the arbiter alone) "
+                         "approve and no blocker remains. All resumable (resume_id) and async-able."),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "preset": {"type": "string",
                                "enum": ["refine_plan", "council_review", "map_review",
                                         "research_verify", "verify_repair", "fanout_compare",
-                                        "jury"],
+                                        "jury", "converge"],
                                "description": "Which workflow to run."},
                     "plan_file": {"type": "string",
                                   "description": "refine_plan: path to the plan (PREFERRED — read "
@@ -272,18 +276,26 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                                       "(default: first other council lane)."},
                     "max_rounds": {"type": "integer",
                                    "description": "verify_repair: build->verify->repair rounds "
-                                   f"(default 3, max {orchestrate.VERIFY_MAX_ROUNDS})."},
+                                   f"(default 3); converge: review->revise rounds (default 5); "
+                                   f"max {orchestrate.VERIFY_MAX_ROUNDS}."},
                     "cross_family": {"type": "boolean",
                                      "description": "verify_repair: pick the verifier from a "
                                      "DIFFERENT vendor family (default false)."},
                     "author_lane": {"type": "string",
-                                    "description": "jury: lane that produces the answer (default: "
-                                    "first council lane)."},
+                                    "description": "jury / converge: lane that drafts the answer "
+                                    "(default: first council lane)."},
+                    "arbiter_lane": {"type": "string",
+                                     "description": "converge: the independent decider that gives "
+                                     "the blind verdict + adjudicates (default: a cross-family lane)."},
+                    "peer_lanes": {"type": "array", "items": {"type": "string"},
+                                   "description": "converge: explicit peer reviewer lanes (default: "
+                                   "cross-family, distinct from author + arbiter)."},
                     "verifier_lanes": {"type": "array", "items": {"type": "string"},
                                        "description": "jury: explicit verifier lanes (default: "
                                        "auto-picked from DIFFERENT vendor families than the author)."},
                     "verifiers": {"type": "integer",
-                                  "description": "jury: how many verifiers (default min(3, pool))."},
+                                  "description": "jury verifiers / converge peers — how many "
+                                  "(default min(3, pool))."},
                     "threshold": {"type": "integer",
                                   "description": "jury: PASS votes needed to APPROVE (default "
                                   "majority); short of it = REJECTED, fail-closed."},

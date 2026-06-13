@@ -26,8 +26,9 @@ src/cli_bridge/
   council.py    # ask_all/ask_cascade/ask_best/synthesize fan-out (injected run_lane — like workflows)
   jobs.py       # in-process async jobs (ask_all_async) + sqlite persistence
   workflows.py  # review_diff/security_review/debate + prechecks + council recap
-  orchestrate.py # batch_run durable fan-out + presets (refine_plan/verify_repair/fanout_compare/…)
-  findings.py   # parse/merge/render structured review findings (pure)
+  orchestrate.py # batch_run durable fan-out + presets (refine_plan/verify_repair/fanout_compare/converge)
+  consensus_loop.py # converge-loop PURE state machine (3 governance guards, no I/O) — driven by orchestrate
+  findings.py   # parse/merge/render structured review findings (pure; optional category taxonomy)
   guards.py     # injection/tool-poisoning output guard (CLI_BRIDGE_GUARD)
   worktrees.py  # ask_build (isolated worktree diff | direct zone-guarded write + artifact return)
   buildloop.py  # steerable multi-turn builds: job_tail/build_steer, executable DoD gate
@@ -100,6 +101,11 @@ Gemini `images=` vision (experimental). **Local + council quality + quota resili
 a known rival), **`seat_report`** earn-their-seat (`jury_outcomes` telemetry benches dead-weight lanes
 on evidence), **discrete calibration binning** (eval bins on emitted confidences, N≥50 gate),
 **quota-empty cooldown with capped exponential backoff** (never infinite, success-resets).
+**Governance + classification:** **optional issue-category taxonomy** on findings (`{security,
+correctness, scope, ambiguity, performance, ops}`, orthogonal to severity, never invented),
+**`workflow preset=converge`** governance loop — a PURE state machine (`consensus_loop.py`)
+enforcing blind-verdict-first + no-silent-dismissal + no-self-approval in code (author → blind
+arbiter → anonymized cross-family peers → reasoned adjudication → revise/converge).
 
 ### Considered & deferred (rationale — not just "not yet")
 - **forced-pacing engine** — contradicts the model (cli-bridge delegates investigation to the

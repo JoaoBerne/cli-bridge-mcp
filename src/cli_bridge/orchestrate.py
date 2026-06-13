@@ -25,7 +25,8 @@ import os
 import re
 import uuid
 
-from . import config, lanes
+from . import config, findings, lanes
+from . import consensus_loop as cl
 
 MAX_BATCH_TASKS = 64           # anti-runaway: the existing cost model governs spend; this caps count
 VERIFY_MAX_ROUNDS = 6          # hard cap on the build->verify->repair loop (cost guard)
@@ -604,3 +605,231 @@ async def jury(*, run_lane, resolve_lane, default_lanes, telemetry, task: str, a
                        else int((x["vote"] == "pass") == (verdict == "APPROVED")))
                       for x in votes])
     return _render_jury(author, answer, votes, verdict, passes, fails, k, n, agreement, degraded)
+
+
+# ── converge: governance loop (blind-verdict-first + no-silent-dismissal + no-self-approval) ──
+# Thin driver over the PURE consensus_loop state machine: an author drafts a plan, an independent
+# ARBITER commits a BLIND verdict before seeing anyone, cross-family ANONYMIZED peers review, the
+# arbiter adjudicates every issue with a mandatory reason, then revise-or-converge. The three
+# guards live in consensus_loop (enforced in code); this only feeds it real lane output.
+
+def _converge_author_prompt(task: str) -> str:
+    return ("Produce a complete, concrete PLAN / answer for the task below. It will be scrutinised "
+            "by independent peer reviewers and an arbiter, so make it specific and defensible — no "
+            f"hand-waving.\n\nTASK:\n{task}")
+
+
+_CONVERGE_BLIND = (
+    "You are the ARBITER. Judge the PLAN below ON ITS OWN MERITS — you have NOT seen anyone else's "
+    "opinion and you must commit your independent verdict NOW (it is recorded before any peer "
+    "review, so you cannot be anchored by them).\n\nTASK:\n{task}\n\nPLAN:\n{plan}\n\nGive a "
+    "one-paragraph assessment, then end with EXACTLY one line: `VERDICT: APPROVE` (ship it), "
+    "`VERDICT: REQUEST_CHANGES` (needs work), or `VERDICT: ABSTAIN` (cannot tell). Default to "
+    "REQUEST_CHANGES if unsure.")
+
+
+def _converge_peer_prompt(task: str, plan: str) -> str:
+    return (
+        "You are an independent reviewer. Review the PLAN for the TASK and surface ONLY genuine "
+        f"BLOCKING problems — do not pad with nitpicks or out-of-scope rewrites.\n\nTASK:\n{task}"
+        f"\n\nPLAN:\n{plan}\n\n"
+        'Return ONLY a JSON array of issues — each {"category": '
+        '"security|correctness|scope|ambiguity|performance|ops", "title": "<short>", "detail": '
+        '"<what is wrong and why it blocks>"}. Return [] if there are no blocking problems. '
+        "Then on a FINAL separate line write exactly one of: `STANCE: APPROVE` (ship as-is) or "
+        "`STANCE: REJECT` (must change first).")
+
+
+def _parse_verdict(text: str) -> str:
+    hits = re.findall(r"VERDICT:\s*(APPROVE|REQUEST_CHANGES|ABSTAIN)", text or "", re.IGNORECASE)
+    if not hits:
+        return cl.ABSTAIN                                       # fail-closed: no verdict => abstain
+    v = hits[-1].upper()
+    return cl.APPROVE if v == "APPROVE" else (cl.ABSTAIN if v == "ABSTAIN" else cl.REJECT)
+
+
+def _parse_stance(text: str) -> str:
+    hits = re.findall(r"STANCE:\s*(APPROVE|REJECT|ABSTAIN)", text or "", re.IGNORECASE)
+    return hits[-1].lower() if hits else cl.ABSTAIN             # fail-closed: no stance => abstain
+
+
+def _peer_issues(text: str, label: str) -> list:
+    """Parse a peer's JSON issue array into CriticalIssues. Tolerant + fail-safe: anything that
+    isn't a clean array of titled objects yields NO issues (the STANCE line still carries the
+    signal), so a chatty reply can't fabricate a blocker."""
+    val, _ = findings.extract_json(text or "")
+    out = []
+    if isinstance(val, list):
+        for idx, it in enumerate(val, 1):
+            if not isinstance(it, dict):
+                continue
+            title = str(it.get("title") or it.get("issue") or "").strip()
+            if not title:
+                continue
+            out.append(cl.CriticalIssue(
+                id=f"{label.replace(' ', '')}-{idx}", peer=label, title=title[:160],
+                detail=str(it.get("detail") or it.get("evidence") or "").strip()[:600],
+                category=findings.normalize_category(it.get("category") or it.get("type"))))
+    return out
+
+
+def _adjudicate_prompt(task: str, plan: str, issues: list) -> str:
+    listed = "\n".join(f"- [{i.id}] ({i.category or 'general'}) {i.title}: {i.detail}"
+                       for i in issues)
+    return ("You are the ARBITER. Peers raised the ISSUES below about the PLAN. Rule on EACH one "
+            "honestly: accept the real blockers, dismiss the wrong or out-of-scope ones, defer the "
+            f"real-but-non-blocking ones.\n\nTASK:\n{task}\n\nPLAN:\n{plan}\n\nISSUES:\n{listed}\n\n"
+            'Return ONLY a JSON array, one object per issue id: {"id": "<id>", "decision": '
+            '"accept|dismiss|defer", "reason": "<why — REQUIRED for dismiss and defer>"}. '
+            "accept = a real blocker the plan must fix; dismiss = not a real problem; defer = real "
+            "but can ship and fix later.")
+
+
+def _parse_adjudications(text: str, issues: list) -> list:
+    """Map the arbiter's JSON onto every issue. FAIL-CLOSED: an issue the arbiter ignored, or
+    dismissed/deferred without a reason, is upgraded to an ACCEPTED blocker — never silently
+    dropped. Guarantees submit_adjudication() receives a complete, reasoned set."""
+    val, _ = findings.extract_json(text or "")
+    by_id: dict[str, cl.Adjudication] = {}
+    if isinstance(val, list):
+        for it in val:
+            if isinstance(it, dict) and str(it.get("id") or "").strip():
+                dec = str(it.get("decision") or "").strip().lower()
+                if dec in cl._DECISIONS:
+                    iid = str(it["id"]).strip()
+                    by_id[iid] = cl.Adjudication(iid, dec, str(it.get("reason") or "").strip())
+    out = []
+    for i in issues:
+        a = by_id.get(i.id)
+        if a is None:
+            out.append(cl.Adjudication(i.id, cl.ACCEPT, "not adjudicated by arbiter — fail-closed"))
+        elif a.decision in cl._NEEDS_REASON and not a.reason:
+            out.append(cl.Adjudication(i.id, cl.ACCEPT, "dismissed without a reason — fail-closed"))
+        else:
+            out.append(a)
+    return out
+
+
+def _revise_prompt(task: str, plan: str, accepted: list) -> str:
+    items = "\n".join(f"- {i.title}: {i.detail}" for i in accepted) or "- (none)"
+    return ("Revise the PLAN to FULLY address the ACCEPTED blocking issues below. Keep what works; "
+            f"change only what the issues require.\n\nTASK:\n{task}\n\nCURRENT PLAN:\n{plan}\n\n"
+            "ACCEPTED ISSUES TO FIX:\n" + items + "\n\nReturn the COMPLETE revised plan.")
+
+
+def _converge_labels(peers: list) -> dict:
+    return {ln.key: f"Reviewer {chr(65 + i)}" for i, ln in enumerate(peers)}
+
+
+def _render_converge(report: dict, *, task: str, author, arbiter, panel, labels, final_plan) -> str:
+    banner = {cl.CONVERGED: "✅ CONVERGED", cl.UNRESOLVED: "⚠️ UNRESOLVED"}[report["outcome"]]
+    lines = [f"# converge — {banner}  (round {report['settled_round']}/{report['max_rounds']}, "
+             f"confidence {report['confidence']})",
+             f"_author: {author.display} · arbiter: {arbiter.display} · peers: "
+             + ", ".join(f"{labels[p.key]}={p.display}" for p in panel) + "_",
+             "",
+             "_Guards enforced: blind-verdict-first · no-silent-dismissal · no-self-approval "
+             "(peers carry it, not the arbiter)._",
+             "", "## Rounds", ""]
+    for h in report["history"]:
+        peers = ", ".join(f"{p['peer']}:{p['stance']}" + ("" if p["responded"] else "(no-run)")
+                          for p in h["peers"]) or "—"
+        lines.append(f"- **Round {h['round']}** — arbiter blind: `{h['blind_verdict']}` · peers: "
+                     f"{peers} · accepted: {h['accepted']} · deferred: {h['deferred']}")
+    if report["unaddressed_issues"]:
+        lines += ["", "## Unresolved blocking issues", ""]
+        lines += [f"- ({i['category'] or 'general'}) {i['title']} — _{i['peer']}_"
+                  for i in report["unaddressed_issues"]]
+    if report["residual_issues"]:
+        lines += ["", "## Deferred (non-blocking) — residual risk", ""]
+        lines += [f"- ({i['category'] or 'general'}) {i['title']} — _{i['peer']}_"
+                  for i in report["residual_issues"]]
+    lines += ["", "## Final plan", "", final_plan or "_(empty)_"]
+    return "\n".join(lines)
+
+
+async def converge(*, run_lane, resolve_lane, default_lanes, telemetry, task: str,
+                   author_lane: str = "", arbiter_lane: str = "", peer_lanes=None, peers: int = 0,
+                   max_rounds: int = 5, cwd: str = "", run_id: str = "", progress=None) -> str:
+    """Governance converge-loop. Author drafts -> arbiter blind verdict -> anonymized cross-family
+    peers review -> arbiter adjudicates (reasoned) -> revise or converge, bounded by max_rounds. The
+    three guards are enforced by consensus_loop; this driver only supplies real lane output."""
+    if not (task or "").strip():
+        return "[error] converge needs a task / plan goal."
+    author = resolve_lane(author_lane) if author_lane else (default_lanes[0] if default_lanes else None)
+    if author is None:
+        return "[error] no author lane available for converge."
+    if arbiter_lane:
+        arbiter = resolve_lane(arbiter_lane) or author
+    else:                                              # prefer an independent (cross-family) arbiter
+        arbiter = (next(iter(_cross_family_verifiers(default_lanes, author, 0)), None)
+                   or next((ln for ln in default_lanes if ln.key != author.key), None) or author)
+    exclude = {author.key, arbiter.key}
+    if peer_lanes:
+        panel = [ln for ln in (resolve_lane(k) for k in peer_lanes)
+                 if ln is not None and ln.key not in exclude]
+    else:
+        want = peers if peers > 0 else min(3, max(0, len(default_lanes) - 1))
+        panel = [ln for ln in _cross_family_verifiers(default_lanes, author, 0)
+                 if ln.key not in exclude][:want]
+        if not panel:                                  # mono-family / tiny pool: any distinct lane
+            panel = [ln for ln in default_lanes if ln.key not in exclude][:max(1, want)]
+    if not panel:
+        return ("[error] converge needs at least one peer lane distinct from the author and "
+                "arbiter — install/login another CLI or pass peer_lanes.")
+
+    labels = _converge_labels(panel)
+    sub = {"cwd": cwd} if cwd else {}
+    loop = cl.ConvergenceLoop(max_rounds=max(1, int(max_rounds or 5)))
+
+    ar = await run_lane(author, {**sub, "task": _converge_author_prompt(task)}, tool="converge")
+    if not ar.ok:
+        return f"# converge — author {author.display} FAILED ({ar.kind})\n\n{ar.render()}"
+    plan = ar.output.strip()
+
+    while True:
+        loop.prepare_round(plan)
+        # 1. arbiter's BLIND verdict — recorded before any peer is consulted (guard 1)
+        br = await run_lane(arbiter, {**sub, "task": _CONVERGE_BLIND.format(task=task, plan=plan)},
+                            tool="converge")
+        loop.record_blind_verdict(_parse_verdict(br.output) if br.ok else cl.ABSTAIN,
+                                  note=(br.output.strip()[:300] if br.ok else br.kind))
+        # 2. anonymized cross-family peers review the plan in parallel
+        ptasks = [{"lane": p.key, **sub, "task": _converge_peer_prompt(task, plan)}
+                  for p in panel]
+        _rid, presults = await batch_run(ptasks, run_lane=run_lane, resolve_lane=resolve_lane,
+                                         default_lane=panel[0], telemetry=telemetry, run_id=run_id,
+                                         progress=progress)
+        opinions = []
+        for p, r in zip(panel, presults, strict=False):
+            lab = labels[p.key]
+            if r["ok"]:
+                opinions.append(cl.PeerOpinion(peer=lab, stance=_parse_stance(r["output"]),
+                                               issues=_peer_issues(r["output"], lab), responded=True))
+            else:
+                opinions.append(cl.PeerOpinion(peer=lab, stance=cl.ABSTAIN, responded=False))
+        loop.add_opinions(opinions)
+        # 3. arbiter adjudicates EVERY issue with a mandatory reason (guards 2 + fail-closed)
+        issues = loop.current.issues()
+        if issues:
+            jr = await run_lane(arbiter, {**sub, "task": _adjudicate_prompt(task, plan, issues)},
+                                tool="converge")
+            adjs = _parse_adjudications(jr.output if jr.ok else "", issues)
+        else:
+            adjs = []
+        loop.submit_adjudication(adjs)
+        # 4. converge (guard 3) or revise
+        status = loop.check_convergence()
+        if status != "revise":
+            break
+        accepted = loop.accepted_issues()
+        rr = await run_lane(author, {**sub, "task": _revise_prompt(task, plan, accepted)},
+                            tool="converge")
+        if not rr.ok:
+            loop.mark_unresolved()
+            break
+        loop.request_revision()
+        plan = rr.output.strip()
+
+    return _render_converge(loop.finalize(), task=task, author=author, arbiter=arbiter,
+                            panel=panel, labels=labels, final_plan=plan)
