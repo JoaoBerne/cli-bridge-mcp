@@ -205,3 +205,45 @@ def test_result_json_schema():
     assert res["findings"][0]["file"] == "f.py" and res["findings"][0]["line"] == 3
     assert res["residual_risk"] == "r"
     json.dumps(res)   # must be serializable
+
+
+# ── category taxonomy ─────────────────────────────────────────────────────────────────────
+
+def test_normalize_category_aliases_and_none():
+    assert findings.normalize_category("SECURITY") == "security"
+    assert findings.normalize_category("perf") == "performance"
+    assert findings.normalize_category("overengineering") == "scope"
+    assert findings.normalize_category("unclear") == "ambiguity"
+    assert findings.normalize_category("deployment") == "ops"
+    assert findings.normalize_category("logic") == "correctness"
+    assert findings.normalize_category("") is None          # optional — never guessed
+    assert findings.normalize_category("bogus") is None
+
+
+def test_parse_carries_category():
+    txt = '[{"severity":"high","category":"security","title":"SQLi"},' \
+          '{"severity":"low","title":"naming"}]'
+    fs, ok = findings.parse_findings(txt, role="r", lane="L")
+    assert ok and fs[0].category == "security" and fs[1].category is None
+
+
+def test_merge_fills_category_from_either():
+    a = Finding("medium", "Same", "f.py", 5, models=["A"])               # no category
+    b = Finding("high", "same", "f.py", 5, models=["B"], category="security")
+    merged = findings.merge_findings([a, b])
+    assert len(merged) == 1 and merged[0].category == "security"
+
+
+def test_render_shows_category_breakdown_and_tag():
+    fs = [Finding("high", "SQLi", "db.py", 1, models=["G"], category="security"),
+          Finding("low", "naming", "x.py", 2, models=["G"])]
+    out = findings.render_markdown(fs, total_reviewers=1, heading="H", meta=_meta())
+    assert "_By type: 1 security_" in out
+    assert "_security_" in out                # inline tag on the categorized finding
+
+
+def test_result_json_includes_category():
+    fs = [Finding("high", "Bug", "f.py", 3, models=["G"], category="correctness")]
+    res = findings.result_json(fs, total_reviewers=1, tool="review_diff",
+                               summary="s", meta=_meta())
+    assert res["findings"][0]["category"] == "correctness"

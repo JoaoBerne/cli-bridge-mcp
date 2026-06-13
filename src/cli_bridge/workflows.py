@@ -83,13 +83,17 @@ def _assign(roles_def: list[tuple[str, str]],
 
 _JSON_RULES = (
     "Return ONLY a JSON array of findings — no prose, no markdown fences. Each finding is an "
-    'object: {"severity": "blocker|high|medium|low", "title": "<short label>", "file": '
+    'object: {"severity": "blocker|high|medium|low", "category": '
+    '"security|correctness|scope|ambiguity|performance|ops", "title": "<short label>", "file": '
     '"<path>" or null, "line": <int> or null, "evidence": "<what and why it is a problem>", '
     '"recommendation": "<concrete fix>"}. Use null for file/line when the exact location is '
     "not visible in the diff. Severity rubric — apply it, don't inflate: blocker = exploitable "
     "security flaw or certain crash/data loss on a main path; high = real incorrect behaviour "
     "on realistic input; medium = bug on an edge path, or a risky pattern likely to bite; "
-    "low = clarity/maintainability only. If there are no genuine issues, return []."
+    "low = clarity/maintainability only. Category = the kind of issue: security (vuln), "
+    "correctness (logic/edge-case bug), performance, scope (out-of-scope / overengineering), "
+    "ambiguity (unclear intent or spec), ops (build/deploy/config/observability). "
+    "If there are no genuine issues, return []."
 )
 
 
@@ -195,14 +199,14 @@ def prechecks(diff: str) -> list[findings.Finding]:
                     evidence=runner.redact(added.strip())[:120],
                     recommendation="Remove the secret, rotate it, and load it from an env var "
                                    "or secret store.",
-                    models=[findings.STATIC_SOURCE], roles=["precheck"]))
+                    models=[findings.STATIC_SOURCE], roles=["precheck"], category="security"))
                 break
         for pattern, sev, title, rec in _DANGEROUS:
             if pattern.search(added):
                 out.append(findings.Finding(
                     severity=sev, title=title, file=current,
                     evidence=f"`{added.strip()[:120]}`", recommendation=rec,
-                    models=[findings.STATIC_SOURCE], roles=["precheck"]))
+                    models=[findings.STATIC_SOURCE], roles=["precheck"], category="security"))
     return out
 
 
