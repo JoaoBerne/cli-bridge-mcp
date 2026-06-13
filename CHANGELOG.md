@@ -7,6 +7,12 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Read-only mutation guard (`CLI_BRIDGE_VERIFY_PLAN_READONLY`, opt-in).** When on, a delegate that
+  ran read-only (`agent=plan`, the default) in a git repo is checked: cli-bridge snapshots the
+  workspace before/after and, if the "read-only" delegate wrote files anyway, prepends a
+  `⚠️ WORKSPACE MUTATION DETECTED` warning to the answer and sets `RunResult.mutated`. It **never
+  auto-reverts** — it surfaces the taint so the host can decide. Off by default; runs one extra
+  `git status` only when enabled.
 - **Opt-in API lanes (`availability_env`) + a bundled stdlib HTTP bridge.** You can now connect any
   OpenAI-compatible API endpoint by exporting one key — and nothing changes for anyone who doesn't.
   A lane that declares `availability_env` stays **hidden until that env var is set**, so the ban-safe

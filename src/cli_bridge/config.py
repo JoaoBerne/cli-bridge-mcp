@@ -222,6 +222,15 @@ def build_disabled() -> bool:
     return os.environ.get("CLI_BRIDGE_DISABLE_BUILD", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def verify_plan_readonly() -> bool:
+    """CLI_BRIDGE_VERIFY_PLAN_READONLY=1 → after a READ-ONLY (plan) delegate runs in a git repo,
+    snapshot the workspace before/after and prepend a 'WORKSPACE MUTATION DETECTED' warning (and
+    set RunResult.mutated) if the delegate wrote files despite read-only mode. Off by default; it
+    NEVER auto-reverts — it only surfaces the taint so the host can decide."""
+    return os.environ.get("CLI_BRIDGE_VERIFY_PLAN_READONLY", "").strip().lower() in {
+        "1", "true", "yes", "on"}
+
+
 def strip_nesting_env() -> bool:
     """CLI_BRIDGE_STRIP_NESTING_ENV=1 → when spawning a delegate CLI, drop the HOST's own
     session-marker env vars (CLAUDE_*/CODEX_* by default). Some CLIs refuse to run as a "nested
