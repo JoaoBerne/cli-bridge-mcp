@@ -4,130 +4,295 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>cli-bridge — your AI assistant, but it can phone a friend</title>
-<meta name="description" content="MCP server that orchestrates the AI CLIs you already installed — Claude Code, Codex, Gemini, opencode — as a council. No API keys, ban-safe, $0 free lanes, hard cost cap.">
+<meta name="description" content="Your assistant is only as good as the one model you opened. cli-bridge is an MCP server that lets it borrow the other AI CLIs you already run — a bigger context, vision, a cross-vendor second opinion, or a delegated build that returns a reviewable diff. Ban-safe, no API keys.">
+<link rel="icon" href="assets/mark-dark.svg">
+<meta property="og:type" content="website">
 <meta property="og:title" content="cli-bridge — your AI assistant, but it can phone a friend">
-<meta property="og:description" content="Consult a council of AI CLIs from any MCP host. Ban-safe, no API keys, $0 free council, worktree-isolated writes, ships its own eval.">
+<meta property="og:description" content="Your assistant is only as good as the one model you opened. cli-bridge lets it borrow the other AI CLIs you already run — bigger context, vision, a cross-vendor second opinion, a reviewable-diff build. Ban-safe, no API keys.">
 <meta property="og:image" content="https://raw.githubusercontent.com/JoaoBerne/cli-bridge-mcp/main/assets/social-card.png">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://raw.githubusercontent.com/JoaoBerne/cli-bridge-mcp/main/assets/social-card.png">
 <style>
   :root{
-    --bg:#0c1220; --panel:#11203a; --ink:#eef0f4; --sub:#9fb0c8;
-    --gold:#d4a03c; --orange:#e8772e; --line:rgba(238,240,244,.12);
+    --bg:#0c1220; --panel:#11203a; --panel-2:#16294a; --ink:#eef0f4; --sub:#9fb0c8;
+    --gold:#d4a03c; --orange:#e8772e; --line:rgba(238,240,244,.12); --line-2:rgba(238,240,244,.2);
   }
   *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
   body{background:var(--bg);color:var(--ink);
     font-family:ui-monospace,'JetBrains Mono','SF Mono',Menlo,Consolas,monospace;
-    line-height:1.6}
+    line-height:1.6;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
   a{color:var(--gold);text-decoration:none}
   a:hover{text-decoration:underline}
+  code{background:rgba(238,240,244,.07);border-radius:5px;padding:.08em .4em;font-size:.92em}
   .wrap{max-width:980px;margin:0 auto;padding:0 24px}
-  header{padding:64px 0 32px;text-align:center}
-  header img.mark{width:96px;height:96px}
-  h1{font-size:2.6rem;letter-spacing:-1px;margin:16px 0 8px}
-  .tagline{color:var(--sub);font-size:1.15rem}
-  .proof{color:var(--gold);font-size:.95rem;margin-top:10px;letter-spacing:.5px}
-  .banner{display:block;width:100%;max-width:980px;margin:36px auto 0;border-radius:14px}
-  section{padding:40px 0;border-top:1px solid var(--line)}
-  h2{font-size:1.3rem;margin-bottom:18px;color:var(--gold)}
-  pre{background:var(--panel);border:1px solid var(--line);border-radius:10px;
-    padding:18px 20px;overflow-x:auto;font-size:.95rem}
-  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px}
-  .card b{color:var(--gold);display:block;margin-bottom:6px}
-  .card p{color:var(--sub);font-size:.9rem}
-  .honest{border-left:3px solid var(--orange);padding:14px 18px;background:var(--panel);
-    border-radius:0 10px 10px 0;color:var(--sub);font-size:.95rem}
-  .demo{display:block;width:100%;border-radius:12px;border:1px solid var(--line)}
-  .cta{display:inline-block;background:var(--gold);color:#11203a;font-weight:700;
-    padding:12px 26px;border-radius:10px;margin:8px 10px 0 0}
-  .cta:hover{text-decoration:none;filter:brightness(1.08)}
+
+  /* sticky top bar */
+  .topbar{position:sticky;top:0;z-index:20;
+    background:rgba(12,18,32,.82);backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--line)}
+  .topbar .row{display:flex;align-items:center;gap:12px;height:56px}
+  .topbar .brand{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:-.3px}
+  .topbar .brand img{width:26px;height:26px}
+  .topbar nav{margin-left:auto;display:flex;align-items:center;gap:8px}
+  .topbar nav a{color:var(--sub);font-size:.9rem;padding:7px 12px;border-radius:8px}
+  .topbar nav a:hover{color:var(--ink);background:var(--panel);text-decoration:none}
+  .topbar nav a.primary{color:#0c1220;background:var(--gold);font-weight:700}
+  .topbar nav a.primary:hover{filter:brightness(1.08);background:var(--gold)}
+
+  /* hero */
+  header.hero{padding:72px 0 28px;text-align:center}
+  header.hero img.mark{width:88px;height:88px}
+  h1{font-size:2.7rem;letter-spacing:-1.5px;margin:18px 0 14px}
+  .lede{font-size:1.32rem;line-height:1.45;max-width:760px;margin:0 auto;color:var(--ink)}
+  .lede .accent{color:var(--gold)}
+  .sub{color:var(--sub);font-size:1.02rem;max-width:720px;margin:16px auto 0}
+  .sub em{color:var(--ink);font-style:normal;border-bottom:1px solid var(--line-2)}
+  .chips{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin:22px auto 0;max-width:680px}
+  .chip{font-size:.82rem;color:var(--sub);border:1px solid var(--line);border-radius:999px;
+    padding:5px 13px;background:var(--panel)}
+  .chip b{color:var(--gold);font-weight:700}
+  .actions{margin-top:26px}
+  .cta{display:inline-block;background:var(--gold);color:#0c1220;font-weight:700;
+    padding:13px 28px;border-radius:10px;margin:6px 8px 0 0;transition:filter .15s,transform .15s}
+  .cta:hover{text-decoration:none;filter:brightness(1.08);transform:translateY(-1px)}
   .cta.ghost{background:none;border:1.5px solid var(--gold);color:var(--gold)}
-  footer{padding:48px 0;text-align:center;color:var(--sub);font-size:.85rem}
-  footer img{width:56px;opacity:.9}
+  .banner{display:block;width:100%;max-width:920px;margin:44px auto 0;border-radius:14px;
+    border:1px solid var(--line)}
+
+  /* sections */
+  section{padding:52px 0;border-top:1px solid var(--line);scroll-margin-top:72px;position:relative}
+  section::before{content:"";position:absolute;top:-1px;left:0;width:120px;height:1px;
+    background:linear-gradient(90deg,var(--gold),transparent)}
+  h2{font-size:1.28rem;margin-bottom:8px;color:var(--gold);letter-spacing:-.2px}
+  .lead{color:var(--sub);max-width:760px;margin-bottom:24px}
+  p{color:var(--ink)}
+  section > .wrap > p{color:var(--sub)}
+  section h2 + p, .what p{color:var(--sub);max-width:780px}
+  .what p{font-size:1.05rem;line-height:1.7;color:var(--ink)}
+
+  pre{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:18px 20px;overflow-x:auto;font-size:.95rem;color:var(--ink)}
+  pre .c{color:var(--sub)}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;
+    transition:border-color .15s,transform .15s,background .15s}
+  .card:hover{border-color:var(--gold);transform:translateY(-2px);background:var(--panel-2)}
+  .card b{color:var(--gold);display:block;margin-bottom:7px}
+  .card .verb{color:var(--gold)}
+  .card .verb::after{content:"()";opacity:.5}
+  .card p{color:var(--sub);font-size:.92rem}
+  .card .ex{display:block;margin-top:9px;color:var(--sub);font-size:.8rem;opacity:.85}
+
+  /* moat table */
+  .moat{width:100%;border-collapse:collapse;font-size:.86rem;
+    border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .moat th,.moat td{padding:11px 14px;text-align:left;border-bottom:1px solid var(--line);
+    vertical-align:top}
+  .moat thead th{background:var(--panel);color:var(--sub);font-weight:700}
+  .moat thead th.us{color:var(--gold)}
+  .moat td:first-child{color:var(--ink);font-weight:700;white-space:nowrap}
+  .moat td{color:var(--sub)}
+  .moat td.us{color:var(--ink);background:rgba(212,160,60,.06)}
+  .moat tr:last-child td{border-bottom:none}
+  .note{color:var(--sub);font-size:.85rem;margin-top:14px}
+
+  .demo{display:block;width:100%;border-radius:12px;border:1px solid var(--line)}
+  .honest{border-left:3px solid var(--orange);padding:16px 20px;background:var(--panel);
+    border-radius:0 10px 10px 0;color:var(--sub);font-size:.97rem;line-height:1.7}
+  .honest b{color:var(--ink)}
+
+  footer{padding:56px 0;text-align:center;color:var(--sub);font-size:.85rem;
+    border-top:1px solid var(--line)}
+  footer img{width:52px;opacity:.85}
+  footer p{color:var(--sub)}
+
+  @media (max-width:560px){
+    h1{font-size:2.1rem}.lede{font-size:1.12rem}
+    .topbar nav a:not(.primary){display:none}
+  }
+  @media (prefers-reduced-motion:reduce){
+    html{scroll-behavior:auto}
+    *{transition:none!important}
+    .cta:hover,.card:hover{transform:none}
+  }
 </style>
 </head>
 <body>
 
-<header class="wrap">
+<div class="topbar">
+  <div class="wrap row">
+    <a class="brand" href="#top"><img src="assets/mark-dark.svg" alt="">cli-bridge</a>
+    <nav>
+      <a href="#levers">What it does</a>
+      <a href="#why">Why this one</a>
+      <a class="primary" href="https://github.com/JoaoBerne/cli-bridge-mcp">GitHub ★</a>
+    </nav>
+  </div>
+</div>
+
+<header class="hero wrap" id="top">
   <img class="mark" src="assets/mark-dark.svg" alt="cli-bridge — suspension bridge mark">
   <h1>cli-bridge</h1>
-  <p class="tagline">Your AI assistant, but it can phone a friend.</p>
-  <p class="proof">ban-safe · no API keys · $0 free council · ships its own eval</p>
-  <p style="margin-top:22px">
-    <a class="cta" href="https://github.com/JoaoBerne/cli-bridge-mcp">GitHub</a>
+  <p class="lede">Your assistant is only as good as <span class="accent">the one model you opened.</span></p>
+  <p class="sub">An <a href="https://modelcontextprotocol.io">MCP</a> server that lets it borrow the
+  <em>other</em> AI CLIs you already run — a bigger context, vision, a free second opinion from a
+  <em>different vendor</em>, or a delegated build that comes back as a reviewable diff.</p>
+  <div class="chips">
+    <span class="chip"><b>ban-safe</b> · official CLI, no token extraction</span>
+    <span class="chip"><b>no API keys</b></span>
+    <span class="chip"><b>$0</b> free council</span>
+    <span class="chip">stdlib + <b>mcp</b> only</span>
+  </div>
+  <p class="actions">
+    <a class="cta" href="https://github.com/JoaoBerne/cli-bridge-mcp">Get started on GitHub</a>
     <a class="cta ghost" href="#install">Install</a>
   </p>
   <img class="banner" src="assets/banner-dark.svg"
        alt="You → cli-bridge → a council of AI CLIs in parallel → one merged review">
 </header>
 
-<section class="wrap">
-  <h2>// what it is</h2>
-  <p>An <a href="https://modelcontextprotocol.io">MCP</a> server that orchestrates the AI CLIs
-  you've <em>already installed and logged into</em> — Claude Code, Codex, Gemini CLI, opencode —
-  from whatever assistant you're talking to. It never holds an API key and never extracts a
-  token: it spawns each vendor's official CLI, exactly as you would by hand. Reviews fan out to
-  a role-diverse council in parallel and come back merged, deduped and severity-ranked.</p>
-</section>
-
-<section class="wrap">
-  <h2>// 30 seconds, $0</h2>
-  <img class="demo" src="assets/demo.gif"
-       alt="security-review demo: a committed auth bypass caught independently by two models">
-  <p style="color:var(--sub);font-size:.9rem;margin-top:10px"><em>Real run (2.5× speed): a
-  committed auth bypass — two free models flag it blocker independently; <code>usage</code>
-  shows the receipts.</em></p>
-</section>
-
-<section class="wrap" id="install">
-  <h2>// install</h2>
-  <pre>
-# zero-install run
-uvx cli-bridge-mcp
-
-# wire it into Claude Code
-claude mcp add cli-bridge -- uvx cli-bridge-mcp
-
-# or any MCP host — codex, gemini, opencode…</pre>
-</section>
-
-<section class="wrap">
-  <h2>// why this one</h2>
-  <div class="grid">
-    <div class="card"><b>Ban-safe by design</b>
-      <p>Spawns official CLIs. No OAuth-token extraction, no key reuse, nothing that gets
-      accounts flagged.</p></div>
-    <div class="card"><b>Learning router</b>
-      <p>Rate answers 1–5; <code>ask_best</code> learns which model wins each task-type on
-      <em>your</em> machine. Local signal, survives restarts.</p></div>
-    <div class="card"><b>Cost governance</b>
-      <p>Sourced per-plan tiers, free-first councils, a hard daily cap and local receipts —
-      spend is bounded by design.</p></div>
-    <div class="card"><b>Safe writes</b>
-      <p>Build agents run in a throwaway git worktree and hand back a <em>diff</em>. Your live
-      repo is never touched.</p></div>
-    <div class="card"><b>Memory that survives</b>
-      <p>Round-table threads persist in sqlite — across host context resets and restarts.</p></div>
-    <div class="card"><b>Measured, not asserted</b>
-      <p><code>cli-bridge eval</code> tests the council-vs-single claim deterministically and
-      publishes the result either way.</p></div>
+<section class="what">
+  <div class="wrap">
+    <h2>// what it is</h2>
+    <p>You're talking to one assistant. You've also installed and logged into others — Claude Code,
+    Codex, Gemini, opencode, <strong>Ollama</strong>. cli-bridge connects them: when your assistant
+    needs a capability it doesn't have, it spawns each vendor's <em>official CLI</em>, exactly as you
+    would by hand — never an API key, never a stolen token, so accounts can't get flagged. Reviews
+    fan out to a role-diverse council in parallel and come back merged, deduped and severity-ranked.</p>
   </div>
 </section>
 
-<section class="wrap">
-  <h2>// the honest part</h2>
-  <p class="honest">"More models = better" is fragile — big models share training data, so their
-  errors correlate. We measured our own claim: a diverse council did <b>not</b> catch more bugs
-  than one strong model — it cut false alarms ~2×. The numbers are in
-  <a href="https://github.com/JoaoBerne/cli-bridge-mcp/blob/main/docs/BENCHMARKS.md">BENCHMARKS.md</a>,
-  and the harness ships so you can run it on your own CLIs.</p>
+<section id="levers">
+  <div class="wrap">
+    <h2>// the four levers</h2>
+    <p class="lead">Everything cli-bridge does is one of these four moves — each a single tool call
+    from whatever host you're in.</p>
+    <div class="grid">
+      <div class="card"><b><span class="verb">borrow</span></b>
+        <p>Reach a model with a bigger context window, vision, or a tool yours lacks — without
+        leaving your assistant.</p>
+        <span class="ex">ask_gemini · ask_<em>lane</em> · images=</span></div>
+      <div class="card"><b><span class="verb">spread</span></b>
+        <p>Ask several vendors the same thing in parallel; answers return merged and severity-ranked.
+        Different training data → uncorrelated blind spots.</p>
+        <span class="ex">ask_all · review_diff · consensus</span></div>
+      <div class="card"><b><span class="verb">offload</span></b>
+        <p>Delegate a whole build to a cheaper model. It works in a throwaway git worktree and hands
+        back a <em>diff</em> you review before applying.</p>
+        <span class="ex">ask_build · workflow verify_repair</span></div>
+      <div class="card"><b><span class="verb">verify</span></b>
+        <p>Pressure-test a conclusion before you ship: an independent skeptic, a cross-vendor jury,
+        or a multi-round debate with a judge.</p>
+        <span class="ex">challenge · jury · debate</span></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>// 30 seconds, $0</h2>
+    <img class="demo" src="assets/demo.gif"
+         alt="security-review demo: a committed auth bypass caught independently by two models">
+    <p class="note"><em>Real run (2.5× speed): a committed auth bypass — two free models flag it
+    blocker independently; <code>usage</code> shows the receipts.</em></p>
+  </div>
+</section>
+
+<section id="why">
+  <div class="wrap">
+    <h2>// why this one</h2>
+    <p class="lead">The space is crowded. cli-bridge's bet is narrow and defensible.</p>
+    <div class="grid">
+      <div class="card"><b>Ban-safe by design</b>
+        <p>Spawns official CLIs. No OAuth-token extraction, no key reuse — nothing that gets
+        accounts flagged.</p></div>
+      <div class="card"><b>Cost governance</b>
+        <p>Free-first councils, sourced per-plan tiers, and a hard daily credit cap enforced at
+        spawn — spend is bounded by design, with local receipts.</p></div>
+      <div class="card"><b>Safe diff-builds</b>
+        <p>Build agents run in a throwaway git worktree and hand back a diff. Your live repo is
+        never touched.</p></div>
+      <div class="card"><b>Cross-vendor jury</b>
+        <p>Author and reviewer are forced onto <em>different</em> vendor families, k-of-N
+        fail-closed — so correlated errors don't rubber-stamp each other.</p></div>
+      <div class="card"><b>Survives /compact</b>
+        <p>Round-table threads, jobs and fan-out journals persist in sqlite — across host context
+        resets and restarts.</p></div>
+      <div class="card"><b>Measured, not asserted</b>
+        <p><code>cli-bridge eval</code> tests the council-vs-single claim deterministically and
+        publishes the result either way.</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>// vs. other "call other models" MCPs</h2>
+    <table class="moat">
+      <thead>
+        <tr><th></th><th>claude-octopus</th><th>PAL / zen-mcp</th><th class="us">cli-bridge</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Reaches models via</td>
+          <td>CLI / OAuth reuse / API keys</td><td>API keys + CLI spawn</td>
+          <td class="us">official CLI subprocess only</td></tr>
+        <tr><td>API keys needed</td>
+          <td>optional fallback</td><td>for most providers</td><td class="us">never</td></tr>
+        <tr><td>Spend control</td>
+          <td>session-only gate</td><td>none found</td>
+          <td class="us">per-lane daily + credit cap, persisted</td></tr>
+        <tr><td>Delegated edits</td>
+          <td>in-place</td><td>in-place (yolo flags)</td>
+          <td class="us">worktree → diff, or zone-guarded</td></tr>
+        <tr><td>Survives restart / /compact</td>
+          <td>session-scoped</td><td>in-memory (TTL)</td>
+          <td class="us">sqlite: threads, jobs, journal</td></tr>
+        <tr><td>Runtime deps</td>
+          <td>Node 18+, npm, bash</td><td>Python + pip pkgs</td>
+          <td class="us">Python stdlib + mcp</td></tr>
+      </tbody>
+    </table>
+    <p class="note">Where they're stronger, honestly: octopus ships a much larger workflow surface;
+    PAL has the biggest community (~11.6k★). Full, dated breakdown in
+    <a href="https://github.com/JoaoBerne/cli-bridge-mcp/blob/main/docs/COMPARISON.md">COMPARISON.md</a>.</p>
+  </div>
+</section>
+
+<section id="install">
+  <div class="wrap">
+    <h2>// install</h2>
+    <pre><span class="c"># zero-install run</span>
+uvx cli-bridge-mcp
+
+<span class="c"># wire it into Claude Code</span>
+claude mcp add cli-bridge -- uvx cli-bridge-mcp
+
+<span class="c"># or any MCP host — codex, gemini, opencode, cursor, zed…</span></pre>
+    <p class="note">Per-host config locations + a drop-in rules snippet:
+    <a href="https://github.com/JoaoBerne/cli-bridge-mcp/blob/main/docs/HOSTS.md">docs/HOSTS.md</a>.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>// the honest part</h2>
+    <p class="honest">"More models = better" is fragile — big models share training data, so their
+    errors correlate. We measured our own claim: a diverse council did <b>not</b> catch more bugs
+    than one strong model — it cut false alarms ~2×. The numbers are in
+    <a href="https://github.com/JoaoBerne/cli-bridge-mcp/blob/main/docs/BENCHMARKS.md">BENCHMARKS.md</a>,
+    and the harness ships so you can run it on your own CLIs.</p>
+  </div>
 </section>
 
 <footer>
-  <img src="assets/mark-dark.svg" alt="">
-  <p style="margin-top:10px">Apache 2.0 · <a href="https://github.com/JoaoBerne/cli-bridge-mcp">JoaoBerne/cli-bridge-mcp</a></p>
-  <p style="margin-top:6px">Built with the power of Multi-Model AI collaboration 🤝 — Opus 4.8 + the council</p>
+  <div class="wrap">
+    <img src="assets/mark-dark.svg" alt="">
+    <p style="margin-top:10px">Apache 2.0 ·
+      <a href="https://github.com/JoaoBerne/cli-bridge-mcp">JoaoBerne/cli-bridge-mcp</a></p>
+    <p style="margin-top:6px">Built with the power of Multi-Model AI collaboration 🤝 — Opus 4.8 + the council</p>
+  </div>
 </footer>
 
 </body>
