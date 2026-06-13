@@ -134,11 +134,14 @@ job_tail(job_id="…")  ·  build_steer(job_id="…", instruction="use Tailwind,
 だけです。cli-bridge は**別のモデルファミリー**をレビュアー席に座らせます。
 
 ```
+workflow(preset="converge", task="is this migration safe?", author_lane="gpt")        # governance loop: blind verdict → anonymized peers → reasoned adjudication
 workflow(preset="jury", task="is this migration safe?", author_lane="gpt")            # cross-family vote, fail-closed
 workflow(preset="verify_repair", task="add retry with backoff",
          builder_lane="gpt", verifier_lane="gemini")                                   # A builds, B reviews, loop to green
 security_review(base="origin/main")   ·   review_diff(base="origin/main")              # OWASP, severity-ranked
 ```
+
+旗艦プリセットは **`converge`**（ガバナンスループ）：独立した裁定者がまず*ブラインド*の評決をコミットし、匿名化されたベンダー横断のピアがレビューし、すべての論点が*理由つきで*裁定され、その後に修正するか収束する。`review_diff` / `security_review` の指摘は重大度**かつ**カテゴリ——security / correctness / scope / ambiguity / performance / ops——でタグづけされます。
 
 ### 本物のセカンドオピニオンを得る
 結論に達して、それを圧力テストしたいとき、または複数のモデルを並べて見たいとき。
@@ -226,6 +229,10 @@ claude/gpt/opencode/ollama）；コミットされた認可バイパスを **blo
 委譲の再入は深さで上限（`CLI_BRIDGE_MAX_DEPTH`、デフォルト 1）——設定ミスの委譲先が評議会を fork-bomb
 できないように。
 
+`CLI_BRIDGE_VERIFY_PLAN_READONLY=1` を設定すると、`plan`（読み取り専用）の委譲先でありながら git ワークスペース
+に書き込んだものには、その回答に `⚠️ WORKSPACE MUTATION DETECTED` フラグが付きます（表面化はしますが、自動で
+巻き戻すことはありません）。
+
 ---
 
 ## クイックスタート（約 5 分）
@@ -242,7 +249,8 @@ cli-bridge doctor        # see which CLIs are detected + their resolved paths
 ### レーン
 
 **内蔵：** Claude Code、Codex、Gemini（＋ Antigravity `agy`）、opencode、**Ollama（ローカルモデル、0 $、
-オフライン）**、Qwen Code、Copilot、Grok。
+オフライン）**、Qwen Code、Copilot、Grok、そして **OpenRouter**（オプトインの API レーン——400 以上のモデル；
+`OPENROUTER_API_KEY` を設定するまで隠れたままなので、ban-safe なデフォルトの表面は変わりません）。
 
 **Ollama 以外のローカルランタイム**——**LM Studio · MLX · llama.cpp**——はコード不要のレシピで同梱：
 `CLI_BRIDGE_LANES_FILE` を [`examples/lmstudio.lane.json`](../../examples/lmstudio.lane.json)、
@@ -254,7 +262,10 @@ cli-bridge doctor        # see which CLIs are detected + their resolved paths
 Aider、Goose、Plandex、Amp、Crush、Amazon Q Developer CLI、Droid。
 
 **それ以外は約 3 行の JSON。** カスタムレーンを追加するか、`curl` を起動して任意の OpenAI 互換エンドポイントを
-ラップ（鍵は curl の内側に留まり、argv には決して載りません）。レシピは [`examples/`](../../examples/) を参照。
+ラップ（鍵は curl の内側に留まり、argv には決して載りません）。あるいは同梱の **`cli-bridge-openai`** stdlib
+ブリッジを使い、`availability_env` を設定してレーンの鍵がエクスポートされるまで隠したままにします。
+[`examples/openai-compatible.lane.json`](../../examples/openai-compatible.lane.json) を参照。レシピは
+[`examples/`](../../examples/) を参照。
 
 ---
 

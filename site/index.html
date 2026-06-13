@@ -185,8 +185,8 @@
         <span class="ex">ask_build · workflow verify_repair</span></div>
       <div class="card"><b><span class="verb">verify</span></b>
         <p>Pressure-test a conclusion before you ship: an independent skeptic, a cross-vendor jury,
-        or a multi-round debate with a judge.</p>
-        <span class="ex">challenge · jury · debate</span></div>
+        a multi-round debate, or a governance loop that converges only once the peers approve.</p>
+        <span class="ex">challenge · jury · converge · debate</span></div>
     </div>
   </div>
 </section>
@@ -215,9 +215,10 @@
       <div class="card"><b>Safe diff-builds</b>
         <p>Build agents run in a throwaway git worktree and hand back a diff. Your live repo is
         never touched.</p></div>
-      <div class="card"><b>Cross-vendor jury</b>
-        <p>Author and reviewer are forced onto <em>different</em> vendor families, k-of-N
-        fail-closed — so correlated errors don't rubber-stamp each other.</p></div>
+      <div class="card"><b>Cross-vendor governance</b>
+        <p>Author and reviewer are forced onto <em>different</em> vendor families — a k-of-N jury, or
+        the <code>converge</code> loop (blind arbiter verdict, reasoned dismissal, no self-approval),
+        so correlated errors can't rubber-stamp each other.</p></div>
       <div class="card"><b>Survives /compact</b>
         <p>Round-table threads, jobs and fan-out journals persist in sqlite — across host context
         resets and restarts.</p></div>
@@ -240,13 +241,16 @@
         <tr><td>Reaches models via</td>
           <td>CLI / OAuth reuse / API keys</td><td>API keys + CLI spawn</td>
           <td>CLI (GPT/Gemini) + API keys (Grok, OpenRouter)</td>
-          <td class="us">official CLI subprocess only</td></tr>
+          <td class="us">official CLI subprocess by default; optional opt-in API lane</td></tr>
         <tr><td>API keys needed</td>
           <td>optional fallback</td><td>for most providers</td><td>for Grok &amp; OpenRouter</td>
-          <td class="us">never</td></tr>
+          <td class="us">never by default — opt-in lanes stay hidden until keyed</td></tr>
         <tr><td>Spend control</td>
           <td>session-only gate</td><td>none found</td><td>none found</td>
           <td class="us">per-lane daily + credit cap, persisted</td></tr>
+        <tr><td>Consensus governance</td>
+          <td>—</td><td>—</td><td>blind verdict + reasoned dismissal</td>
+          <td class="us">converge: blind verdict, reasoned adjudication, no self-approval — over cross-vendor anonymized peers</td></tr>
         <tr><td>Delegated edits</td>
           <td>in-place</td><td>in-place (yolo flags)</td><td>in-place (workspace-write)</td>
           <td class="us">worktree → diff, or zone-guarded</td></tr>
@@ -260,10 +264,11 @@
     </table>
     </div>
     <p class="note">Where they're stronger, honestly: octopus ships a much larger workflow surface;
-    PAL has the biggest community (~11.6k★); deliberation has the deepest consensus governance — a
-    blind verdict committed <em>before</em> the panel is seen, and a mandatory reason for every
-    dismissed objection (cli-bridge has anonymized peer review, a cross-vendor jury and
-    earn-their-seat scoring, but not those two guards yet). Full, dated breakdown in
+    PAL has the biggest community (~11.6k★); and deliberation is a focused, mature single-purpose
+    governance tool that pioneered the blind-verdict / mandatory-dismissal-reason model — cli-bridge
+    has since adopted exactly those guards as <code>workflow preset=converge</code> (run over
+    <em>anonymized cross-vendor</em> peers under enforced budgets), but deliberation stays the more
+    specialized product for that one job. Full, dated breakdown in
     <a href="https://github.com/JoaoBerne/cli-bridge-mcp/blob/main/docs/COMPARISON.md">COMPARISON.md</a>.</p>
   </div>
 </section>

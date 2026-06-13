@@ -215,6 +215,9 @@ claude/gpt/opencode/ollama）；它们把一处提交的鉴权绕过标记为 **
 
 被委派者的再入受深度上限约束（`CLI_BRIDGE_MAX_DEPTH`，默认 1），以免配置错误的被委派者把评议会 fork 炸了。
 
+设置 `CLI_BRIDGE_VERIFY_PLAN_READONLY=1` 后，任何本应只读的 `plan` 被委派者一旦写入了 git 工作区，其答案上
+就会被打上 `⚠️ WORKSPACE MUTATION DETECTED` 标记（仅作呈现，绝不自动回滚）。
+
 ---
 
 ## 快速开始（约 5 分钟）
@@ -231,7 +234,8 @@ cli-bridge doctor        # see which CLIs are detected + their resolved paths
 ### Lane
 
 **内置：** Claude Code、Codex、Gemini（+ Antigravity `agy`）、opencode、**Ollama（本地模型，0 $，离线）**、
-Qwen Code、Copilot、Grok。
+Qwen Code、Copilot、Grok，以及 **OpenRouter**（可选启用的 API lane —— 400+ 模型；在你设置
+`OPENROUTER_API_KEY` 之前一直隐藏，因此 ban-safe 的默认可见面保持不变）。
 
 **Ollama 之外的本地运行时** —— **LM Studio · MLX · llama.cpp** —— 以零代码配方提供：把
 `CLI_BRIDGE_LANES_FILE` 指向 [`examples/lmstudio.lane.json`](../../examples/lmstudio.lane.json)、
@@ -242,7 +246,9 @@ Qwen Code、Copilot、Grok。
 Plandex、Amp、Crush、Amazon Q Developer CLI、Droid。
 
 **其他任何东西都是约 3 行 JSON。** 添加自定义 lane，或通过启动 `curl` 包装任何 OpenAI 兼容端点（密钥留在
-curl 内部，绝不进入 argv）。配方见 [`examples/`](../../examples/)。
+curl 内部，绝不进入 argv），又或者使用内置的 **`cli-bridge-openai`** stdlib 桥 —— 设置 `availability_env`，
+让该 lane 在其密钥被导出前一直隐藏。见 [`examples/openai-compatible.lane.json`](../../examples/openai-compatible.lane.json)。
+配方见 [`examples/`](../../examples/)。
 
 ---
 

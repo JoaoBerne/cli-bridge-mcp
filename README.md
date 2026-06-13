@@ -162,7 +162,7 @@ workflow(preset="fanout_compare", task="fix this failing test", lanes=["gpt","ge
 
 - **Consult** (read-only): `ask_<lane>` (one model), `ask_all` (every free lane in parallel + a disagreement score), `ask_cascade` (resilient fall-through), `ask_best` (router), `consensus`, `challenge`.
 - **Build** (opt-in write): `ask_build` — `mode=isolated`→diff · `mode=direct`→zone-guarded · `async`→steerable, behind an executable Definition-of-Done gate.
-- **Review & verify**: `review_diff`, `security_review`, `debate`, and `workflow(preset=…)` — `jury` (cross-family k-of-N vote, fail-closed), `verify_repair`, `fanout_compare`, …
+- **Review & verify**: `review_diff`, `security_review` (findings tagged by severity *and* category — security / correctness / scope / ambiguity / performance / ops), `debate`, and `workflow(preset=…)` — **`converge`** (governance loop: an independent arbiter commits a *blind* verdict, anonymized cross-vendor peers review, every issue is adjudicated *with a reason*, then revise-or-converge), `jury` (cross-family k-of-N vote, fail-closed), `verify_repair`, `fanout_compare`, …
 - **Orchestrate & operate**: `batch_run` (durable, budget-capped fan-out), plus `usage_report`, `rate_lane`, `lane_stats`, `set_lane_cost`, `doctor`.
 
 **Full reference — every tool, every flag: [`docs/TOOLS.md`](docs/TOOLS.md)** (or `cli-bridge --help`). Run `CLI_BRIDGE_LEAN=1` for a curated ~12-tool surface.
@@ -213,21 +213,23 @@ corrections welcome.)
 
 |  | [claude-octopus](https://github.com/nyldn/claude-octopus) | [PAL / zen-mcp](https://github.com/BeehiveInnovations/zen-mcp-server) | [deliberation](https://github.com/antonbabenko/deliberation) | **cli-bridge** |
 |---|---|---|---|---|
-| **How other models are reached** | hybrid: CLI spawn, OAuth-subscription reuse, or API keys | API keys (providers) + CLI spawn (`clink`) | CLI spawn (Codex/Gemini) + API keys (Grok, OpenRouter) | **official CLI subprocess only** — each CLI keeps its own auth |
-| **API keys needed** | optional fallback | for most providers | for Grok & OpenRouter | **never** |
+| **How other models are reached** | hybrid: CLI spawn, OAuth-subscription reuse, or API keys | API keys (providers) + CLI spawn (`clink`) | CLI spawn (Codex/Gemini) + API keys (Grok, OpenRouter) | **official CLI subprocess by default** — each CLI keeps its own auth; **optional** opt-in API lanes |
+| **API keys needed** | optional fallback | for most providers | for Grok & OpenRouter | **never by default** — opt-in API lanes stay hidden until you set their key |
 | **Spend control** | session-only cost gate (`OCTOPUS_MAX_COST_USD`; no cross-session history) | none found | none found | **enforced**: per-lane daily run limit + daily credit cap + per-invocation budget, persisted ([docs/BUDGET.md](docs/BUDGET.md)) |
-| **Delegated edits** | in-place | in-place (bypass/yolo flags) | in-place (`workspace-write` experts) | **throwaway worktree → diff** (your repo untouched), or zone-guarded direct mode |
+| **Consensus governance** | — | — | blind verdict + mandatory reason for each dismissal | **`converge`**: blind arbiter verdict, reasoned adjudication, **no-self-approval** — over anonymized **cross-vendor** peers, all 3 guards enforced in code |
+| **Delegated edits** | in-place | in-place (bypass/yolo flags) | in-place (`workspace-write` experts) | **throwaway worktree → diff** (your repo untouched), or zone-guarded direct mode (+ opt-in read-only-write guard) |
 | **Survives host restart / `/compact`** | session-scoped state | in-memory threads (TTL) | opt-in on-disk; in-memory by default | **sqlite**: conversations, jobs, fan-out journal |
 | **Runtime deps** | Node 18+, npm, bash | Python + pip packages | Node 18+, npm | **Python stdlib + `mcp`** |
 | **Hosts** | Claude Code-first (plugin; MCP server secondary) | any MCP host | any MCP host (+ Claude Code plugin) | any MCP host (+ a Claude Code plugin) |
 
 Where they're stronger, honestly: claude-octopus ships a much larger workflow surface (49 commands,
 32 personas, CI reactions); PAL has the biggest community (~11.6k★) with a polished tool set; and
-**deliberation has the deepest consensus governance** — a blind verdict the orchestrator commits
-*before* it sees the panel, plus a mandatory one-line reason for every dismissed objection (cli-bridge
-has anonymized peer review, a cross-vendor k-of-N jury, and earn-their-seat scoring, but not those two
-guards yet). cli-bridge's bet is narrower: **ban-safe auth, enforced budgets, and delegation that
-can't wreck your repo** — verified by its own shipped eval instead of claimed.
+**deliberation** is a focused, mature single-purpose governance tool that pioneered the
+blind-verdict / mandatory-dismissal-reason model — cli-bridge has since adopted exactly those guards
+as `workflow preset=converge` (and runs them over *anonymized cross-vendor* peers under enforced
+budgets), but deliberation remains the more specialized product for that one job. cli-bridge's bet is
+broader: **ban-safe auth, enforced budgets, cross-vendor verification, and delegation that can't wreck
+your repo** — verified by its own shipped eval instead of claimed.
 
 ---
 
@@ -265,6 +267,10 @@ Writes are contained, two ways — **you pick** review-gated or hands-off:
 - **`direct`.** Writes real files, **but only inside a `zone` you declare**, behind a per-zone lock
   with a post-turn zone-violation check. You in `backend/`, a delegate in `frontend/`, concurrently —
   neither can scribble across your whole repo; undo is zone-scoped, never a global reset.
+
+And a tripwire for the *read-only* path: set `CLI_BRIDGE_VERIFY_PLAN_READONLY=1` and any `plan`
+(read-only) delegate that nonetheless writes to a git workspace gets a `⚠️ WORKSPACE MUTATION DETECTED`
+flag on its answer (surfaced, never auto-reverted — you decide).
 
 Delegate re-entry is depth-capped (`CLI_BRIDGE_MAX_DEPTH`, default 1) so a misconfigured delegate
 can't fork-bomb the council.
@@ -337,7 +343,8 @@ second opinion from gpt"* or *"ask gemini to read ./src and find the bug"*.
 ### Lanes
 
 **Built-in:** Claude Code, Codex, Gemini (+ Antigravity `agy`), Mistral (Vibe), opencode, **Ollama
-(local models, $0, offline)**, Qwen Code, Copilot, Grok.
+(local models, $0, offline)**, Qwen Code, Copilot, Grok, and **OpenRouter** (opt-in API lane — 400+
+models; stays hidden until you set `OPENROUTER_API_KEY`, so the ban-safe default surface is unchanged).
 
 **Local runtimes** beyond Ollama — **LM Studio · MLX · llama.cpp** — ship as zero-code recipes:
 point `CLI_BRIDGE_LANES_FILE` at [`examples/lmstudio.lane.json`](examples/lmstudio.lane.json),
@@ -348,8 +355,11 @@ comes from distinct vendors, not a second local runtime.)
 **Community lanes** (`examples/community-lanes.json`, experimental + `limited` until you declare their
 cost): Aider, Goose, Plandex, Amp, Crush, Amazon Q Developer CLI, Droid.
 
-**Anything else is ~3 lines of JSON.** Add a custom lane, or wrap any OpenAI-compatible endpoint by
-spawning `curl` (key kept inside curl, never in argv). See [`examples/`](examples/) for recipes.
+**Anything else is ~3 lines of JSON.** Add a custom lane, or wrap any OpenAI-compatible endpoint two
+ways: spawn `curl` (key kept inside curl, never in argv), or use the bundled **`cli-bridge-openai`**
+stdlib bridge — set `availability_env` so the lane stays hidden until its key is exported. See
+[`examples/openai-compatible.lane.json`](examples/openai-compatible.lane.json) and
+[`examples/`](examples/) for recipes.
 
 ---
 

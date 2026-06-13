@@ -237,6 +237,10 @@ Las escrituras están contenidas, de dos formas — **tú eliges** con revisión
   `frontend/`, a la vez — ninguno puede garabatear todo tu repo; el deshacer está acotado a la zona,
   nunca un reset global.
 
+Y un cable trampa para la vía de *solo lectura*: define `CLI_BRIDGE_VERIFY_PLAN_READONLY=1` y cualquier
+delegado en modo `plan` (solo lectura) que aun así escriba en un workspace git recibe en su respuesta
+una marca `⚠️ WORKSPACE MUTATION DETECTED` (se señala, nunca se revierte automáticamente).
+
 La re-entrada de delegados está topada en profundidad (`CLI_BRIDGE_MAX_DEPTH`, por defecto 1) para que
 un delegado mal configurado no pueda fork-bombear el consejo.
 
@@ -256,7 +260,9 @@ cli-bridge doctor        # see which CLIs are detected + their resolved paths
 ### Lanes
 
 **Integradas:** Claude Code, Codex, Gemini (+ Antigravity `agy`), opencode, **Ollama (modelos locales,
-0 $, offline)**, Qwen Code, Copilot, Grok.
+0 $, offline)**, Qwen Code, Copilot, Grok, y **OpenRouter** (lane API opt-in — más de 400 modelos;
+permanece oculta hasta que defines `OPENROUTER_API_KEY`, así la superficie ban-safe por defecto no
+cambia).
 
 **Runtimes locales** más allá de Ollama — **LM Studio · MLX · llama.cpp** — vienen como recetas sin
 código: apunta `CLI_BRIDGE_LANES_FILE` a [`examples/lmstudio.lane.json`](../../examples/lmstudio.lane.json),
@@ -268,7 +274,10 @@ diversidad de consejo viene de proveedores distintos, no de un segundo runtime l
 su coste): Aider, Goose, Plandex, Amp, Crush, Amazon Q Developer CLI, Droid.
 
 **Cualquier otra cosa son ~3 líneas de JSON.** Añade una lane personalizada, o envuelve cualquier
-endpoint compatible con OpenAI lanzando `curl` (la clave queda dentro de curl, nunca en argv). Ver
+endpoint compatible con OpenAI lanzando `curl` (la clave queda dentro de curl, nunca en argv), o usa
+el puente stdlib **`cli-bridge-openai`** incluido — define `availability_env` para que la lane
+permanezca oculta hasta que su clave esté exportada. Ver
+[`examples/openai-compatible.lane.json`](../../examples/openai-compatible.lane.json) y
 [`examples/`](../../examples/) para recetas.
 
 ---

@@ -8,7 +8,7 @@ surface; hide/show any with `CLI_BRIDGE_DISABLED_TOOLS` / `CLI_BRIDGE_ENABLED_TO
 ### Consult (read-only)
 | Tool | What it does | Reach for it when |
 |------|--------------|-------------------|
-| `ask_<lane>` | Ask one specific CLI — `ask_claude`, `ask_gpt` (Codex), `ask_gemini`, `ask_mistral`, `ask_opencode`, `ask_ollama`, and `ask_qwen`/`ask_grok`/`ask_copilot` when installed. Supports `role="reviewer\|security\|planner\|devil"`, `conversation` (round-table memory — every ask auto-returns a reusable thread id, so any answer is resumable on any lane), and `images=[…]` on Gemini. | You want a particular model's strength, persona, or modality. |
+| `ask_<lane>` | Ask one specific CLI — `ask_claude`, `ask_gpt` (Codex), `ask_gemini`, `ask_mistral`, `ask_opencode`, `ask_ollama`, and `ask_qwen`/`ask_grok`/`ask_copilot` when installed, plus the opt-in `ask_openrouter` (OpenAI-compatible API lane — appears only once `OPENROUTER_API_KEY` is set). Supports `role="reviewer\|security\|planner\|devil"`, `conversation` (round-table memory — every ask auto-returns a reusable thread id, so any answer is resumable on any lane), and `images=[…]` on Gemini. | You want a particular model's strength, persona, or modality. |
 | `ask_all` | Same question to every *free* lane in parallel; returns each answer **plus a disagreement score**. `synthesize: true` adds an agree/disagree summary. | You want breadth fast and a signal of where models diverge (= uncertainty). |
 | `ask_cascade` | Tries lanes in a deterministic order, stops at the first good answer, skips cooled-down lanes; optional confidence-escalation. | You want resilience: a capped/failing lane is skipped automatically. |
 | `ask_best` | A router picks the most suitable lane by `mode` (`fast/cheap/deep/code/review/security`) + your `rate_lane` scores. | You don't want to choose a lane by hand. |
@@ -31,12 +31,12 @@ of success is *tested*, not trusted.
 ### Review & verify
 | Tool | What it does | Reach for it when |
 |------|--------------|-------------------|
-| `review_diff` | Structured review of a diff → findings (severity, file, rationale), deterministically merged across lanes with single/majority/consensus confidence. | Before a change lands. |
+| `review_diff` | Structured review of a diff → findings (severity, **category** — security/correctness/scope/ambiguity/performance/ops — file, rationale), deterministically merged across lanes with single/majority/consensus confidence. | Before a change lands. |
 | `security_review` | OWASP-oriented, severity-ranked security pass + a `residual_risk` section. | The change touches auth, input handling, secrets. |
 | `debate` | Models critique each other over bounded rounds, ending with a `VOTE` footer + convergence early-stop; an independent judge concludes. | A genuinely contested decision. |
 | `premortem` / `test_plan` | Failure-mode analysis of a plan / a prioritized test plan from a diff or description. | Before writing code. |
 | `commit_msg` / `pr_describe` | A Conventional-Commit message from your staged diff / a PR title+body from the branch. Read-only — emits text. | You're about to commit or open a PR. |
-| `workflow(preset=…)` | Named pipelines: `jury` (cross-family k-of-N vote, fail-closed), `verify_repair` (cross-model build→review→repair loop), `refine_plan`, `fanout_compare`, `council_review`, `map_review`, `research_verify`. | You want a vetted multi-step pattern in one call. |
+| `workflow(preset=…)` | Named pipelines: **`converge`** (governance loop — independent arbiter blind verdict → anonymized cross-vendor peers → reasoned adjudication → revise/converge; guards: blind-verdict-first, no-silent-dismissal, no-self-approval), `jury` (cross-family k-of-N vote, fail-closed), `verify_repair` (cross-model build→review→repair loop), `refine_plan`, `fanout_compare`, `council_review`, `map_review`, `research_verify`. | You want a vetted multi-step pattern in one call. |
 
 ### Orchestrate
 | Tool | What it does | Reach for it when |

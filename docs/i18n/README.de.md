@@ -247,6 +247,10 @@ Schreibvorgänge sind eingegrenzt, auf zwei Arten — **du wählst** review-gega
 Der Wiedereintritt von Delegierten ist tiefenbegrenzt (`CLI_BRIDGE_MAX_DEPTH`, Standard 1), damit ein
 fehlkonfigurierter Delegierter den Rat nicht fork-bomben kann.
 
+Setze `CLI_BRIDGE_VERIFY_PLAN_READONLY=1`, und jeder `plan`-Delegierte (read-only), der trotzdem in
+einen git-Arbeitsbereich schreibt, erhält das Flag `⚠️ WORKSPACE MUTATION DETECTED` an seiner Antwort
+(sichtbar gemacht, nie automatisch zurückgerollt).
+
 ---
 
 ## Schnellstart (≈5 Min)
@@ -263,7 +267,9 @@ cli-bridge doctor        # see which CLIs are detected + their resolved paths
 ### Lanes
 
 **Eingebaut:** Claude Code, Codex, Gemini (+ Antigravity `agy`), opencode, **Ollama (lokale Modelle,
-0 $, offline)**, Qwen Code, Copilot, Grok.
+0 $, offline)**, Qwen Code, Copilot, Grok und **OpenRouter** (Opt-in-API-Lane — 400+ Modelle; bleibt
+verborgen, bis du `OPENROUTER_API_KEY` setzt, sodass die ban-safe-Standardoberfläche unverändert
+bleibt).
 
 **Lokale Runtimes** jenseits von Ollama — **LM Studio · MLX · llama.cpp** — kommen als Code-freie
 Rezepte: richte `CLI_BRIDGE_LANES_FILE` auf [`examples/lmstudio.lane.json`](../../examples/lmstudio.lane.json),
@@ -275,7 +281,10 @@ Rat-Diversität kommt von verschiedenen Anbietern, nicht von einem zweiten lokal
 deklarierst): Aider, Goose, Plandex, Amp, Crush, Amazon Q Developer CLI, Droid.
 
 **Alles andere sind ~3 Zeilen JSON.** Füge eine eigene Lane hinzu, oder umhülle jeden
-OpenAI-kompatiblen Endpoint, indem du `curl` startest (der Schlüssel bleibt in curl, nie in argv).
+OpenAI-kompatiblen Endpoint, indem du `curl` startest (der Schlüssel bleibt in curl, nie in argv),
+oder nutze die mitgelieferte stdlib-Brücke **`cli-bridge-openai`** — setze `availability_env`, damit
+die Lane verborgen bleibt, bis ihr Schlüssel exportiert ist. Siehe
+[`examples/openai-compatible.lane.json`](../../examples/openai-compatible.lane.json).
 Siehe [`examples/`](../../examples/) für Rezepte.
 
 ---
