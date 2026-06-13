@@ -28,6 +28,24 @@ _SEV_ALIASES = {
 }
 _DEFAULT_SEVERITY = "medium"
 
+# Issue-category axis — ORTHOGONAL to severity. Closed set, OPTIONAL: a finding whose category
+# isn't recognised stays None (we classify, never invent). Aliases fold common model wording.
+CATEGORIES = ("security", "correctness", "scope", "ambiguity", "performance", "ops")
+_CAT_SET = set(CATEGORIES)
+_CAT_ALIASES = {
+    "vuln": "security", "vulnerability": "security", "sec": "security", "injection": "security",
+    "auth": "security", "authz": "security", "crypto": "security",
+    "correct": "correctness", "logic": "correctness", "bug": "correctness",
+    "edge-case": "correctness", "edge case": "correctness", "race": "correctness",
+    "perf": "performance", "speed": "performance", "efficiency": "performance",
+    "scope-creep": "scope", "scope creep": "scope", "overengineering": "scope",
+    "over-engineering": "scope", "yagni": "scope",
+    "ambiguous": "ambiguity", "unclear": "ambiguity", "spec": "ambiguity",
+    "requirement": "ambiguity", "requirements": "ambiguity",
+    "operational": "ops", "operations": "ops", "devops": "ops", "deploy": "ops",
+    "deployment": "ops", "config": "ops", "observability": "ops", "ci": "ops",
+}
+
 STATIC_SOURCE = "static-check"   # label for deterministic precheck findings
 
 
@@ -41,6 +59,7 @@ class Finding:
     recommendation: str = ""
     models: list[str] = field(default_factory=list)
     roles: list[str] = field(default_factory=list)
+    category: str | None = None
 
 
 # ── severity / value coercion ───────────────────────────────────────────────────────────
@@ -49,6 +68,14 @@ def normalize_severity(raw) -> str:
     s = str(raw or "").strip().lower()
     s = _SEV_ALIASES.get(s, s)
     return s if s in _SEV_RANK else _DEFAULT_SEVERITY
+
+
+def normalize_category(raw) -> str | None:
+    """Map a model's category label onto the closed CATEGORIES set; None if unrecognised — the
+    field is optional, so an unknown/empty category is dropped rather than guessed."""
+    s = str(raw or "").strip().lower()
+    s = _CAT_ALIASES.get(s, s)
+    return s if s in _CAT_SET else None
 
 
 def _clean_str(v) -> str:
@@ -145,6 +172,7 @@ def _coerce(item, role: str, lane: str) -> Finding | None:
                                   or item.get("remediation")),
         models=[lane],
         roles=[role],
+        category=normalize_category(item.get("category") or item.get("type")),
     )
 
 
@@ -211,6 +239,8 @@ def merge_findings(findings: list[Finding]) -> list[Finding]:
         for r in f.roles:
             if r not in g.roles:
                 g.roles.append(r)
+        if g.category is None and f.category is not None:
+            g.category = f.category
         if len(f.evidence) > len(g.evidence):
             g.evidence = f.evidence
         if len(f.recommendation) > len(g.recommendation):
@@ -256,6 +286,14 @@ def _counts(findings: list[Finding]) -> str:
     return ", ".join(f"{by[s]} {s}" for s in SEVERITIES if by[s])
 
 
+def _cat_counts(findings: list[Finding]) -> str:
+    by: dict[str, int] = {}
+    for f in findings:
+        if f.category:
+            by[f.category] = by.get(f.category, 0) + 1
+    return ", ".join(f"{by[c]} {c}" for c in CATEGORIES if by.get(c))
+
+
 def render_markdown(findings: list[Finding], *, total_reviewers: int, heading: str,
                     meta: dict, recap: str = "", residual_risk: str = "",
                     show_trace: bool = True) -> str:
@@ -269,6 +307,9 @@ def render_markdown(findings: list[Finding], *, total_reviewers: int, heading: s
     n = len(findings)
     lines.append(f"**{n} finding{'s' if n != 1 else ''}**"
                  + (f" ({_counts(findings)})" if findings else "") + f" — _{verdict(findings)}_\n")
+    cats = _cat_counts(findings)
+    if cats:
+        lines.append(f"_By type: {cats}_\n")
     if not findings:
         lines.append("No issues raised by any reviewer.")
     cur = None
@@ -278,7 +319,8 @@ def render_markdown(findings: list[Finding], *, total_reviewers: int, heading: s
             lines.append(f"\n## {cur.capitalize()}\n")
         loc = f" `{f.file}{':' + str(f.line) if f.line is not None else ''}`" if f.file else ""
         models = ", ".join(f.models) if f.models else "?"
-        lines.append(f"- **{f.title}**{loc} — _{confidence(f, total_reviewers)}_ · {models}")
+        cat = f" · _{f.category}_" if f.category else ""
+        lines.append(f"- **{f.title}**{loc} — _{confidence(f, total_reviewers)}_ · {models}{cat}")
         if f.evidence:
             lines.append(f"  {f.evidence}")
         if f.recommendation:
@@ -303,6 +345,7 @@ def result_json(findings: list[Finding], *, total_reviewers: int, tool: str, sum
                 "severity": f.severity,
                 "confidence": confidence(f, total_reviewers),
                 "title": f.title,
+                "category": f.category,
                 "file": f.file,
                 "line": f.line,
                 "models": f.models,
