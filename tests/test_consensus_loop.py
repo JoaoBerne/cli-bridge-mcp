@@ -17,7 +17,7 @@ def _issue(iid, label="Reviewer A", cat="correctness"):
 
 def test_converges_round_one_when_peers_and_arbiter_approve():
     loop = cl.ConvergenceLoop()
-    loop.prepare_round("plan v1")
+    loop.prepare_round()
     loop.record_blind_verdict("approve")
     loop.add_opinions([_peer("Reviewer A", "approve")])
     loop.submit_adjudication([])
@@ -30,14 +30,14 @@ def test_converges_round_one_when_peers_and_arbiter_approve():
 
 def test_blind_verdict_first_gate():
     loop = cl.ConvergenceLoop()
-    loop.prepare_round("p")
+    loop.prepare_round()
     with pytest.raises(cl.ConvergenceError):
         loop.add_opinions([_peer("Reviewer A", "approve")])      # opinions before any blind verdict
 
 
 def test_blind_verdict_recorded_only_once():
     loop = cl.ConvergenceLoop()
-    loop.prepare_round("p")
+    loop.prepare_round()
     loop.record_blind_verdict("approve")
     with pytest.raises(cl.ConvergenceError):
         loop.record_blind_verdict("reject")
@@ -47,7 +47,7 @@ def test_blind_verdict_recorded_only_once():
 
 def test_no_silent_dismissal_unadjudicated_issue_raises():
     loop = cl.ConvergenceLoop()
-    loop.prepare_round("p")
+    loop.prepare_round()
     loop.record_blind_verdict("approve")
     loop.add_opinions([_peer("Reviewer A", "reject", [_issue("A-1")])])
     with pytest.raises(cl.ConvergenceError):
@@ -56,7 +56,7 @@ def test_no_silent_dismissal_unadjudicated_issue_raises():
 
 def test_no_silent_dismissal_reasonless_dismiss_raises():
     loop = cl.ConvergenceLoop()
-    loop.prepare_round("p")
+    loop.prepare_round()
     loop.record_blind_verdict("approve")
     loop.add_opinions([_peer("Reviewer A", "reject", [_issue("A-1")])])
     with pytest.raises(cl.ConvergenceError):
@@ -67,7 +67,7 @@ def test_no_silent_dismissal_reasonless_dismiss_raises():
 
 def test_accept_needs_no_reason():
     loop = cl.ConvergenceLoop(max_rounds=1)
-    loop.prepare_round("p")
+    loop.prepare_round()
     loop.record_blind_verdict("approve")
     loop.add_opinions([_peer("Reviewer A", "reject", [_issue("A-1")])])
     loop.submit_adjudication([cl.Adjudication("A-1", cl.ACCEPT)])  # no reason required for accept
@@ -78,7 +78,7 @@ def test_accept_needs_no_reason():
 
 def test_arbiter_cannot_self_approve_without_a_responding_peer():
     loop = cl.ConvergenceLoop(max_rounds=1)
-    loop.prepare_round("p")
+    loop.prepare_round()
     loop.record_blind_verdict("approve")
     loop.add_opinions([cl.PeerOpinion("Reviewer A", "approve", responded=False)])  # peer lane died
     loop.submit_adjudication([])
@@ -87,7 +87,7 @@ def test_arbiter_cannot_self_approve_without_a_responding_peer():
 
 def test_peer_reject_blocks_convergence():
     loop = cl.ConvergenceLoop(max_rounds=1)
-    loop.prepare_round("p")
+    loop.prepare_round()
     loop.record_blind_verdict("approve")
     loop.add_opinions([_peer("Reviewer A", "approve"), _peer("Reviewer B", "reject")])
     loop.submit_adjudication([])
@@ -96,7 +96,7 @@ def test_peer_reject_blocks_convergence():
 
 def test_arbiter_blind_reject_blocks_even_if_peers_approve():
     loop = cl.ConvergenceLoop(max_rounds=1)
-    loop.prepare_round("p")
+    loop.prepare_round()
     loop.record_blind_verdict("reject")
     loop.add_opinions([_peer("Reviewer A", "approve")])
     loop.submit_adjudication([])
@@ -105,7 +105,7 @@ def test_arbiter_blind_reject_blocks_even_if_peers_approve():
 
 def test_unknown_stance_fails_closed_to_abstain():
     loop = cl.ConvergenceLoop(max_rounds=1)
-    loop.prepare_round("p")
+    loop.prepare_round()
     loop.record_blind_verdict("approve")
     loop.add_opinions([cl.PeerOpinion("Reviewer A", "maybe")])    # unrecognised -> abstain
     loop.submit_adjudication([])
@@ -115,7 +115,7 @@ def test_unknown_stance_fails_closed_to_abstain():
 
 def test_deferred_issue_does_not_block_and_is_residual():
     loop = cl.ConvergenceLoop()
-    loop.prepare_round("p")
+    loop.prepare_round()
     loop.record_blind_verdict("approve")
     loop.add_opinions([_peer("Reviewer A", "approve", [_issue("A-1", cat="performance")])])
     loop.submit_adjudication([cl.Adjudication("A-1", cl.DEFER, "non-blocking, fix later")])
@@ -128,13 +128,13 @@ def test_deferred_issue_does_not_block_and_is_residual():
 
 def test_revise_then_converge_two_rounds_medium_confidence():
     loop = cl.ConvergenceLoop(max_rounds=5)
-    loop.prepare_round("v1")
+    loop.prepare_round()
     loop.record_blind_verdict("approve")
     loop.add_opinions([_peer("Reviewer A", "reject", [_issue("A-1")])])
     loop.submit_adjudication([cl.Adjudication("A-1", cl.ACCEPT)])
     assert loop.check_convergence() == "revise"
     loop.request_revision()
-    loop.prepare_round("v2")
+    loop.prepare_round()
     loop.record_blind_verdict("approve")
     loop.add_opinions([_peer("Reviewer A", "approve")])
     loop.submit_adjudication([])
@@ -145,7 +145,7 @@ def test_revise_then_converge_two_rounds_medium_confidence():
 
 def test_exhausting_rounds_yields_unresolved():
     loop = cl.ConvergenceLoop(max_rounds=1)
-    loop.prepare_round("v1")
+    loop.prepare_round()
     loop.record_blind_verdict("approve")
     loop.add_opinions([_peer("Reviewer A", "reject", [_issue("A-1")])])
     loop.submit_adjudication([cl.Adjudication("A-1", cl.ACCEPT)])
@@ -157,7 +157,7 @@ def test_exhausting_rounds_yields_unresolved():
 
 def test_mark_unresolved_when_revision_unavailable():
     loop = cl.ConvergenceLoop(max_rounds=5)
-    loop.prepare_round("v1")
+    loop.prepare_round()
     loop.record_blind_verdict("approve")
     loop.add_opinions([_peer("Reviewer A", "reject", [_issue("A-1")])])
     loop.submit_adjudication([cl.Adjudication("A-1", cl.ACCEPT)])
@@ -175,6 +175,6 @@ def test_confidence_labels():
 
 def test_finalize_before_terminal_raises():
     loop = cl.ConvergenceLoop()
-    loop.prepare_round("p")
+    loop.prepare_round()
     with pytest.raises(cl.ConvergenceError):
         loop.finalize()

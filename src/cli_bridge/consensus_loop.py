@@ -70,9 +70,7 @@ class Adjudication:
 @dataclass
 class Round:
     index: int
-    plan: str
     blind_verdict: str | None = None
-    blind_note: str = ""
     opinions: list[PeerOpinion] = field(default_factory=list)
     adjudications: list[Adjudication] = field(default_factory=list)
 
@@ -114,16 +112,17 @@ class ConvergenceLoop:
 
     # ── transitions ──────────────────────────────────────────────────────────────────────────
 
-    def prepare_round(self, plan: str) -> Round:
-        """Open a round with the author's (possibly revised) plan. Valid at the very start and,
-        after `request_revision`, for each subsequent round."""
+    def prepare_round(self) -> Round:
+        """Open the next round. Valid at the very start and, after `request_revision`, for each
+        subsequent round. The plan text lives with the driver — the machine tracks only the
+        governance state (verdict, peer stances, adjudications)."""
         if self.state != AWAIT_BLIND:
             raise ConvergenceError(f"cannot start a round from state {self.state!r}")
-        r = Round(index=self.round + 1, plan=plan)
+        r = Round(index=self.round + 1)
         self.rounds.append(r)
         return r
 
-    def record_blind_verdict(self, verdict: str, note: str = "") -> None:
+    def record_blind_verdict(self, verdict: str) -> None:
         """The arbiter commits its OWN verdict BEFORE seeing any peer opinion (guard 1)."""
         if self.state != AWAIT_BLIND:
             raise ConvergenceError(f"blind verdict not expected in state {self.state!r}")
@@ -131,7 +130,6 @@ class ConvergenceLoop:
         if cur.blind_verdict is not None:
             raise ConvergenceError("blind verdict already recorded for this round")
         cur.blind_verdict = _norm_stance(verdict)
-        cur.blind_note = str(note or "")
         self.state = AWAIT_PEERS
 
     def add_opinions(self, opinions: list[PeerOpinion]) -> None:

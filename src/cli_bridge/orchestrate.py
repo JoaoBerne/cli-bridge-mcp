@@ -788,12 +788,11 @@ async def converge(*, run_lane, resolve_lane, default_lanes, telemetry, task: st
     plan = ar.output.strip()
 
     while True:
-        loop.prepare_round(plan)
+        loop.prepare_round()
         # 1. arbiter's BLIND verdict — recorded before any peer is consulted (guard 1)
         br = await run_lane(arbiter, {**sub, "task": _CONVERGE_BLIND.format(task=task, plan=plan)},
                             tool="converge")
-        loop.record_blind_verdict(_parse_verdict(br.output) if br.ok else cl.ABSTAIN,
-                                  note=(br.output.strip()[:300] if br.ok else br.kind))
+        loop.record_blind_verdict(_parse_verdict(br.output) if br.ok else cl.ABSTAIN)
         # 2. anonymized cross-family peers review the plan in parallel
         ptasks = [{"lane": p.key, **sub, "task": _converge_peer_prompt(task, plan)}
                   for p in panel]
