@@ -106,7 +106,11 @@ on evidence), **discrete calibration binning** (eval bins on emitted confidences
 correctness, scope, ambiguity, performance, ops}`, orthogonal to severity, never invented),
 **`workflow preset=converge`** governance loop — a PURE state machine (`consensus_loop.py`)
 enforcing blind-verdict-first + no-silent-dismissal + no-self-approval in code (author → blind
-arbiter → anonymized cross-family peers → reasoned adjudication → revise/converge).
+arbiter → anonymized cross-family peers → reasoned adjudication → revise/converge), **opt-in API
+lanes** (`availability_env` auto-hides a lane until its key is set; bundled `cli-bridge-openai`
+urllib bridge + built-in `openrouter`; ban-safe default unchanged), **read-only mutation guard**
+(`CLI_BRIDGE_VERIFY_PLAN_READONLY` flags a plan-mode delegate that writes to a git workspace; no
+auto-revert).
 
 ### Considered & deferred (rationale — not just "not yet")
 - **forced-pacing engine** — contradicts the model (cli-bridge delegates investigation to the

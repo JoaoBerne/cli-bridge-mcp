@@ -398,6 +398,33 @@ def _mock_answer(lane: LaneSpec, model: str, task: str) -> str:
             f"model={model or 'default'} would answer:\n{task[:300]}")
 
 
+def _readonly_guard_snapshot(agent: str, expanded: str | None):
+    """Pre-spawn workspace snapshot for the opt-in read-only mutation guard. Returns
+    (snapshot, repo_root), or (None, "") when the guard is off, the run isn't read-only, or cwd
+    isn't a git repo. Cheap: one `git status` only when the toggle is on."""
+    if agent == "build" or not expanded or not config.verify_plan_readonly():
+        return None, ""
+    root, _err = worktrees._repo_root(expanded)
+    if not root:                               # not a git repo -> nothing to diff against
+        return None, ""
+    return worktrees._porcelain(root), root
+
+
+def _readonly_guard_diff(root: str, before: dict) -> list[str]:
+    """Paths that changed/appeared since `before` — i.e. what a 'read-only' delegate wrote."""
+    after = worktrees._porcelain(root)
+    return sorted(p for p, s in after.items() if before.get(p) != s)
+
+
+def _readonly_mutation_banner(paths: list[str]) -> str:
+    """Prominent warning prepended to a read-only delegate's answer when it wrote files anyway."""
+    shown = "\n".join(f"  - {p}" for p in paths[:20])
+    more = f"\n  …and {len(paths) - 20} more" if len(paths) > 20 else ""
+    return ("⚠️ WORKSPACE MUTATION DETECTED — this lane ran READ-ONLY (plan) but changed "
+            f"{len(paths)} path(s) in the repo. cli-bridge did NOT revert them; review/restore if "
+            f"unexpected (git checkout / git clean).\n{shown}{more}\n\n---\n\n")
+
+
 async def _run_lane(lane: LaneSpec, args: dict, *, tool: str = "ask",
                     terse: bool = True) -> runner.RunResult:
     task = _str(args, "task")
@@ -477,12 +504,20 @@ async def _run_lane(lane: LaneSpec, args: dict, *, tool: str = "ask",
     # the re-entry guard above. Merge onto a COPY of the env (a bare dict drops the CLI's PATH/auth).
     spawn_env = {**base_env, **extra_env, "CLI_BRIDGE_DEPTH": str(depth + 1)}
     await runner.pace(lane.key, lane.min_interval_s)   # anti-burst (opt-in, per lane)
+    # Opt-in read-only guard: snapshot the workspace before a 'plan' delegate runs (no-op unless
+    # CLI_BRIDGE_VERIFY_PLAN_READONLY is on and cwd is a git repo).
+    ro_before, ro_root = _readonly_guard_snapshot(agent, expanded)
     rec = telemetry.start(tool, lane.key, model, task, role=_str(args, "role"))
     timeout = _timeout(args.get("timeout_s"))
     t0 = time.monotonic()
     res = await _spawn_with_retry(argv, timeout, expanded, spawn_env)
     res.latency_ms = int((time.monotonic() - t0) * 1000)
     res.model = model                          # provenance: the resolved model that actually ran
+    if ro_before is not None and res.ok:       # read-only delegate that wrote files -> flag (no revert)
+        mutated = _readonly_guard_diff(ro_root, ro_before)
+        if mutated:
+            res.output = _readonly_mutation_banner(mutated) + res.output
+            res.mutated = True
     telemetry.record(rec, res.ok, res.kind, len(res.output), input_chars=len(prompt))
     _write_trace(lane, model, argv, expanded, timeout, res)
     if key and res.ok:                        # cache only successes; failures are transient

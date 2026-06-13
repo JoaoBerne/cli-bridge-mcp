@@ -141,6 +141,8 @@ class RunResult:
     model: str = ""           # resolved model that ran, filled in by the caller (provenance)
     err: str = ""             # redacted stderr (success only carries it for handle capture —
                               # e.g. opencode --print-logs emits its session id there)
+    mutated: bool = False     # a READ-ONLY (plan) delegate wrote to the workspace anyway — set by
+                              # server._run_lane when CLI_BRIDGE_VERIFY_PLAN_READONLY catches it
 
     def render(self) -> str:
         """One string for the MCP tool result. Errors are prefixed so the caller can tell
