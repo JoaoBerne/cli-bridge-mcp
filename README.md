@@ -211,20 +211,23 @@ How the multi-model orchestrators differ on the axes that bite later — auth mo
 and what happens to your repo. (As of June 2026, read from each project's public repo/docs —
 corrections welcome.)
 
-|  | [claude-octopus](https://github.com/nyldn/claude-octopus) | [PAL / zen-mcp](https://github.com/BeehiveInnovations/zen-mcp-server) | **cli-bridge** |
-|---|---|---|---|
-| **How other models are reached** | hybrid: CLI spawn, OAuth-subscription reuse, or API keys | API keys (providers) + CLI spawn (`clink`) | **official CLI subprocess only** — each CLI keeps its own auth |
-| **API keys needed** | optional fallback | for most providers | **never** |
-| **Spend control** | session-only cost gate (`OCTOPUS_MAX_COST_USD`; no cross-session history) | none found | **enforced**: per-lane daily run limit + daily credit cap + per-invocation budget, persisted ([docs/BUDGET.md](docs/BUDGET.md)) |
-| **Delegated edits** | in-place | in-place (bypass/yolo flags) | **throwaway worktree → diff** (your repo untouched), or zone-guarded direct mode |
-| **Survives host restart / `/compact`** | session-scoped state | in-memory threads (TTL) | **sqlite**: conversations, jobs, fan-out journal |
-| **Runtime deps** | Node 18+, npm, bash | Python + pip packages | **Python stdlib + `mcp`** |
-| **Hosts** | Claude Code-first (plugin; MCP server secondary) | any MCP host | any MCP host (+ a Claude Code plugin) |
+|  | [claude-octopus](https://github.com/nyldn/claude-octopus) | [PAL / zen-mcp](https://github.com/BeehiveInnovations/zen-mcp-server) | [deliberation](https://github.com/antonbabenko/deliberation) | **cli-bridge** |
+|---|---|---|---|---|
+| **How other models are reached** | hybrid: CLI spawn, OAuth-subscription reuse, or API keys | API keys (providers) + CLI spawn (`clink`) | CLI spawn (Codex/Gemini) + API keys (Grok, OpenRouter) | **official CLI subprocess only** — each CLI keeps its own auth |
+| **API keys needed** | optional fallback | for most providers | for Grok & OpenRouter | **never** |
+| **Spend control** | session-only cost gate (`OCTOPUS_MAX_COST_USD`; no cross-session history) | none found | none found | **enforced**: per-lane daily run limit + daily credit cap + per-invocation budget, persisted ([docs/BUDGET.md](docs/BUDGET.md)) |
+| **Delegated edits** | in-place | in-place (bypass/yolo flags) | in-place (`workspace-write` experts) | **throwaway worktree → diff** (your repo untouched), or zone-guarded direct mode |
+| **Survives host restart / `/compact`** | session-scoped state | in-memory threads (TTL) | opt-in on-disk; in-memory by default | **sqlite**: conversations, jobs, fan-out journal |
+| **Runtime deps** | Node 18+, npm, bash | Python + pip packages | Node 18+, npm | **Python stdlib + `mcp`** |
+| **Hosts** | Claude Code-first (plugin; MCP server secondary) | any MCP host | any MCP host (+ Claude Code plugin) | any MCP host (+ a Claude Code plugin) |
 
 Where they're stronger, honestly: claude-octopus ships a much larger workflow surface (49 commands,
-32 personas, CI reactions) and PAL has the biggest community (~11.6k★) with a polished tool set.
-cli-bridge's bet is narrower: **ban-safe auth, enforced budgets, and delegation that can't wreck
-your repo** — verified by its own shipped eval instead of claimed.
+32 personas, CI reactions); PAL has the biggest community (~11.6k★) with a polished tool set; and
+**deliberation has the deepest consensus governance** — a blind verdict the orchestrator commits
+*before* it sees the panel, plus a mandatory one-line reason for every dismissed objection (cli-bridge
+has anonymized peer review, a cross-vendor k-of-N jury, and earn-their-seat scoring, but not those two
+guards yet). cli-bridge's bet is narrower: **ban-safe auth, enforced budgets, and delegation that
+can't wreck your repo** — verified by its own shipped eval instead of claimed.
 
 ---
 
