@@ -1059,6 +1059,17 @@ async def _run_workflow_preset(args: dict, lanes: list[LaneSpec]) -> list[TextCo
                 verifier_lanes=args.get("verifier_lanes"),
                 verifiers=int(args.get("verifiers") or 0),
                 threshold=int(args.get("threshold") or 0), cwd=_str(args, "cwd"))
+    elif preset == "converge":
+        try:
+            c_rounds = min(int(args.get("max_rounds") or 5), orchestrate.VERIFY_MAX_ROUNDS)
+        except (TypeError, ValueError):
+            c_rounds = 5
+
+        def make():
+            return orchestrate.converge(
+                **common, task=_str(args, "task"), author_lane=_str(args, "author_lane"),
+                arbiter_lane=_str(args, "arbiter_lane"), peer_lanes=args.get("peer_lanes"),
+                peers=int(args.get("verifiers") or 0), max_rounds=c_rounds, cwd=_str(args, "cwd"))
     else:
         return [TextContent(type="text", text=f"[error] unknown preset: {preset or '(none)'}")]
 

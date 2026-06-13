@@ -500,3 +500,89 @@ def test_fanout_compare_plain_lane_entries_unchanged(tmp_path, monkeypatch):
         run_lane=fake_run_lane, resolve_lane=lambda k: oc if k == "gemini" else None,
         default_lanes=[oc], telemetry=telemetry, task="t", lanes=["gemini"]))
     assert "gemini" in out and "(model" not in out                        # no spurious model tag
+
+
+# ── converge (governance loop: blind verdict -> peers -> adjudicate -> revise/converge) ─────────
+
+def _converge_lanes():
+    return {k: _lane(k) for k in ("gpt", "gemini", "claude")}             # openai / google / anthropic
+
+
+def test_converge_happy_path_converges_round_one():
+    tel = FakeTelemetry()
+    lanes = _converge_lanes()
+    order = []
+
+    async def rl(lane, args, *, tool="ask", terse=True):
+        t = args["task"]
+        if "You are the ARBITER. Judge the PLAN" in t:
+            order.append("blind")
+            return RunResult(True, "looks solid\nVERDICT: APPROVE", "ok", 1)
+        if "You are an independent reviewer" in t:
+            order.append("peer")
+            return RunResult(True, "[]\nSTANCE: APPROVE", "ok", 1)
+        return RunResult(True, "PLAN BODY", "ok", 1)                      # author draft
+
+    report = asyncio.run(orchestrate.converge(
+        run_lane=rl, resolve_lane=lanes.get, default_lanes=list(lanes.values()),
+        telemetry=tel, task="design X", author_lane="gpt"))
+    assert "CONVERGED" in report and "confidence high" in report
+    assert order.index("blind") < order.index("peer")                    # blind verdict before peers
+
+
+def test_converge_unresolved_when_blocker_accepted():
+    tel = FakeTelemetry()
+    lanes = _converge_lanes()
+
+    async def rl(lane, args, *, tool="ask", terse=True):
+        t = args["task"]
+        if "You are the ARBITER. Judge the PLAN" in t:
+            return RunResult(True, "VERDICT: APPROVE", "ok", 1)
+        if "Rule on EACH" in t:                                          # arbiter adjudicates
+            return RunResult(True, '[{"id":"ReviewerA-1","decision":"accept","reason":"real"}]', "ok", 1)
+        if "You are an independent reviewer" in t:
+            return RunResult(True, '[{"category":"security","title":"SQLi","detail":"bad"}]\n'
+                                   "STANCE: REJECT", "ok", 1)
+        return RunResult(True, "PLAN", "ok", 1)
+
+    report = asyncio.run(orchestrate.converge(
+        run_lane=rl, resolve_lane=lanes.get, default_lanes=list(lanes.values()),
+        telemetry=tel, task="q", author_lane="gpt", max_rounds=1))
+    assert "UNRESOLVED" in report and "SQLi" in report and "security" in report
+
+
+def test_converge_revise_then_converge_two_rounds():
+    tel = FakeTelemetry()
+    lanes = _converge_lanes()
+    st = {"peer_calls": 0}
+
+    async def rl(lane, args, *, tool="ask", terse=True):
+        t = args["task"]
+        if "You are the ARBITER. Judge the PLAN" in t:
+            return RunResult(True, "VERDICT: APPROVE", "ok", 1)
+        if "Rule on EACH" in t:
+            return RunResult(True, '[{"id":"ReviewerA-1","decision":"accept","reason":"x"}]', "ok", 1)
+        if "You are an independent reviewer" in t:
+            st["peer_calls"] += 1
+            if st["peer_calls"] == 1:                                    # round 1: a real blocker
+                return RunResult(True, '[{"title":"bug","detail":"d"}]\nSTANCE: REJECT', "ok", 1)
+            return RunResult(True, "[]\nSTANCE: APPROVE", "ok", 1)       # round 2: clean
+        return RunResult(True, "PLAN", "ok", 1)                          # author draft + revise
+
+    report = asyncio.run(orchestrate.converge(
+        run_lane=rl, resolve_lane=lanes.get, default_lanes=list(lanes.values()),
+        telemetry=tel, task="q", author_lane="gpt", max_rounds=3))
+    assert "CONVERGED" in report and "Round 2" in report
+
+
+def test_converge_needs_a_distinct_peer():
+    tel = FakeTelemetry()
+    lanes = {k: _lane(k) for k in ("gpt", "codex")}                      # both openai: no peer left
+
+    async def rl(lane, args, *, tool="ask", terse=True):
+        return RunResult(True, "x", "ok", 1)
+
+    report = asyncio.run(orchestrate.converge(
+        run_lane=rl, resolve_lane=lanes.get, default_lanes=list(lanes.values()),
+        telemetry=tel, task="q", author_lane="gpt"))
+    assert report.startswith("[error]") and "peer" in report
