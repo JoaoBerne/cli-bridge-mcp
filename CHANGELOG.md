@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-06-13
+
 ### Added
 - **Read-only mutation guard (`CLI_BRIDGE_VERIFY_PLAN_READONLY`, opt-in).** When on, a delegate that
   ran read-only (`agent=plan`, the default) in a git repo is checked: cli-bridge snapshots the
