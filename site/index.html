@@ -86,7 +86,8 @@
   .card .ex{display:block;margin-top:9px;color:var(--sub);font-size:.8rem;opacity:.85}
 
   /* moat table */
-  .moat{width:100%;border-collapse:collapse;font-size:.86rem;
+  .moat-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:12px}
+  .moat{width:100%;min-width:760px;border-collapse:collapse;font-size:.84rem;
     border:1px solid var(--line);border-radius:12px;overflow:hidden}
   .moat th,.moat td{padding:11px 14px;text-align:left;border-bottom:1px solid var(--line);
     vertical-align:top}
@@ -229,33 +230,40 @@
 
 <section>
   <div class="wrap">
-    <h2>// vs. other "call other models" MCPs</h2>
+<h2 id="vs">// vs. other "call other models" MCPs</h2>
+    <div class="moat-wrap">
     <table class="moat">
       <thead>
-        <tr><th></th><th>claude-octopus</th><th>PAL / zen-mcp</th><th class="us">cli-bridge</th></tr>
+        <tr><th></th><th>claude-octopus</th><th>PAL / zen-mcp</th><th>deliberation</th><th class="us">cli-bridge</th></tr>
       </thead>
       <tbody>
         <tr><td>Reaches models via</td>
           <td>CLI / OAuth reuse / API keys</td><td>API keys + CLI spawn</td>
+          <td>CLI (GPT/Gemini) + API keys (Grok, OpenRouter)</td>
           <td class="us">official CLI subprocess only</td></tr>
         <tr><td>API keys needed</td>
-          <td>optional fallback</td><td>for most providers</td><td class="us">never</td></tr>
+          <td>optional fallback</td><td>for most providers</td><td>for Grok &amp; OpenRouter</td>
+          <td class="us">never</td></tr>
         <tr><td>Spend control</td>
-          <td>session-only gate</td><td>none found</td>
+          <td>session-only gate</td><td>none found</td><td>none found</td>
           <td class="us">per-lane daily + credit cap, persisted</td></tr>
         <tr><td>Delegated edits</td>
-          <td>in-place</td><td>in-place (yolo flags)</td>
+          <td>in-place</td><td>in-place (yolo flags)</td><td>in-place (workspace-write)</td>
           <td class="us">worktree → diff, or zone-guarded</td></tr>
         <tr><td>Survives restart / /compact</td>
-          <td>session-scoped</td><td>in-memory (TTL)</td>
+          <td>session-scoped</td><td>in-memory (TTL)</td><td>opt-in on-disk; in-memory default</td>
           <td class="us">sqlite: threads, jobs, journal</td></tr>
         <tr><td>Runtime deps</td>
-          <td>Node 18+, npm, bash</td><td>Python + pip pkgs</td>
+          <td>Node 18+, npm, bash</td><td>Python + pip pkgs</td><td>Node 18+, npm</td>
           <td class="us">Python stdlib + mcp</td></tr>
       </tbody>
     </table>
+    </div>
     <p class="note">Where they're stronger, honestly: octopus ships a much larger workflow surface;
-    PAL has the biggest community (~11.6k★). Full, dated breakdown in
+    PAL has the biggest community (~11.6k★); deliberation has the deepest consensus governance — a
+    blind verdict committed <em>before</em> the panel is seen, and a mandatory reason for every
+    dismissed objection (cli-bridge has anonymized peer review, a cross-vendor jury and
+    earn-their-seat scoring, but not those two guards yet). Full, dated breakdown in
     <a href="https://github.com/JoaoBerne/cli-bridge-mcp/blob/main/docs/COMPARISON.md">COMPARISON.md</a>.</p>
   </div>
 </section>
