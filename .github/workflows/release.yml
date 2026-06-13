@@ -1,7 +1,8 @@
-# Publish to PyPI on a version tag, via Trusted Publishing (OIDC — no API token stored).
+# Publish to PyPI + the official MCP registry on a version tag — both via OIDC, no API token stored.
 # One-time setup on PyPI: add a "pending publisher" for project `cli-bridge-mcp`, repo
-# JoaoBerne/cli-bridge-mcp, workflow `release.yml`, environment `pypi`. Then `git tag v0.1.0 &&
-# git push --tags` builds + publishes automatically.
+# JoaoBerne/cli-bridge-mcp, workflow `release.yml`, environment `pypi`. The registry step needs no
+# setup: GitHub OIDC authenticates the `io.github.JoaoBerne` namespace from this repo automatically.
+# Then `git tag v0.1.0 && git push --tags` builds, publishes to PyPI, and registers automatically.
 name: release
 
 on:
@@ -56,3 +57,36 @@ jobs:
           name: dist
           path: dist/
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+  # Register the same version on the official MCP registry. Runs AFTER PyPI because the registry
+  # validates the `mcp-name` marker in server.json against the PUBLISHED PyPI README. GitHub OIDC
+  # (id-token) authenticates the io.github.<owner> namespace — no interactive `mcp-publisher login`.
+  registry:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      MCP_PUBLISHER_VERSION: v1.7.9
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install mcp-publisher
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz" \
+            | tar -xz mcp-publisher
+      - name: Wait for PyPI to index this version
+        run: |
+          V=$(python -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          for i in $(seq 1 30); do
+            curl -fsS "https://pypi.org/pypi/cli-bridge-mcp/$V/json" >/dev/null && { echo "PyPI $V is live"; exit 0; }
+            echo "waiting for PyPI $V to index ($i/30)"; sleep 10
+          done
+          echo "PyPI $V not visible after 5 min — aborting registry publish"; exit 1
+      - name: Publish to the MCP registry (GitHub OIDC)
+        run: |
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish
