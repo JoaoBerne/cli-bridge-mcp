@@ -86,6 +86,10 @@ class LaneSpec:
     experimental: bool = False            # flags not verified live — caller is warned
     install_hint: str = ""                # shown by doctor when the CLI isn't installed
     note: str = ""
+    # OPT-IN API lanes: when set, this lane needs an API key in the named env var, and stays
+    # HIDDEN until that var is non-empty (see has_required_key + detect.is_installed). The ban-safe
+    # DEFAULT surface — official CLIs, no keys — is therefore unchanged for anyone who doesn't opt in.
+    availability_env: str | None = None
     # Some CLIs pick a model via an ENV var, not a flag (e.g. vibe reads VIBE_ACTIVE_MODEL). A
     # lane may supply extra env vars for the spawn via this builder; default = none.
     env_ask: Callable[..., dict] | None = None
@@ -136,6 +140,15 @@ class LaneSpec:
     @property
     def enabled(self) -> bool:
         return self._env("ENABLED").lower() not in {"0", "false", "no", "off"}
+
+    @property
+    def has_required_key(self) -> bool:
+        """An opt-in API lane declares an env var that must hold its key; until that var is set the
+        lane is treated as unavailable (hidden from the surface). Non-API lanes: always True, so the
+        ban-safe default behaviour is unchanged."""
+        if not self.availability_env:
+            return True
+        return bool(os.environ.get(self.availability_env, "").strip())
 
     @property
     def _cost(self) -> str:
@@ -356,6 +369,19 @@ def _ollama_env(model="", effort="", agent=""):
     # rewrites the line for word-wrap), which corrupts the captured answer. NO_COLOR + a dumb
     # TERM make it emit the plain response. Applied to every ollama spawn via LaneSpec.env_ask.
     return {"NO_COLOR": "1", "TERM": "dumb"}
+
+
+_OPENROUTER_BASE = "https://openrouter.ai/api/v1"
+
+
+def _openrouter_ask(task, model, effort, agent, bin=""):  # OpenAI-compatible API via the bundled bridge
+    # bin = the bundled stdlib bridge (cli-bridge-openai). The API KEY is read from
+    # OPENROUTER_API_KEY by the bridge itself — NEVER placed in argv (so it can't leak via `ps`).
+    # Only the env var's NAME and the base URL travel on the command line.
+    cmd = ["--base-url", _OPENROUTER_BASE, "--key-env", "OPENROUTER_API_KEY"]
+    if model:
+        cmd += ["--model", model]
+    return cmd + [task]
 
 
 # opencode's bare default can resolve to a PAID model, so we pick a free one. The pick is
@@ -580,6 +606,26 @@ BUILTIN_LANES: list[LaneSpec] = [
                   "first model from `ollama list`. Max decorrelation for the jury — but note a "
                   "local runtime of open weights still correlates with OTHER local runtimes of the "
                   "same weights; real jury diversity comes from distinct vendors."),
+    LaneSpec("openrouter", "OpenRouter (400+ models, OpenAI-compatible API)", "cli-bridge-openai",
+             _openrouter_ask,
+             cost_default="paid",
+             availability_env="OPENROUTER_API_KEY",   # OPT-IN: hidden until this key is set
+             cost_note="OpenRouter bills per token against YOUR API key (some ':free' models exist "
+                       "but rate-limit). Opt-in: this lane stays HIDDEN until OPENROUTER_API_KEY is "
+                       "set, so the ban-safe default surface is unchanged.",
+             models_args=["--list-models", "--base-url", _OPENROUTER_BASE,
+                          "--key-env", "OPENROUTER_API_KEY"],
+             caps=frozenset({"model"}),
+             client_ids=frozenset({"openrouter"}),
+             experimental=True,
+             install_hint="export OPENROUTER_API_KEY=sk-or-... (get a key at openrouter.ai/keys); "
+                          "the bridge ships with cli-bridge — no extra install.",
+             note="OPT-IN API lane via the bundled stdlib HTTP bridge (urllib only, no extra deps). "
+                  "The key is read from OPENROUTER_API_KEY by the bridge, never placed in argv "
+                  "(secret-safe). pass model=<id>, e.g. 'anthropic/claude-3.7-sonnet' or a ':free' "
+                  "model. Ban-safe note: this spends YOUR key by YOUR choice — it does not change "
+                  "the ban-safe DEFAULT (spawn official CLIs, no keys); API lanes stay hidden until "
+                  "you opt in. cost=paid keeps it out of the free fan-out (ask_all/cascade)."),
 ]
 
 
@@ -719,6 +765,7 @@ def load_custom_lanes(path: str | None = None) -> list[LaneSpec]:
             install_hint=str(item.get("install_hint", "")),
             note=str(item.get("note", "user-defined lane")),
             native_session=native,
+            availability_env=(str(item.get("availability_env", "")).strip() or None),
         ))
     LANES_LOAD_STATUS.update({"loaded": len(lanes), "skipped": skipped})
     return lanes
