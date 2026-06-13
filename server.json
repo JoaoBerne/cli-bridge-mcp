@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.JoaoBerne/cli-bridge-mcp",
-  "description": "A council of other AI CLIs (Gemini, GPT, Claude, opencode, Ollama) for any MCP host — ban-safe, no API keys.",
+  "description": "Other AI CLIs (Gemini, GPT, Claude, opencode, Ollama) as a council — ban-safe, no API keys.",
   "version": "0.1.4",
   "websiteUrl": "https://github.com/JoaoBerne/cli-bridge-mcp",
   "repository": {
