@@ -31,6 +31,12 @@ All notable changes to this project are documented here. The format follows
   stay in `server.py`; the moved symbols are re-exported so the MCP surface and the test-pinned
   `server.*` names are byte-identical. `doctor`/`doctor_deep` take their host-detection + lane-runner
   couplings injected (the same pattern as `council.py`). 648 tests, ruff and mypy unchanged.
+- **Landing page redesign (`site/`).** Refined-terminal pass aligned with the repo's mono /
+  gold-navy / `//`-header aesthetic: pain-first hero ("your assistant is only as good as the one
+  model you opened"), a sticky top bar, a "four levers" section (borrow / spread / offload /
+  verify), a compact moat table vs. octopus and PAL/zen-mcp, and accessibility polish
+  (`prefers-reduced-motion`, AA contrast, favicon). Self-contained static file, no build step.
+  Docs only.
 - **README hero is pain-first.** Opens with the user's problem ("your assistant is only as good as
   the one model you opened") before the mechanism, and names the concrete payoffs (bigger context,
   vision, cross-vendor second opinion, reviewable-diff build). Adds a GitHub-stars badge. Docs only.
