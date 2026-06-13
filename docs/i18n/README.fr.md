@@ -166,7 +166,7 @@ workflow(preset="fanout_compare", task="fix this failing test", lanes=["gpt","ge
 
 ## La boîte à outils
 
-~30 outils, groupés par intention (consulter / construire / vérifier / orchestrer). **Référence complète — chaque outil, chaque flag : [`docs/TOOLS.md`](../../docs/TOOLS.md)** (ou `cli-bridge --help`). `CLI_BRIDGE_LEAN=1` pour une surface réduite (~12 outils).
+~30 outils, groupés par intention (consulter / construire / vérifier / orchestrer). Côté revue et vérification, `security_review` / `review_diff` étiquettent désormais leurs constats par sévérité ET par catégorie — sécurité / correction / périmètre / ambiguïté / performance / ops ; et `workflow(preset=…)` propose **`converge`** (boucle de gouvernance : un arbitre indépendant valide un verdict *aveugle*, des pairs inter-éditeurs anonymisés relisent, chaque problème est tranché *avec une raison*, puis révise-ou-converge), `jury`, `verify_repair`, `fanout_compare`, … **Référence complète — chaque outil, chaque flag : [`docs/TOOLS.md`](../../docs/TOOLS.md)** (ou `cli-bridge --help`). `CLI_BRIDGE_LEAN=1` pour une surface réduite (~12 outils).
 
 ---
 
@@ -188,6 +188,35 @@ C'est de l'**orchestration, pas de la fusion** : vous dirigez des spécialistes,
 seul cerveau doté de tous les pouvoirs.
 
 → Forces & limites par CLI (datées, ça bouge vite) : **[docs/COMPARISON.md](../COMPARISON.md)**.
+
+### Côte à côte
+
+En quoi les orchestrateurs multi-modèles diffèrent sur les axes qui font mal plus tard — modèle d'auth,
+contrôle des dépenses, et ce qui arrive à votre dépôt. (En juin 2026, lu depuis le dépôt/la doc publics
+de chaque projet — corrections bienvenues.)
+
+|  | [claude-octopus](https://github.com/nyldn/claude-octopus) | [PAL / zen-mcp](https://github.com/BeehiveInnovations/zen-mcp-server) | [deliberation](https://github.com/antonbabenko/deliberation) | **cli-bridge** |
+|---|---|---|---|---|
+| **Comment les autres modèles sont atteints** | hybride : spawn CLI, réutilisation d'abonnement OAuth, ou clés API | clés API (fournisseurs) + spawn CLI (`clink`) | spawn CLI (Codex/Gemini) + clés API (Grok, OpenRouter) | **sous-processus de CLI officielle par défaut** — chaque CLI garde sa propre auth ; lanes API opt-in **optionnelles** |
+| **Clés API nécessaires** | repli optionnel | pour la plupart des fournisseurs | pour Grok & OpenRouter | **jamais par défaut** — les lanes API opt-in restent masquées tant que vous n'avez pas défini leur clé |
+| **Contrôle des dépenses** | garde de coût par session uniquement (`OCTOPUS_MAX_COST_USD` ; pas d'historique inter-sessions) | rien trouvé | rien trouvé | **appliqué** : limite quotidienne de runs par lane + plafond de crédits quotidien + budget par invocation, persistés ([docs/BUDGET.md](../BUDGET.md)) |
+| **Gouvernance du consensus** | — | — | verdict aveugle + raison obligatoire pour chaque rejet | **`converge`** : verdict d'arbitre aveugle, arbitrage motivé, **pas d'auto-approbation** — sur des pairs **inter-éditeurs** anonymisés, les 3 gardes appliquées dans le code |
+| **Éditions déléguées** | en place | en place (flags bypass/yolo) | en place (experts `workspace-write`) | **worktree jetable → diff** (votre dépôt intact), ou mode direct gardé par zone (+ garde lecture-seule-écriture opt-in) |
+| **Survit au redémarrage de l'hôte / `/compact`** | état limité à la session | threads en mémoire (TTL) | sur disque opt-in ; en mémoire par défaut | **sqlite** : conversations, jobs, journal de fan-out |
+| **Dépendances runtime** | Node 18+, npm, bash | Python + paquets pip | Node 18+, npm | **stdlib Python + `mcp`** |
+| **Hôtes** | Claude Code d'abord (plugin ; serveur MCP secondaire) | tout hôte MCP | tout hôte MCP (+ plugin Claude Code) | tout hôte MCP (+ un plugin Claude Code) |
+
+Là où ils sont plus forts, honnêtement : claude-octopus livre une surface de workflows bien plus large
+(49 commandes, 32 personas, réactions CI) ; PAL a la plus grosse communauté (~11,6k★) avec un jeu
+d'outils soigné ; et **deliberation** est un outil de gouvernance ciblé, mûr et mono-usage qui a été
+le pionnier du modèle verdict-aveugle / raison-de-rejet-obligatoire — cli-bridge a depuis adopté
+exactement ces gardes sous `workflow preset=converge` (et les exécute sur des pairs *inter-éditeurs
+anonymisés* sous budgets appliqués), mais deliberation reste le produit le plus spécialisé pour cette
+seule tâche. Le pari de cli-bridge est plus large : **auth ban-safe, budgets appliqués, vérification
+inter-éditeurs, et délégation qui ne peut pas saccager votre dépôt** — vérifié par son propre eval
+livré au lieu d'être proclamé.
+
+---
 
 ## Pourquoi cli-bridge (et pas un autre MCP « appeler d'autres modèles »)
 
@@ -245,6 +274,10 @@ Les écritures sont contenues, de deux façons — **vous choisissez** sous revu
   `backend/`, un délégué dans `frontend/`, en même temps — aucun ne peut gribouiller tout votre
   dépôt ; l'annulation est limitée à la zone, jamais un reset global.
 
+Et un garde-fou pour le chemin *lecture seule* : définissez `CLI_BRIDGE_VERIFY_PLAN_READONLY=1` et tout
+délégué `plan` (lecture seule) qui écrit malgré tout dans un espace de travail git se voit attribuer un
+drapeau `⚠️ WORKSPACE MUTATION DETECTED` sur sa réponse (signalé, jamais annulé automatiquement).
+
 La ré-entrée des délégués est plafonnée en profondeur (`CLI_BRIDGE_MAX_DEPTH`, défaut 1) pour qu'un
 délégué mal configuré ne puisse pas fork-bomber le conseil.
 
@@ -263,8 +296,10 @@ cli-bridge doctor        # see which CLIs are detected + their resolved paths
 
 ### Lanes
 
-**Intégrées :** Claude Code, Codex, Gemini (+ Antigravity `agy`), opencode, **Ollama (modèles locaux,
-0 $, offline)**, Qwen Code, Copilot, Grok.
+**Intégrées :** Claude Code, Codex, Gemini (+ Antigravity `agy`), Mistral (Vibe), opencode, **Ollama
+(modèles locaux, 0 $, offline)**, Qwen Code, Copilot, Grok, et **OpenRouter** (lane API opt-in — plus de 400 modèles ;
+reste masquée tant que vous n'avez pas défini `OPENROUTER_API_KEY`, donc la surface ban-safe par défaut
+est inchangée).
 
 **Runtimes locaux** au-delà d'Ollama — **LM Studio · MLX · llama.cpp** — fournis en recettes
 sans code : pointez `CLI_BRIDGE_LANES_FILE` vers [`examples/lmstudio.lane.json`](../../examples/lmstudio.lane.json),
@@ -276,7 +311,10 @@ diversité de conseil vient d'éditeurs distincts, pas d'un second runtime local
 vous déclariez leur coût) : Aider, Goose, Plandex, Amp, Crush, Amazon Q Developer CLI, Droid.
 
 **Tout le reste, c'est ~3 lignes de JSON.** Ajoutez une lane personnalisée, ou enveloppez n'importe
-quel endpoint compatible OpenAI en lançant `curl` (la clé reste dans curl, jamais dans argv). Voir
+quel endpoint compatible OpenAI en lançant `curl` (la clé reste dans curl, jamais dans argv), ou
+utilisez le pont **`cli-bridge-openai`** intégré (stdlib) — définissez `availability_env` pour que la
+lane reste masquée tant que sa clé n'est pas exportée. Voir
+[`examples/openai-compatible.lane.json`](../../examples/openai-compatible.lane.json). Voir aussi
 [`examples/`](../../examples/) pour les recettes.
 
 ---

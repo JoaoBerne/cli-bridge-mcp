@@ -24,21 +24,23 @@ host (Claude/Codex/…) ──MCP/stdio──▶ cli-bridge ──spawn subproce
 | File | Responsibility | Rule of thumb |
 |------|----------------|---------------|
 | `server.py` | The MCP surface: list tools, dispatch calls, list/serve prompts. Thin glue. | **No business logic here** — it should only route. |
-| `lanes.py` | The **lane registry**: one `LaneSpec` per CLI (claude/gpt/gemini/mistral/opencode/qwen/copilot) + the argv builders (`_claude_ask`, …) + the custom-lane JSON loader. | Add a CLI = add a `LaneSpec`. Never touch the server. |
+| `lanes.py` | The **lane registry**: one `LaneSpec` per CLI (claude/gpt/gemini/mistral/opencode/qwen/copilot/grok/ollama + the opt-in `openrouter` API lane) + the argv builders (`_claude_ask`, …) + the custom-lane JSON loader. `availability_env` hides an API lane until its key is set. | Add a CLI = add a `LaneSpec`. Never touch the server. |
+| `bridges/` | Bundled stdlib API bridges (`openai_compatible.py` = the `cli-bridge-openai` console script, `urllib` only). The runner spawns it like any lane; it reads the API key from the env var named in `--key-env` (the key VALUE never enters argv). | OPT-IN only — used by API lanes the user explicitly enables. No new dependency. |
 | `runner.py` | Runs a subprocess safely: timeout, process-tree kill, secret redaction, error classification (`quota`/`auth`/`timeout`/…), output cap. Returns a `RunResult`. | All "how do we spawn safely" lives here. |
 | `config.py` | All env parsing, timeouts, cost profile, onboarding text. **Single source of truth** for settings. | Need a new env var? It goes here. |
 | `telemetry.py` | Local sqlite: run log + per-lane health/cooldown + response cache + async-job rows + estimated token/credit accounting. | **Best-effort: must never raise into a delegation.** |
 | `router.py` | Pure functions that order lanes for `ask_cascade` (cheapest→strongest) and `ask_best` (per-mode: fast/cheap/deep/code/review/security), skipping cooled ones. | No side effects — pure, easy to test. |
 | `council.py` | The fan-out itself: `ask_all` (+ `agreement` score) / `ask_cascade` (opt-in confidence-escalate) / `ask_best` / `synthesize` + the `council_recap` digest. Extracted from `server.py`; takes injected `run_lane` / `emit` / `progress` / `host_sample`. | Same injection pattern as `workflows.py` — testable with fakes. |
 | `workflows.py` | The multi-model workflows: `review_diff`, `security_review`, `debate` + the `council_recap` digest + deterministic `prechecks` (secrets / dangerous shell). Orchestrates several lanes. | Takes an injected `run_lane`, so it's testable with fakes. |
-| `orchestrate.py` | Durable fan-out (`batch_run`: typed result + provenance, per-invocation budget caps + `dry_run` cost envelope, SQLite-journalled `resume_id`) + presets: `refine_plan`, `council_review`, `map_review`, `research_verify`, `verify_repair`, `fanout_compare`, **`jury`** (cross-vendor, author≠reviewer, k-of-N fail-closed). | Presets are hardcoded post-fan-out steps, not a DSL — the host composes logic. |
-| `findings.py` | Pure: parse each reviewer's JSON tolerantly, merge by file/line/title, derive confidence from agreement, render Markdown or a JSON result. | No I/O — deterministic merge replaces an LLM merge pass (can't fabricate findings). |
+| `orchestrate.py` | Durable fan-out (`batch_run`: typed result + provenance, per-invocation budget caps + `dry_run` cost envelope, SQLite-journalled `resume_id`) + presets: `refine_plan`, `council_review`, `map_review`, `research_verify`, `verify_repair`, `fanout_compare`, **`jury`** (cross-vendor, author≠reviewer, k-of-N fail-closed), **`converge`** (the governance-loop driver — injects `run_lane` into `consensus_loop`, reusing cross-family + anonymization). | Presets are hardcoded post-fan-out steps, not a DSL — the host composes logic. |
+| `consensus_loop.py` | The **converge-loop** as a PURE state machine: enforces blind-verdict-first, no-silent-dismissal, no-self-approval in code; states await_blind→await_peers→await_adjudication→converged/unresolved; confidence by settling round. | No I/O — unit-tested with no lanes/network; `orchestrate.converge` drives it. |
+| `findings.py` | Pure: parse each reviewer's JSON tolerantly, merge by file/line/title, derive confidence from agreement, render Markdown or a JSON result. Findings carry an **optional `category`** (security/correctness/scope/ambiguity/performance/ops), orthogonal to severity. | No I/O — deterministic merge replaces an LLM merge pass (can't fabricate findings). |
 | `jobs.py` | In-process async jobs (`ask_all_async`): wrap a coroutine in `asyncio.create_task`, return a job id, poll/fetch/cancel later. Live registry + best-effort sqlite row. | No cross-restart resume in v1 — stale `running` rows become `interrupted`. |
 | `preamble.py` | The terse response-style preamble prepended to delegate prompts. | Prose only — never applied to structured (JSON) workflows. |
 | `guards.py` | Scans UNTRUSTED delegate output for prompt-injection / tool-poisoning; `CLI_BRIDGE_GUARD=off\|warn\|strict`. | Runs in `_emit` after redaction; never on cli-bridge's own reports. |
 | `worktrees.py` | `ask_build`: `mode=isolated` runs a build agent in a throwaway worktree → diff (repo untouched); `mode=direct` writes real files under a git **zone contract** (per-zone lock, post-turn out-of-zone-write detection + zone-scoped revert) and returns non-text files as **artifacts by path**. | Real repo only ever touched inside the zone; undo is never a global reset. |
 | `buildloop.py` | Steerable multi-turn builds: `job_tail` / `build_steer` / interrupt, an executable Definition-of-Done gate (`dod_cmd`), filesystem continuity (no transcript). | Bounded by `max_turns` / `max_fail_retries`; a 0-file turn warns (plan-leak). |
-| `detect.py` | Which CLIs are actually installed (PATH lookup). | — |
+| `detect.py` | Which CLIs are actually installed (PATH lookup); also gates opt-in API lanes on `has_required_key` (hidden until `availability_env` is set). | — |
 | `cli.py` | Human/CI entry point (`cli-bridge …`) over the SAME internal functions the MCP tools use. | Thin wrappers — no logic of its own. |
 
 ## Request lifecycle (a single `ask_<lane>` call)
@@ -106,7 +108,8 @@ host (Claude/Codex/…) ──MCP/stdio──▶ cli-bridge ──spawn subproce
 3. **Cost safety**: an empty/missing model must never resolve to a paid model; `ask_all` /
    `ask_cascade` exclude limited/paid lanes by default.
 4. **Read-only by default**: writes happen only with explicit `agent: build`, annotated
-   destructive — and `ask_build_isolated` confines them to a throwaway worktree.
+   destructive — and `ask_build_isolated` confines them to a throwaway worktree. Opt-in
+   `CLI_BRIDGE_VERIFY_PLAN_READONLY=1` flags (never reverts) a plan-mode delegate that writes anyway.
 5. **Telemetry never raises** into a delegation path.
 6. **Portable**: macOS/Linux/Windows (see `runner._kill_tree`'s Windows branch).
 7. **Stdlib + `mcp` only**: no new runtime dependencies.
@@ -116,7 +119,9 @@ host (Claude/Codex/…) ──MCP/stdio──▶ cli-bridge ──spawn subproce
 ## Extending it
 
 - **Add a CLI**: append a `LaneSpec` in `lanes.py`, or — without forking — point
-  `CLI_BRIDGE_LANES_FILE` at a JSON file. Wrap any HTTP API by spawning `curl`.
+  `CLI_BRIDGE_LANES_FILE` at a JSON file. Wrap any OpenAI-compatible HTTP API by spawning `curl`,
+  or via the bundled `cli-bridge-openai` bridge; set `availability_env` to keep an API lane hidden
+  until its key is exported (opt-in; ban-safe default unchanged).
 - **Add a workflow**: add a function in `workflows.py` taking `(targets, args, run_lane)`, then
   register a tool + dispatch in `server.py`.
 - **Every change ships a test.** Tests must not need a real CLI or network (fake lanes via
