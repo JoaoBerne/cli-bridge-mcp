@@ -7,6 +7,15 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Opt-in API lanes (`availability_env`) + a bundled stdlib HTTP bridge.** You can now connect any
+  OpenAI-compatible API endpoint by exporting one key — and nothing changes for anyone who doesn't.
+  A lane that declares `availability_env` stays **hidden until that env var is set**, so the ban-safe
+  default surface (official CLIs, no keys) is unchanged. Ships a built-in **`ask_openrouter`** lane
+  (400+ models, `cost=paid` so it's out of the free fan-out) and **`cli-bridge-openai`**, a tiny
+  `urllib`-only bridge (no new dependency) that reads the key from the named env var — never argv, so
+  it can't leak via `ps` — POSTs to `/chat/completions`, and returns just the assistant text.
+  `--list-models` lists the endpoint's models. Custom lanes accept `availability_env` too; see
+  `examples/openai-compatible.lane.json` for the BYO pattern (Together, Groq, DeepSeek, local vLLM, …).
 - **`workflow preset=converge` — governance converge-loop (flagship).** An author lane drafts a
   plan; an independent **arbiter** commits a **blind verdict** *before* seeing any peer; **anonymized
   cross-family** peers review; the arbiter **adjudicates every issue with a mandatory reason**; then

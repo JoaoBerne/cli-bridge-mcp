@@ -1,0 +1,28 @@
+[
+  {
+    "//": "OPT-IN API lane via the bundled stdlib bridge (cli-bridge-openai) — no curl, no jq.",
+    "//1": "Works with ANY OpenAI-compatible endpoint: OpenRouter, Groq, Together, DeepSeek,",
+    "//2": "Fireworks, a local vLLM/llama.cpp server, or your own gateway. Unlike the raw-curl",
+    "//3": "recipe (byo-api-lane.json), the bridge PARSES the response and returns just the",
+    "//4": "assistant text, so the council reads it like any other lane.",
+    "//5": "SECRET-SAFE: the bridge reads the key from the env var NAMED in --key-env; the key",
+    "//6": "VALUE is never put in argv (invisible in `ps`).",
+    "//7": "OPT-IN: availability_env hides this lane until that env var is set, so adding the",
+    "//8": "recipe never changes your surface until you export the key. (OpenRouter itself is",
+    "//9": "built in as `ask_openrouter` — this is the template for OTHER providers.)",
+
+    "key": "together",
+    "display": "Together AI (OpenAI-compatible, API key)",
+    "bin": "cli-bridge-openai",
+    "model_flag": "--model",
+    "default_model": "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
+    "cost": "paid",
+    "availability_env": "TOGETHER_API_KEY",
+    "models": ["--list-models", "--base-url", "https://api.together.xyz/v1",
+               "--key-env", "TOGETHER_API_KEY"],
+    "experimental": true,
+    "install_hint": "export TOGETHER_API_KEY=...  (the bridge ships with cli-bridge — no extra install)",
+    "note": "OpenAI-compatible API lane via the bundled bridge. Hidden until TOGETHER_API_KEY is set; the key is read from env by the bridge, never in argv. Swap base-url + key-env for any other provider.",
+    "ask": ["--base-url", "https://api.together.xyz/v1", "--key-env", "TOGETHER_API_KEY", "{task}"]
+  }
+]

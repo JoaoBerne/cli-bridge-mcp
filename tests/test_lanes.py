@@ -361,3 +361,49 @@ def test_sunset_prefers_alt_binary(monkeypatch):
     assert dead.bin == "newbin"                        # successor first once the service died
     alive = _sunset_lane("2999-01-01", bin_alts=("newbin",))
     assert alive.bin == "oldbin"                       # default order before the sunset
+
+
+# ── opt-in API lanes (availability_env) ──────────────────────────────────────────────────────
+
+def test_has_required_key_default_true():
+    assert _lane("gpt").has_required_key is True              # no availability_env -> always available
+
+
+def test_openrouter_lane_is_opt_in(monkeypatch):
+    orouter = _lane("openrouter")
+    assert orouter.availability_env == "OPENROUTER_API_KEY"
+    assert orouter.cost_label == "paid"                      # kept out of the free fan-out
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    assert orouter.has_required_key is False                 # hidden until the key is set
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-x")
+    assert orouter.has_required_key is True
+
+
+def test_openrouter_ask_keeps_key_out_of_argv():
+    argv = _lane("openrouter").build_ask("review this", "anthropic/claude-3.7-sonnet", "", "")
+    assert "--key-env" in argv and "OPENROUTER_API_KEY" in argv  # only the NAME travels
+    assert "--base-url" in argv and argv[-1] == "review this"
+    assert not any(a.startswith("sk-") for a in argv)           # no key VALUE anywhere in argv
+
+
+def test_detect_hides_api_lane_without_key(monkeypatch):
+    from cli_bridge import detect
+    monkeypatch.setenv("CLI_BRIDGE_MOCK", "1")                  # even in dry-run mode
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    assert detect.is_installed(_lane("openrouter")) is False
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-x")
+    assert detect.is_installed(_lane("openrouter")) is True     # key set + mock -> available
+    assert detect.is_installed(_lane("gpt")) is True            # a normal lane is unaffected
+
+
+def test_custom_lane_reads_availability_env(tmp_path, monkeypatch):
+    spec = [{"key": "myapi", "bin": "cli-bridge-openai", "model_flag": "--model",
+             "availability_env": "MYAPI_KEY",
+             "ask": ["--base-url", "https://x/v1", "--key-env", "MYAPI_KEY", "{task}"]}]
+    p = tmp_path / "lanes.json"
+    p.write_text(json.dumps(spec))
+    monkeypatch.setenv("CLI_BRIDGE_LANES_FILE", str(p))
+    monkeypatch.delenv("MYAPI_KEY", raising=False)
+    loaded = lanes.load_custom_lanes()
+    assert len(loaded) == 1 and loaded[0].availability_env == "MYAPI_KEY"
+    assert loaded[0].has_required_key is False                  # opt-in, hidden until the key is set

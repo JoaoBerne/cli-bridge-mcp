@@ -22,6 +22,7 @@ Issues = "https://github.com/JoaoBerne/cli-bridge-mcp/issues"
 [project.scripts]
 cli-bridge-mcp = "cli_bridge.server:main"
 cli-bridge = "cli_bridge.cli:main"
+cli-bridge-openai = "cli_bridge.bridges.openai_compatible:main"
 
 [build-system]
 requires = ["hatchling"]

@@ -36,7 +36,8 @@ src/cli_bridge/
   preamble.py   # terse response-style preamble prepended to delegate prompts
   eval.py       # quality eval: council vs single + self-consistency, permutation test, scorer
   cli.py        # human/CI entry point (cli-bridge ...) over the same internals
-  detect.py     # PATH detection
+  detect.py     # PATH detection (+ availability_env gate for opt-in API lanes)
+  bridges/      # bundled stdlib API bridges (openai_compatible.py = cli-bridge-openai, urllib-only)
 tests/          # pytest; unit + cross-host integration (no real CLI needed)
 docs/           # COSTS.md, BENCHMARKS.md, ARCHITECTURE.md, i18n/ READMEs
 assets/         # README banner/mark/social SVGs + demo.gif (generated, do not hand-edit)

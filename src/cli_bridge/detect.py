@@ -6,6 +6,10 @@ from .lanes import LaneSpec, which_path
 
 
 def is_installed(lane: LaneSpec) -> bool:
+    # An opt-in API lane is unavailable until its key is set — gate it FIRST so it stays hidden
+    # even in dry-run mode (the key, not a binary, is what makes an API lane usable).
+    if not lane.has_required_key:
+        return False
     # Dry-run mode reports every lane installed so the whole tool is explorable with no CLIs.
     # which_path also searches the usual install dirs — GUI MCP hosts (Claude Desktop,
     # Hermes Desktop, …) run with a minimal PATH that misses Homebrew/npm/user bins.
