@@ -34,7 +34,7 @@ Three exhaustion behaviours matter more than sticker price:
 
 | CLI | Status June 2026 | Detail |
 |---|---|---|
-| **Gemini CLI** | ⚠️ **SUNSET 2026-06-18** | Free personal tier (60 RPM / 1000 RPD, aggregated across models, Pro sub-quota falls back to Flash) **stops serving on 2026-06-18** — official notice; migration path is Antigravity (`agy`). cli-bridge's gemini lane auto-falls back to `agy`. |
+| **Gemini CLI → Antigravity (`agy`)** | ⚠️ **Consumer tiers DEAD since 2026-06-18** | Gemini CLI's free/Pro/Ultra consumer access stopped 2026-06-18 ([Google official](https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/)); the old `gemini` binary now serves only **paid API keys / enterprise licenses**. The lane auto-falls back to **Antigravity (`agy`)** — its free tier is real (no card) but **scarce: ~20 agent req/day** (cut from 250 at launch; exact current figure **UNCONFIRMED**, secondary sources), refreshing ~5h. So cli-bridge degrades this lane to **`limited`** post-sunset (free in $, but quota too small for fan-out), not `free`. |
 | **Qwen Code** | ❌ **DEAD** | OAuth free tier cut 1000→100 RPD on 2026-04-13, fully closed 2026-04-15 ([issue #3203](https://github.com/QwenLM/qwen-code/issues/3203) + official docs). Only metered API keys work now — hence the lane's `paid` default. |
 | **Codex CLI** | Headless confirmed; $0 tier **UNCONFIRMED** | `codex exec` is officially supported for scripts/CI. Codex is included on **all ChatGPT plans incl. Free/Go** (plan-scaled quotas) — but OpenAI labels the Free/Go inclusion a **limited-time promotion** (no published end date), and a card-free $0 login path was not confirmed by primary sources. |
 | **Mistral Vibe** | Free tier works in practice | No surviving primary-source claim on exact quotas — **UNCONFIRMED** limits; hence the lane's conservative `limited` default (override to `free` if you're on the free tier). |
@@ -110,7 +110,7 @@ confidence than sections 1–2.*
 |---|---|---|---|
 | **Claude Pro/Max** | Claude Code shares **one bucket** with chat | Hard stop (+ opt-in API credits) | Scripting via the *official CLI* is permitted; third-party reuse of subscription tokens was **banned 2026-04-04** — exactly the line cli-bridge's ban-safe design never crosses. |
 | **ChatGPT (all plans incl. Free)** | Codex included, plan-scaled quotas from a **shared agentic pool** | Pooled limits; documented quota downgrades Apr 2026 | The reason `gpt` defaults to `limited`, not `paid`. |
-| **Google AI Pro / Ultra** | 1500 / 2000 RPD on Gemini CLI… until 2026-06-18 (sunset, incl. paid tiers → Antigravity) | **Silent downgrade** toward Flash-Lite, not a stop | Budget-able but quality-degrading. |
+| **Google AI Pro / Ultra → Antigravity** | Gemini CLI access ended 2026-06-18 (incl. paid tiers); Pro/Ultra now run through **Antigravity** ($20 / $100-$200/mo) | Credit/quota model, refreshes ~5h | The free `agy` tier (~20 req/day) is why the gemini lane degrades to `limited`. |
 | **GitHub Copilot** | CLI access per plan | **Usage-based credits since 2026-06-01** — can meter, not stop | |
 | **Alibaba Coding Plan (Qwen)** | cheap flat quota — **but its ToS prohibits non-interactive use** | — | A Coding Plan is therefore **not a valid path for cli-bridge** (which is non-interactive by nature). Script-legal path = metered API key. |
 | **opencode Go ($10/mo)** | prepaid credits | Caps: $12/5h · $30/wk · $60/mo | |

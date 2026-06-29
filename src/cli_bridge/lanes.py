@@ -516,14 +516,19 @@ BUILTIN_LANES: list[LaneSpec] = [
                   "EDITS files (sandbox workspace-write). Default plan = read-only."),
     LaneSpec("gemini", "Gemini (Google Gemini CLI / Antigravity)", "gemini", _gemini_ask,
              cost_default="free",
-             cost_note="⚠ Gemini CLI's free personal tier (60 req/min, 1000 req/day) ENDS "
-                       "2026-06-18 (official sunset) — migrate to Antigravity (`agy`); this lane "
-                       "falls back to `agy` automatically when installed.",
+             cost_note="Gemini CLI's consumer free/Pro/Ultra tiers were SUNSET 2026-06-18 (Google, "
+                       "official) — the old `gemini` binary now serves only paid API keys / "
+                       "enterprise. The lane auto-uses Antigravity (`agy`); its free tier is real "
+                       "(no card) but scarce — ~20 agent req/day (UNCONFIRMED current figure, "
+                       "secondary sources), so post-sunset this lane is `limited`, not free. See "
+                       "docs/COSTS.md.",
              help_args=["--help"], caps=frozenset({"model", "agent"}), bin_alts=("agy",),
-             sunset="2026-06-18",   # free personal tier dies; past this, prefer agy + degrade cost
+             sunset="2026-06-18",   # consumer tiers dead; past this, prefer agy + degrade to limited
              probe_flags=("-p",),   # common to gemini & agy; -m differs by binary, so not probed
              client_ids=frozenset({"gemini-cli-mcp-client", "gemini", "antigravity"}),
-             install_hint="npm i -g @google/gemini-cli  (free tier; then log in)",
+             install_hint="install Antigravity for `agy` (free tier ~20 req/day, no card — "
+                          "antigravity.google); the old `gemini` CLI now needs a paid API key / "
+                          "enterprise license.",
              note="Google. Fast, broad, multimodal/web. Uses `gemini`, or falls back to `agy` "
                   "(Antigravity) if installed. agent='build' EDITS files (--yolo / agy "
                   "--dangerously-skip-permissions). Note: `agy` ignores model (uses its own)."),
