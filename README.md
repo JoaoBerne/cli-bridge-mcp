@@ -256,6 +256,65 @@ in parallel (claude/gpt/opencode/ollama here); they flag a committed auth bypass
 
 </div>
 
+<details>
+<summary><b>The report it actually prints</b> — real run, $0 free lanes, reproducible in 2 commands</summary>
+
+<br>
+
+Two *different vendors* independently flag the same bypass — that's the point: uncorrelated blind
+spots, not one model's opinion. Note what it does **not** hide: a reviewer came back empty, so the
+recap says `3/4 answered` and the residual-risk line names the category nobody assessed.
+
+```
+# Security review (OWASP-aware)
+
+_Base: `HEAD~1` · reviewers: injection (Mistral (Vibe CLI)), auth & access control (OpenCode
+(gateway to many models)), data exposure & SSRF (OpenCode (gateway to many models)) · read-only_
+
+## Reviewers — 3/4 answered
+
+- ✅ **injection (Mistral (Vibe CLI))** _10927ms_ — 1 finding(s)
+- ✅ **auth & access control (OpenCode (gateway to many models))** _13875ms_ — 1 finding(s)
+- ❌ **secrets & crypto (Mistral (Vibe CLI))** _8465ms_ — empty
+- ✅ **data exposure & SSRF (OpenCode (gateway to many models))** _11792ms_ — 0 finding(s)
+
+**2 findings** (1 blocker, 1 high) — _block — blocker-level issues must be fixed before merge_
+
+_By type: 2 security_
+
+## Blocker
+
+- **Unauthenticated user granted admin access** `auth.py:3` — _single_ · OpenCode · _security_
+  require_admin returns True when user is None, meaning any unauthenticated/anonymous caller is
+  treated as admin. This bypasses the is_admin check entirely.
+  **Fix:** If user is None: raise PermissionError('authentication required')
+
+## High
+
+- **Insecure default for anonymous users** `auth.py:3` — _single_ · Mistral (Vibe CLI) · _security_
+  The function returns True for user=None, granting admin privileges to unauthenticated sessions.
+  This allows anonymous users to bypass admin checks.
+  **Fix:** Remove the `if user is None: return True` block and let the function raise
+  PermissionError for anonymous users.
+
+## Residual risk
+
+Treat with care — reviewer role(s) failed (secrets & crypto=empty); their categories are
+unassessed; this is a static review of the shown diff only — no runtime, dependency, or
+deployment/secrets-config analysis was performed.
+```
+
+Reproduce it on the throwaway fixture (a committed `if user is None: return True`, built in `/tmp`):
+
+```bash
+sh docs/demo/setup.sh                 # creates /tmp/demo-authz
+cd /tmp/demo-authz && cli-bridge security-review --base HEAD~1
+```
+
+_(Trace footer omitted — `CLI_BRIDGE_TRACE_FOOTER=off`. Lanes vary with what you have logged in.)_
+
+</details>
+
 ---
 
 ## Writing code safely: two modes
