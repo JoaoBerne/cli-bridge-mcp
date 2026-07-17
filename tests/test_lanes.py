@@ -407,3 +407,13 @@ def test_custom_lane_reads_availability_env(tmp_path, monkeypatch):
     loaded = lanes.load_custom_lanes()
     assert len(loaded) == 1 and loaded[0].availability_env == "MYAPI_KEY"
     assert loaded[0].has_required_key is False                  # opt-in, hidden until the key is set
+
+
+def test_cursor_readonly_gate_and_build():
+    # cursor-agent's bare `-p` has FULL tool access (write+shell) — `--mode plan` is the gate.
+    ro = _lane("cursor").build_ask("q", "", "", "")
+    assert ro[:2] == ["-p", "--trust"] and ro[2:4] == ["--mode", "plan"]
+    assert "--force" not in ro and ro[-1] == "q"
+    build = _lane("cursor").build_ask("q", "gpt-5", "", "build")
+    assert "--force" in build and "--mode" not in build      # build drops the read-only gate
+    assert build[-3:] == ["--model", "gpt-5", "q"]
