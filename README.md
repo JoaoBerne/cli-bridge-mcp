@@ -343,7 +343,7 @@ second opinion from gpt"* or *"ask gemini to read ./src and find the bug"*.
 ### Lanes
 
 **Built-in:** Claude Code, Codex, Gemini (+ Antigravity `agy`), Mistral (Vibe), opencode, **Ollama
-(local models, $0, offline)**, Qwen Code, Copilot, Grok, and **OpenRouter** (opt-in API lane — 400+
+(local models, $0, offline)**, Qwen Code, Copilot, Cursor (`cursor-agent`), Grok, and **OpenRouter** (opt-in API lane — 400+
 models; stays hidden until you set `OPENROUTER_API_KEY`, so the ban-safe default surface is unchanged).
 
 **Local runtimes** beyond Ollama — **LM Studio · MLX · llama.cpp** — ship as zero-code recipes:

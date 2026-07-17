@@ -346,6 +346,18 @@ def _copilot_ask(task, model, effort, agent, bin=""):  # GitHub Copilot CLI (bes
     return cmd + ["-p", task]
 
 
+def _cursor_ask(task, model, effort, agent, bin=""):  # Cursor Agent CLI (flags verified live)
+    # DANGER: a bare `-p` "has access to all tools, including write and shell" (its own --help), so
+    # unlike other lanes the print flag is NOT the read-only gate — `--mode plan` is. Never emit
+    # `-p` without a mode/force decision. build = --force (alias --yolo): allow unless denied.
+    # --trust skips the workspace-trust prompt (headless-only flag) so a cwd run can't hang.
+    cmd = ["-p", "--trust"]
+    cmd += ["--force"] if _is_build(agent) else ["--mode", "plan"]
+    if model:
+        cmd += ["--model", model]
+    return cmd + [task]
+
+
 def _grok_ask(task, model, effort, agent, bin=""):  # xAI Grok CLI (experimental)
     # `-p` is the documented headless flag (xAI docs, June 2026). No hardcoded model: empty
     # model = the CLI's own default; `--model` is best-effort (unverified — `doctor deep`
@@ -586,6 +598,21 @@ BUILTIN_LANES: list[LaneSpec] = [
              note="GitHub Copilot. agent='build' EDITS files (--allow-all-tools). Flags verified vs "
                   "GitHub docs 2026-06 (-p/--model/--allow-all-tools), not run live by the suite; if "
                   "your install is `gh copilot`, set CLI_BRIDGE_COPILOT_BIN and a custom lane."),
+    LaneSpec("cursor", "Cursor (Cursor Agent CLI)", "cursor-agent", _cursor_ask,
+             cost_default="limited",
+             cost_note="The card-free Hobby tier exists but its limits are UNPUBLISHED (no fixed "
+                       "quota on the current pricing page) and every prompt burns request-equivalent "
+                       "credits on a metered model (Pro $20 / Pro+ $60 / Ultra $200) — hence the "
+                       "conservative `limited` default; set free if your plan covers it.",
+             models_args=["--list-models"], help_args=["--help"],
+             caps=frozenset({"model", "agent"}),
+             probe_flags=("-p", "--mode", "--force"),
+             client_ids=frozenset({"cursor", "cursor-agent", "cursor-cli"}),
+             install_hint="curl https://cursor.com/install -fsS | bash  (then `cursor-agent login`)",
+             note="Cursor's agent CLI. ⚠ A bare `-p` has FULL tool access (write+shell) — this lane's "
+                  "read-only gate is `--mode plan`, not the print flag. agent='build' EDITS files "
+                  "(--force). model=<id> e.g. gpt-5 / sonnet-4-thinking, or a bracket override like "
+                  "'claude-opus-4-8[effort=high]'. Flags verified live 2026-07 (v2026.07.16)."),
     LaneSpec("grok", "Grok (xAI CLI)", "grok", _grok_ask,
              cost_default="limited",
              cost_note="Requires a SuperGrok / X Premium+ subscription (no free CLI tier as of "
