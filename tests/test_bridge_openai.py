@@ -39,6 +39,25 @@ def test_bridge_success_reads_key_from_env_not_argv(monkeypatch, capsys):
     assert cap["url"] == "https://x/v1/chat/completions"
     assert cap["body"]["model"] == "m"
     assert cap["body"]["messages"][0]["content"] == "hi there"
+    # Explicit, not left to the endpoint's default: Apple's `fm serve` streams SSE unless told
+    # otherwise, and this bridge parses a single JSON object.
+    assert cap["body"]["stream"] is False
+
+
+def test_bridge_without_key_env_sends_no_auth_header(monkeypatch, capsys):
+    # A keyless LOCAL server (`fm serve`, llama.cpp, vLLM, LM Studio) has nothing to authenticate
+    # against: omitting --key-env must succeed and send no Authorization header at all.
+    cap = {}
+
+    def fake_urlopen(req, timeout=0):
+        cap["auth"] = req.headers.get("Authorization")
+        return _FakeResp({"choices": [{"message": {"content": "local answer"}}]})
+
+    monkeypatch.setattr(br.urllib.request, "urlopen", fake_urlopen)
+    rc = br.main(["--base-url", "http://127.0.0.1:1976/v1", "--model", "pcc", "hi"])
+    assert rc == 0
+    assert capsys.readouterr().out.strip() == "local answer"
+    assert cap["auth"] is None
 
 
 def test_bridge_missing_key_returns_missing_auth(monkeypatch, capsys):

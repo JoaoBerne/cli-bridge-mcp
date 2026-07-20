@@ -103,7 +103,7 @@ starten. Leihe dir die, die deinem Host fehlt (sie muss installiert + eingeloggt
 | **Bilder** | Codex (`gpt-image-2`, **kein API-Schlüssel** — bezahltes ChatGPT-Abo, nicht Free) | dein Host nicht zeichnen kann |
 | **Riesiger Kontext** | Gemini (1-Mio.-Token-Fenster) | eine Datei/ein Repo nicht in den Kontext deines Hosts passt |
 | **Frisches Wissen** | Gemini (Google-Search-Grounding) · Grok (Live-Web/X) ⚗️ | einen Stichtag schlagen: *„wie ist die aktuelle API von `<lib>`?“* |
-| **Vision** | Gemini (`images=[…]`) ⚗️ | einen Screenshot oder ein Diagramm analysieren |
+| **Vision** | `images=[…]` bei Codex · opencode · Ollama · Apple · Gemini ⚗️ | einen Screenshot oder ein Diagramm analysieren |
 | **Eine kostenlose Zweitmeinung** | Gemini (kostenlose Tagesstufe) · opencode · Ollama (lokal, 0 $) | ein 0-$-Gegencheck |
 | **Generierte Dateien** | jede Build-Lane → artifact-return | ein Chart / PDF / Diagramm **per Pfad** zurückbekommen |
 | **Video** ⚗️ | Gemini (Veo) · Grok (Imagine) — *wenn deine installierte CLI es bereitstellt* | du brauchst einen generierten Clip |
@@ -112,7 +112,7 @@ starten. Leihe dir die, die deinem Host fehlt (sie muss installiert + eingeloggt
 ask_build(lane="gpt", task="generate a 1200×630 social card to assets/card.png", zone="assets")   # Codex image → file by path, no API key (paid ChatGPT plan)
 ask_gemini(task="find the bug across ./src — read the files you need", cwd="path/to/repo")         # 1M-token context
 ask_gemini(task="what's the current recommended API for <lib>? check the latest docs")            # fresh knowledge (Search grounding)
-ask_gemini(task="what's wrong in this UI?", images=["screenshot.png"])                             # vision (experimental)
+ask_apple(task="what's wrong in this UI?", images=["screenshot.png"])                              # vision, on-device, $0, offline
 ```
 
 ⚗️ = experimentell / hängt vom aktuellen Build der installierten CLI ab (z. B. ist Grok Build Beta) — mit `doctor deep` prüfen.
@@ -314,7 +314,7 @@ kannst es also an *deinen* CLIs bestätigen — Zahlen in beide Richtungen in
 - **Token-/Credit-Zahlen sind Schätzungen** (chars/4 + dein `CREDITS_PER_1K`), nie exakt.
 - **Kostenstufen sind gesourcte Defaults, keine Erkennung** — Plan-Fakten sind datiert; `doctor` warnt,
   wenn der Snapshot veraltet ist.
-- **Experimentell** (`qwen`, `copilot`, `grok`, Community-Lanes, Gemini `images=`): Flags sind nicht
+- **Experimentell** (`qwen`, `copilot`, `grok`, Community-Lanes, `images=`): Flags sind nicht
   live verifiziert — `doctor deep` prüft sie gegen das `--help` jeder CLI auf deiner Maschine.
 
 ---

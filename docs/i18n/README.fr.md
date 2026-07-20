@@ -105,7 +105,7 @@ peut la lancer. Empruntez celle qui manque à votre hôte (elle doit être insta
 | **Images** | Codex (`gpt-image-2`, **sans clé API** — forfait ChatGPT payant, pas l'offre gratuite) | votre hôte ne sait pas dessiner |
 | **Contexte géant** | Gemini (fenêtre d'1 M de tokens) | un fichier/dépôt ne tient pas dans le contexte de votre hôte |
 | **Connaissance fraîche** | Gemini (ancrage Google Search) · Grok (web/X en direct) ⚗️ | battre une date de coupure : *« quelle est l'API actuelle de `<lib>` ? »* |
-| **Vision** | Gemini (`images=[…]`) ⚗️ | analyser une capture ou un diagramme |
+| **Vision** | `images=[…]` sur Codex · opencode · Ollama · Apple · Gemini ⚗️ | analyser une capture ou un diagramme |
 | **Un deuxième avis gratuit** | Gemini (palier quotidien gratuit) · opencode · Ollama (local, 0 $) | un contre-contrôle à 0 $ |
 | **Fichiers générés** | toute lane de build → artifact-return | récupérer un graphe / PDF / diagramme **par chemin** |
 | **Vidéo** ⚗️ | Gemini (Veo) · Grok (Imagine) — *si votre CLI installée l'expose* | il vous faut un clip généré |
@@ -114,7 +114,7 @@ peut la lancer. Empruntez celle qui manque à votre hôte (elle doit être insta
 ask_build(lane="gpt", task="generate a 1200×630 social card to assets/card.png", zone="assets")   # Codex image → file by path, no API key (paid ChatGPT plan)
 ask_gemini(task="find the bug across ./src — read the files you need", cwd="path/to/repo")         # 1M-token context
 ask_gemini(task="what's the current recommended API for <lib>? check the latest docs")            # fresh knowledge (Search grounding)
-ask_gemini(task="what's wrong in this UI?", images=["screenshot.png"])                             # vision (experimental)
+ask_apple(task="what's wrong in this UI?", images=["screenshot.png"])                              # vision, on-device, $0, offline
 ```
 
 ⚗️ = expérimental / dépend de la version actuelle de la CLI installée (p. ex. Grok Build est en bêta) — à vérifier avec `doctor deep`.
@@ -345,7 +345,7 @@ chiffres dans un sens comme dans l'autre dans [docs/BENCHMARKS.md](../BENCHMARKS
   exacts.
 - **Les paliers de coût sont des défauts sourcés, pas de la détection** — les faits de forfait sont
   datés ; `doctor` prévient quand l'instantané est périmé.
-- **Expérimental** (`qwen`, `copilot`, `grok`, lanes communautaires, Gemini `images=`) : les flags ne
+- **Expérimental** (`qwen`, `copilot`, `grok`, lanes communautaires, `images=`) : les flags ne
   sont pas vérifiés en live — `doctor deep` les contrôle contre le `--help` de chaque CLI sur votre
   machine.
 

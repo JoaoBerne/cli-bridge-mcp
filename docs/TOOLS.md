@@ -8,7 +8,7 @@ surface; hide/show any with `CLI_BRIDGE_DISABLED_TOOLS` / `CLI_BRIDGE_ENABLED_TO
 ### Consult (read-only)
 | Tool | What it does | Reach for it when |
 |------|--------------|-------------------|
-| `ask_<lane>` | Ask one specific CLI — `ask_claude`, `ask_gpt` (Codex), `ask_gemini`, `ask_mistral`, `ask_opencode`, `ask_ollama`, and `ask_qwen`/`ask_grok`/`ask_copilot`/`ask_cursor` when installed, plus the opt-in `ask_openrouter` (OpenAI-compatible API lane — appears only once `OPENROUTER_API_KEY` is set). Supports `role="reviewer\|security\|planner\|devil"`, `conversation` (round-table memory — every ask auto-returns a reusable thread id, so any answer is resumable on any lane), and `images=[…]` on Gemini. | You want a particular model's strength, persona, or modality. |
+| `ask_<lane>` | Ask one specific CLI — `ask_claude`, `ask_gpt` (Codex), `ask_gemini`, `ask_mistral`, `ask_opencode`, `ask_ollama`, `ask_apple` (Apple Foundation Models, on-device), and `ask_qwen`/`ask_grok`/`ask_copilot`/`ask_cursor` when installed, plus the opt-in `ask_openrouter` (`OPENROUTER_API_KEY`) and `ask_applepcc` (`APPLE_FM_SERVE_URL`) — each appears only once its env var is set. Supports `role="reviewer\|security\|planner\|devil"`, `conversation` (round-table memory — every ask auto-returns a reusable thread id, so any answer is resumable on any lane), and `images=[…]` on the five vision lanes (see below). | You want a particular model's strength, persona, or modality. |
 | `ask_all` | Same question to every *free* lane in parallel; returns each answer **plus a disagreement score**. `synthesize: true` adds an agree/disagree summary. | You want breadth fast and a signal of where models diverge (= uncertainty). |
 | `ask_cascade` | Tries lanes in a deterministic order, stops at the first good answer, skips cooled-down lanes; optional confidence-escalation. | You want resilience: a capped/failing lane is skipped automatically. |
 | `ask_best` | A router picks the most suitable lane by `mode` (`fast/cheap/deep/code/review/security`) + your `rate_lane` scores. | You don't want to choose a lane by hand. |
@@ -16,6 +16,21 @@ surface; hide/show any with `CLI_BRIDGE_DISABLED_TOOLS` / `CLI_BRIDGE_ENABLED_TO
 | `consensus` | N lanes answer, then peers rank to **select** the best (selection beats synthesis). | A single defensible answer matters more than a blend. |
 | `challenge` | One lane plays skeptic against a conclusion you supply. | You want your own reasoning attacked before you commit. |
 | `conversations_list` / `conversation_show` | List / read persistent round-table threads (survive `/compact` and restarts). | You want to recover or read a multi-model thread. |
+
+**Vision (`images=[…]`).** Five lanes accept image paths; cli-bridge emits whichever shape that CLI
+wants, so you always just pass paths:
+
+| Lane | How the path is passed | Cost |
+|---|---|---|
+| `apple` | `--image <path>` | free, on-device, unmetered, offline |
+| `ollama` | bare path in the prompt (the CLI resolves it) | free, local — needs a multimodal model pulled |
+| `opencode` | `-f <path>` | free on `*-free` models |
+| `gpt` | `-i <path>` | limited (plan quota) |
+| `gemini` | `@<path>` in the prompt | limited ⚠ unreliable under `agy`, which may route the file through a `read_file` tool that headless mode auto-denies |
+
+⚠ **Vision is a property of the model, not the lane.** On the same image, Apple's on-device model
+transcribed every line correctly while opencode's default free model replied *"model lacks vision"*.
+cli-bridge can't detect this — pick a lane whose model you know is multimodal.
 
 ### Build (opt-in write)
 | Tool | What it does | Reach for it when |

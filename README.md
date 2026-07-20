@@ -100,8 +100,8 @@ Borrow the one your host lacks (it must be installed + logged in):
 | **Images** | Codex (`gpt-image-2`, **no API key** — paid ChatGPT plan, not Free) | your host can't draw |
 | **Huge context** | Gemini (1M-token window) | a file/repo won't fit your host's context |
 | **Fresh knowledge** | Gemini (Google-Search grounding) · Grok (live web/X) ⚗️ | beat a stale cutoff: *"what's the current API of `<lib>`?"* |
-| **Vision** | Gemini (`images=[…]`) ⚗️ | analyse a screenshot or diagram |
-| **A free second opinion** | Gemini (free daily tier) · opencode · Ollama (local, $0) | a $0 cross-check |
+| **Vision** | `images=[…]` on Codex · opencode · Ollama · Apple · Gemini ⚗️ | analyse a screenshot or diagram |
+| **A free second opinion** | opencode · Ollama · Apple (local, $0) · Gemini (scarce free tier) | a $0 cross-check |
 | **Generated files** | any build lane → artifact-return | get a chart / PDF / diagram back **by path** |
 | **Video** ⚗️ | Grok (Imagine) — *if your installed CLI exposes it* (Veo isn't exposed by any official Gemini CLI extension) | you need a generated clip |
 
@@ -109,8 +109,15 @@ Borrow the one your host lacks (it must be installed + logged in):
 ask_build(lane="gpt", task="generate a 1200×630 social card to assets/card.png", zone="assets")   # Codex image → file by path, no API key (paid ChatGPT plan)
 ask_gemini(task="find the bug across ./src — read the files you need", cwd="path/to/repo")         # 1M-token context
 ask_gemini(task="what's the current recommended API for <lib>? check the latest docs")            # fresh knowledge (Search grounding)
-ask_gemini(task="what's wrong in this UI?", images=["screenshot.png"])                             # vision (experimental)
+ask_apple(task="what's wrong in this UI?", images=["screenshot.png"])                             # vision, on-device, $0, offline
 ```
+
+**Vision, honestly:** `images=[…]` is no longer one vendor's feature. Five lanes take it and each
+lane declares its own shape as data, so you always just pass paths — an argv flag (`apple --image`,
+`gpt -i`, `opencode -f`) or a path folded into the prompt (`gemini @path`, `ollama` bare); a sixth
+lane is one field, not a code path. Caveat: whether the image is actually *read* depends on the
+**model** behind the lane, not the lane — on the same test image one free model transcribed every
+line and another answered *"model lacks vision"*. Full table in [`docs/TOOLS.md`](docs/TOOLS.md).
 
 ⚗️ = experimental / depends on the installed CLI's current build (e.g. Grok Build is beta) — verify with `doctor --deep`.
 
@@ -402,8 +409,15 @@ second opinion from gpt"* or *"ask gemini to read ./src and find the bug"*.
 ### Lanes
 
 **Built-in:** Claude Code, Codex, Gemini (+ Antigravity `agy`), Mistral (Vibe), opencode, **Ollama
-(local models, $0, offline)**, Qwen Code, Copilot, Cursor (`cursor-agent`), Grok, and **OpenRouter** (opt-in API lane — 400+
-models; stays hidden until you set `OPENROUTER_API_KEY`, so the ban-safe default surface is unchanged).
+(local models, $0, offline)**, **Apple Foundation Models (`fm`, on-device, $0, offline, unmetered)**,
+Qwen Code, Copilot, Cursor (`cursor-agent`), Grok, and two opt-in lanes that stay hidden until you set
+their env var (so the ban-safe default surface is unchanged): **OpenRouter** (400+ models, needs
+`OPENROUTER_API_KEY`) and **Apple PCC** (`APPLE_FM_SERVE_URL`).
+
+> Apple PCC needs one manual step: it refuses inference in any process cli-bridge spawns (session
+> attribution, not permissions), so you run `fm serve --port 1976` yourself and the lane reaches it
+> over HTTP. Same pattern serves llama.cpp / vLLM / LM Studio — the bundled `cli-bridge-openai`
+> bridge now works keyless. See [`examples/apple-fm-serve.lane.json`](examples/apple-fm-serve.lane.json).
 
 **Local runtimes** beyond Ollama — **LM Studio · MLX · llama.cpp** — ship as zero-code recipes:
 point `CLI_BRIDGE_LANES_FILE` at [`examples/lmstudio.lane.json`](examples/lmstudio.lane.json),
@@ -445,7 +459,7 @@ recall.** The harness ships, so you can confirm it on *your* CLIs — numbers ei
 - **Token/credit figures are estimates** (chars/4 + your `CREDITS_PER_1K`), never exact.
 - **Cost tiers are sourced defaults, not detection** — vendor-plan facts are dated; `doctor` warns
   when the snapshot is stale.
-- **Experimental** (`qwen`, `copilot`, `grok`, community lanes, Gemini `images=`): flags aren't
+- **Experimental** (`qwen`, `copilot`, `grok`, community lanes, `images=`): flags aren't
   verified live — `doctor --deep` checks them against each CLI's `--help` on your machine.
 
 ---
