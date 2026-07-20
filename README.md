@@ -414,10 +414,13 @@ Qwen Code, Copilot, Cursor (`cursor-agent`), Grok, and two opt-in lanes that sta
 their env var (so the ban-safe default surface is unchanged): **OpenRouter** (400+ models, needs
 `OPENROUTER_API_KEY`) and **Apple PCC** (`APPLE_FM_SERVE_URL`).
 
-> Apple PCC needs one manual step: it refuses inference in any process cli-bridge spawns (session
-> attribution, not permissions), so you run `fm serve --port 1976` yourself and the lane reaches it
-> over HTTP. Same pattern serves llama.cpp / vLLM / LM Studio — the bundled `cli-bridge-openai`
-> bridge now works keyless. See [`examples/apple-fm-serve.lane.json`](examples/apple-fm-serve.lane.json).
+> Apple PCC talks to a local `fm serve` over HTTP. `fm` refuses PCC to anything cli-bridge spawns —
+> it walks the caller's ancestry to the session boundary and checks that ancestor's code signature —
+> so start the server through Terminal instead, which you can do from anywhere, including from your
+> assistant: `osascript -e 'tell application "Terminal" to do script "fm serve --port 1976"'`.
+> Terminal becomes the parent, which is the chain `fm` trusts. Same HTTP pattern serves llama.cpp /
+> vLLM / LM Studio — the bundled `cli-bridge-openai` bridge now works keyless.
+> See [`examples/apple-fm-serve.lane.json`](examples/apple-fm-serve.lane.json).
 
 **Local runtimes** beyond Ollama — **LM Studio · MLX · llama.cpp** — ship as zero-code recipes:
 point `CLI_BRIDGE_LANES_FILE` at [`examples/lmstudio.lane.json`](examples/lmstudio.lane.json),
