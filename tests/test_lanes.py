@@ -205,6 +205,40 @@ def test_gpt_lane_surfaces_the_models_its_plan_allows(tmp_path, monkeypatch):
     assert f"list_{lane.key}_models" in [t.name for t in schemas._tools_for([lane])]
 
 
+def test_parse_model_ids_handles_the_three_real_output_shapes():
+    # Verbatim shapes from the installed CLIs — each puts the id first but wraps it differently.
+    assert lanes.parse_model_ids("opencode/big-pickle\nopencode/deepseek-v4-flash-free\n") == \
+        ["opencode/big-pickle", "opencode/deepseek-v4-flash-free"]
+    ollama = "NAME       ID        SIZE\ngemma4:e4b-it-qat   ee66  6.1 GB\nqwen3.5:0.8b  f381  1.0 GB"
+    assert lanes.parse_model_ids(ollama) == ["gemma4:e4b-it-qat", "qwen3.5:0.8b"]
+    cursor = "Available models\n\nauto - Auto (current, default)\ngpt-5.3-codex - Codex 5.3\n"
+    assert lanes.parse_model_ids(cursor) == ["auto", "gpt-5.3-codex"]
+
+
+def test_known_models_never_spawns_and_reports_staleness(monkeypatch, tmp_path):
+    # Called while tool schemas are built, so it must answer from a file or the remembered set —
+    # putting a subprocess on the listing path would stall every host connection.
+    from cli_bridge import telemetry
+    monkeypatch.setenv("CLI_BRIDGE_STATE_DB", str(tmp_path / "s.sqlite"))
+    telemetry.reset_for_tests() if hasattr(telemetry, "reset_for_tests") else None
+    lane = _lane("claude")                                   # no models_args, no models_file
+    assert lanes.known_models(lane) == ([], False)           # nothing to say, nothing to refresh
+    cur = _lane("cursor")                                    # has models_args, never listed yet
+    ids, stale = lanes.known_models(cur, now=1000.0)
+    assert ids == [] and stale is True                       # unknown counts as due a refresh
+
+
+def test_schema_caps_the_model_list_and_points_at_the_list_tool(monkeypatch):
+    from cli_bridge import schemas
+    lane = _lane("cursor")
+    many = [f"m{i}" for i in range(30)]
+    monkeypatch.setattr(lanes, "known_models", lambda ln, now=0.0: (many, False))
+    monkeypatch.setattr(schemas, "known_models", lambda ln, now=0.0: (many, False))
+    desc = schemas._ask_schema(lane)["properties"]["model"]["description"]
+    assert "m0, m1" in desc and "m9" not in desc              # capped, not dumped
+    assert "+22 more" in desc and "list_cursor_models" in desc
+
+
 def test_ollama_default_model_skips_header(monkeypatch):
     # `ollama list` prints a header row then model rows; the empty-model default is the first
     # model's first column. The header is skipped UNCONDITIONALLY (not by matching its text).
