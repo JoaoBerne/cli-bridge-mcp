@@ -1,0 +1,31 @@
+[
+  {
+    "//": "VARIANT of the built-in `applepcc` lane, for when the defaults don't fit — a different",
+    "//1": "port, a Unix socket, or an OpenAI-compatible server that isn't `fm serve` at all.",
+    "//2": "If you just want PCC on the default setup you do NOT need this file: export",
+    "//3": "APPLE_FM_SERVE_URL=http://127.0.0.1:1976/v1 and the built-in lane appears.",
+
+    "//4": "THE WHOLE POINT — run `fm serve` in YOUR OWN terminal, not from cli-bridge:",
+    "//5": "  % fm serve --port 1976        (or --socket /tmp/fm.sock)",
+    "//6": "PCC refuses inference in any process cli-bridge spawns ('PCC inference is not available",
+    "//7": "in this context') even unsandboxed, while the same command works in your terminal — the",
+    "//8": "gate is session attribution, not permissions. Your `fm serve` process holds that session,",
+    "//9": "so cli-bridge only has to be an HTTP client to it. Check with: curl -s localhost:1976/health",
+
+    "//10": "Keyless by design: no --key-env is passed, so the bundled bridge sends no auth header.",
+    "//11": "Same recipe works for llama.cpp / vLLM / LM Studio's server — swap the base URL.",
+
+    "key": "applepcc2",
+    "display": "Apple PCC (custom fm serve)",
+    "bin": "cli-bridge-openai",
+    "cost": "free",
+    "default_model": "pcc",
+    "model_flag": "--model",
+    "//12": "model_flag emits `--model <id>` on its own — don't repeat it in `ask` or it lands twice.",
+    "ask": ["--base-url", "http://127.0.0.1:1976/v1", "{task}"],
+    "availability_env": "APPLE_FM_SERVE_URL",
+    "client_ids": ["apple", "fm", "foundation-models"],
+    "install_hint": "start `fm serve --port 1976` yourself, then export APPLE_FM_SERVE_URL=1 to unhide this lane",
+    "note": "Apple Private Cloud Compute over HTTP, through an `fm serve` you started. model=pcc (server-side, bigger, metered quota) or system (on-device, unmetered). Private either way — PCC is stateless."
+  }
+]

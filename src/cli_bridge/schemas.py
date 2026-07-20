@@ -51,10 +51,13 @@ def _ask_schema(lane: LaneSpec) -> dict:
                      " (extend via CLI_BRIDGE_ROLES_FILE) — or write a one-sentence persona "
                      "INLINE, tailored to this exact task (dynamic role assignment; an unknown "
                      "single word is ignored as a probable typo)."}
-    if lane.key == "gemini":
+    if "images" in lane.caps:
+        how = (f"as `{lane.image_arg} <path>` arguments" if lane.image_arg.startswith("-")
+               else "as path references in the prompt")
         props["images"] = {"type": "array", "items": {"type": "string"},
-                           "description": "Image file paths to include (vision, ban-safe — passed to "
-                           "the Gemini CLI as @-file references). Experimental: verify with your CLI."}
+                           "description": f"Image file paths to include (vision, ban-safe — passed "
+                           f"to the CLI {how}). Experimental: whether the image is actually READ "
+                           "depends on the model behind the lane, not the lane itself."}
     return {"type": "object", "properties": props, "required": ["task"]}
 
 

@@ -374,7 +374,42 @@ def test_role_persona_is_prepended(monkeypatch):
     assert "[role]" in prompt and "code reviewer" in prompt
 
 
-def test_vision_images_become_at_refs(monkeypatch, tmp_path):
+def _vision_argv(monkeypatch, tmp_path, image_arg, n=1):
+    """Run a fake vision lane declaring `image_arg` and return the argv it would have spawned."""
+    imgs = []
+    for i in range(n):
+        img = tmp_path / f"a{i}.png"
+        img.write_bytes(b"\x89PNG\r\n")
+        imgs.append(img)
+    captured = {}
+
+    async def fake_arun(argv, timeout, cwd=None, env=None):
+        captured["argv"] = argv
+        return RunResult(True, "ok", "ok")
+    monkeypatch.setattr(server.runner, "arun", fake_arun)
+    lane = LaneSpec("v", "V", "echo", lambda task, model, effort, agent, bin: ["-p", task],
+                    caps=frozenset({"images"}), image_arg=image_arg)
+    asyncio.run(server._run_lane(lane, {"task": "describe the image",
+                                        "images": [str(p) for p in imgs]}))
+    return captured["argv"], imgs
+
+
+def test_vision_text_prefix_lanes_fold_paths_into_the_prompt(monkeypatch, tmp_path):
+    argv, [img] = _vision_argv(monkeypatch, tmp_path, "@")      # gemini/agy: @-file reference
+    assert f"@{img}" in argv[-1]
+    bare, [img2] = _vision_argv(monkeypatch, tmp_path, "")      # ollama: the CLI resolves a bare path
+    assert str(img2) in bare[-1] and f"@{img2}" not in bare[-1]
+
+
+def test_vision_flag_lanes_put_images_after_the_task(monkeypatch, tmp_path):
+    # Regression guard for a real trap: codex's `-i <FILE>...` and opencode's `-f` are variadic,
+    # so emitting them BEFORE the prompt makes the CLI swallow it ("No prompt provided via stdin").
+    argv, imgs = _vision_argv(monkeypatch, tmp_path, "-i", n=2)
+    assert argv[-4:] == ["-i", str(imgs[0]), "-i", str(imgs[1])]
+    assert "describe the image" in argv[-5]                     # the task still precedes the flags
+
+
+def test_vision_ignored_when_the_lane_does_not_declare_it(monkeypatch, tmp_path):
     img = tmp_path / "a.png"
     img.write_bytes(b"\x89PNG\r\n")
     captured = {}
@@ -383,9 +418,9 @@ def test_vision_images_become_at_refs(monkeypatch, tmp_path):
         captured["argv"] = argv
         return RunResult(True, "ok", "ok")
     monkeypatch.setattr(server.runner, "arun", fake_arun)
-    lane = LaneSpec("gemini", "G", "echo", lambda task, model, effort, agent, bin: ["-p", task])
-    asyncio.run(server._run_lane(lane, {"task": "describe the image", "images": [str(img)]}))
-    assert f"@{img}" in captured["argv"][-1]                    # @-file ref injected for Gemini CLI
+    lane = LaneSpec("t", "T", "echo", lambda task, model, effort, agent, bin: ["-p", task])
+    asyncio.run(server._run_lane(lane, {"task": "hi", "images": [str(img)]}))
+    assert str(img) not in " ".join(captured["argv"])           # caps gates vision, not the key
 
 
 def test_ann_helper_is_accepted_by_tool_and_coerced():

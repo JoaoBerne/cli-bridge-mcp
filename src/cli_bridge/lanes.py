@@ -77,7 +77,13 @@ class LaneSpec:
     probe_flags: tuple[str, ...] = ()     # flags this lane EMITS that must still exist in the
                                           # CLI's --help; if one vanishes the invocation is broken
                                           # (doctor deep flags the drift before a silent failure)
-    caps: frozenset[str] = field(default_factory=frozenset)        # {"model","effort","agent"}
+    caps: frozenset[str] = field(default_factory=frozenset)        # {"model","effort","agent","images"}
+    # How this CLI takes an image path (only read when "images" is in caps, so "" is unambiguous):
+    #   starts with "-"  -> an argv FLAG, appended after the task (`--image p` / `-i p` / `-f p`)
+    #   anything else    -> a text PREFIX folded into the prompt ("@" for gemini, "" for ollama)
+    # Flags go LAST because codex's `-i <FILE>...` and opencode's `-f` are variadic: put them
+    # before the prompt and they swallow it ("No prompt provided via stdin"). Verified live 2026-07.
+    image_arg: str = ""
     client_ids: frozenset[str] = field(default_factory=frozenset)  # MCP clientInfo.name == host
     bin_alts: tuple[str, ...] = ()        # fallback binaries if the default isn't on PATH
     sunset: str = ""                      # ISO date the lane's free service dies (vendor-announced).
@@ -376,6 +382,34 @@ def _ollama_ask(task, model, effort, agent, bin=""):  # local models via the oll
     return ["run", "--hidethinking", model, task]
 
 
+def _apple_ask(task, model, effort, agent, bin=""):  # Apple Foundation Models (`fm`), on-device
+    # `fm respond` only emits text — it has no tool/write mode at all, so unlike every agentic
+    # lane here there is no _is_build() branch: this lane is read-only by construction.
+    # Output is clean when piped in both stream modes (verified live), so no env fix is needed.
+    cmd = ["respond"]
+    if model:
+        cmd += ["-m", model]
+    return cmd + [task]
+
+
+_APPLE_SERVE_ENV = "APPLE_FM_SERVE_URL"
+
+
+def _applepcc_ask(task, model, effort, agent, bin=""):  # Apple PCC through the user's `fm serve`
+    # bin = the bundled stdlib bridge (cli-bridge-openai). NO --key-env: `fm serve` is a local
+    # keyless server, so the bridge sends no Authorization header.
+    #
+    # Why HTTP instead of spawning `fm --model pcc` like the on-device lane: PCC refuses inference
+    # in any subprocess we spawn ("PCC inference is not available in this context") even unsandboxed,
+    # while the identical command works in the user's own terminal — the gate is session
+    # attribution. Running `fm serve` THERE keeps inference inside the attributed process and
+    # leaves us a plain HTTP client, which is what makes PCC reachable at all.
+    cmd = ["--base-url", os.environ.get(_APPLE_SERVE_ENV, "").strip()]
+    if model:
+        cmd += ["--model", model]
+    return cmd + [task]
+
+
 def _ollama_env(model="", effort="", agent=""):
     # ollama writes ANSI cursor-control codes to STDOUT even when redirected to a file (it
     # rewrites the line for word-wrap), which corrupts the captured answer. NO_COLOR + a dumb
@@ -520,8 +554,9 @@ BUILTIN_LANES: list[LaneSpec] = [
              cost_default="limited",
              cost_note="Codex is included on ALL ChatGPT plans (even Free) with plan-scaled "
                        "quotas from a shared agentic pool — many users have it at no extra cost.",
-             help_args=["exec", "--help"], caps=frozenset({"model", "effort", "agent"}),
-             probe_flags=("--sandbox", "-m"),
+             help_args=["exec", "--help"], caps=frozenset({"model", "effort", "agent", "images"}),
+             image_arg="-i",                       # `-i <FILE>...` — variadic, so it goes LAST
+             probe_flags=("--sandbox", "-m", "-i"),
              client_ids=frozenset({"codex", "codex-mcp-client", "codex-cli"}),
              install_hint="npm i -g @openai/codex  (then `codex` to log in)",
              note="OpenAI. effort=high for hard reasoning, low/empty for quick; agent='build' "
@@ -534,7 +569,8 @@ BUILTIN_LANES: list[LaneSpec] = [
                        "(no card) but scarce — ~20 agent req/day (UNCONFIRMED current figure, "
                        "secondary sources), so post-sunset this lane is `limited`, not free. See "
                        "docs/COSTS.md.",
-             help_args=["--help"], caps=frozenset({"model", "agent"}), bin_alts=("agy",),
+             help_args=["--help"], caps=frozenset({"model", "agent", "images"}), bin_alts=("agy",),
+             image_arg="@",                        # @-file reference inside the prompt text
              sunset="2026-06-18",   # consumer tiers dead; past this, prefer agy + degrade to limited
              probe_flags=("-p",),   # common to gemini & agy; -m differs by binary, so not probed
              client_ids=frozenset({"gemini-cli-mcp-client", "gemini", "antigravity"}),
@@ -543,7 +579,10 @@ BUILTIN_LANES: list[LaneSpec] = [
                           "enterprise license.",
              note="Google. Fast, broad, multimodal/web. Uses `gemini`, or falls back to `agy` "
                   "(Antigravity) if installed. agent='build' EDITS files (--yolo / agy "
-                  "--dangerously-skip-permissions). Note: `agy` ignores model (uses its own)."),
+                  "--dangerously-skip-permissions). Note: `agy` ignores model (uses its own). "
+                  "⚠ images= is unreliable on `agy`: it may route the @-file through its read_file "
+                  "tool, which headless mode auto-denies — add a permissions.allow rule in its "
+                  "settings.json, or use a lane that takes an image FLAG (apple/gpt/opencode)."),
     LaneSpec("mistral", "Mistral (Vibe CLI)", "vibe", _mistral_ask,
              cost_default="limited",
              cost_note="Conservative default — the free tier works but its quotas are unverified and "
@@ -561,8 +600,9 @@ BUILTIN_LANES: list[LaneSpec] = [
                        "its free period; bare 'opencode/*' (Zen) bills per token; "
                        "'opencode-go/*' spends subscription credits ($10/mo plan with caps).",
              models_args=["models"], help_args=["run", "--help"],
-             caps=frozenset({"model", "effort", "agent"}),
-             probe_flags=("--agent", "-m"),
+             caps=frozenset({"model", "effort", "agent", "images"}),
+             image_arg="-f",                       # `-f <path>` attach — yargs array, so it goes LAST
+             probe_flags=("--agent", "-m", "-f"),
              client_ids=frozenset({"opencode"}),
              install_hint="curl -fsSL https://opencode.ai/install | bash",
              native_session={"mode": "capture",                    # verified live 2026-06-12
@@ -573,7 +613,10 @@ BUILTIN_LANES: list[LaneSpec] = [
                    "'opencode/*-free' model ($0, rate-limited; may train on your data during its "
                    "free period). PAID otherwise: a bare 'opencode/*' Zen model bills per-token "
                    "(API cost), 'opencode-go/*' spends prepaid credits — pass those only when the "
-                   "task earns it. agent='build' EDITS files (default 'plan' is read-only).")),
+                   "task earns it. agent='build' EDITS files (default 'plan' is read-only). "
+                   "images= attaches the file, but whether it's READ depends on the model you "
+                   "pick: the default free model has no vision (verified live — it answered "
+                   "\"model lacks vision\"), while other free ones do.")),
     LaneSpec("qwen", "Qwen (Qwen Code CLI)", "qwen", _qwen_ask,
              cost_default="paid",
              cost_note="Free OAuth tier DISCONTINUED 2026-04-15 — needs a metered API key "
@@ -629,7 +672,8 @@ BUILTIN_LANES: list[LaneSpec] = [
              cost_default="free",
              cost_note="local models — $0, on your machine, private/offline (no network calls).",
              models_args=["list"], help_args=["run", "--help"],
-             caps=frozenset({"model"}), env_ask=_ollama_env,
+             caps=frozenset({"model", "images"}), env_ask=_ollama_env,
+             image_arg="",                         # a BARE path in the prompt; the CLI resolves it
              probe_flags=("--hidethinking",),
              client_ids=frozenset({"ollama"}),
              install_hint="macOS: brew install ollama · Linux: curl -fsSL "
@@ -638,6 +682,43 @@ BUILTIN_LANES: list[LaneSpec] = [
                   "first model from `ollama list`. Max decorrelation for the jury — but note a "
                   "local runtime of open weights still correlates with OTHER local runtimes of the "
                   "same weights; real jury diversity comes from distinct vendors."),
+    LaneSpec("apple", "Apple Foundation Models (on-device)", "fm", _apple_ask,
+             cost_default="free",
+             cost_note="on-device Apple Intelligence — $0, offline, private, and UNMETERED "
+                       "(`fm quota-usage` reports that the quota applies to PCC only).",
+             # No models_args: `fm available` EXITS 1 whenever PCC is unreachable — which is always
+             # true from a spawned subprocess (see note) — so wiring it here would make
+             # list_models look permanently broken. The two model ids are in the note instead.
+             models_args=None, help_args=["respond", "--help"],
+             caps=frozenset({"model", "images"}),
+             image_arg="--image",
+             probe_flags=("-m", "--image"),
+             client_ids=frozenset({"apple", "fm", "foundation-models"}),
+             install_hint="Apple's Foundation Models CLI (`fm`), macOS with Apple Intelligence on",
+             note="Apple, on-device. $0, offline, private, unmetered. Read-only (no build mode — "
+                  "`fm respond` cannot write). Strong PERCEPTION, weak reasoning: verified live it "
+                  "transcribes an image better than the cloud lanes, but it's a small model — don't "
+                  "hand it hard analysis. model=system (default) or pcc; ⚠ pcc is refused from any "
+                  "spawned subprocess ('PCC inference is not available in this context' — session "
+                  "attribution, not permissions), so use the `applepcc` lane for that."),
+    LaneSpec("applepcc", "Apple Foundation Models on Private Cloud Compute", "cli-bridge-openai",
+             _applepcc_ask,
+             cost_default="free",
+             availability_env=_APPLE_SERVE_ENV,   # OPT-IN: hidden until you point it at your server
+             cost_note="$0 — Apple Intelligence, no billing and no API key. PCC does meter a quota "
+                       "(`fm quota-usage`), unlike the on-device model.",
+             default_model="pcc",
+             models_args=None,                    # only two ids, both named in the note
+             caps=frozenset({"model"}),
+             client_ids=frozenset({"apple", "fm", "foundation-models"}),
+             install_hint=f"run `fm serve --port 1976` in YOUR OWN terminal, then export "
+                          f"{_APPLE_SERVE_ENV}=http://127.0.0.1:1976/v1",
+             note="Apple's server-side model, reached over HTTP through a `fm serve` you start "
+                  "yourself. This indirection is the point: PCC refuses inference in a spawned "
+                  "subprocess ('not available in this context'), so the `apple` lane can only do "
+                  "on-device — but your own `fm serve` process holds the session, and this lane is "
+                  "just an HTTP client to it. model=pcc (default) or system. Bigger and better at "
+                  "reasoning than on-device, still private (Apple's stateless PCC)."),
     LaneSpec("openrouter", "OpenRouter (400+ models, OpenAI-compatible API)", "cli-bridge-openai",
              _openrouter_ask,
              cost_default="paid",

@@ -90,7 +90,7 @@ cli-bridge 不是一个功能，而是**四个杠杆**。理解它们，下面�
 | **图像** | Codex（`gpt-image-2`，**无 API 密钥** —— 付费 ChatGPT 套餐，非免费） | 你的 host 不会画图时 |
 | **超大上下文** | Gemini（100 万 token 窗口） | 文件/仓库装不进你 host 的上下文时 |
 | **新鲜知识** | Gemini（Google 搜索接地）· Grok（实时 web/X）⚗️ | 越过训练截止：*「`<lib>` 当前的 API 是什么？」* |
-| **视觉** | Gemini（`images=[…]`）⚗️ | 分析截图或示意图 |
+| **视觉** | Codex · opencode · Ollama · Apple · Gemini 上的 `images=[…]` ⚗️ | 分析截图或示意图 |
 | **免费的第二意见** | Gemini（免费日额）· opencode · Ollama（本地，0 $） | 一次 0 $ 的交叉核对 |
 | **生成文件** | 任意构建 lane → artifact-return | **按路径**取回图表/PDF/示意图 |
 | **视频** ⚗️ | Gemini（Veo）· Grok（Imagine）—— *若你装的 CLI 暴露它* | 你需要一段生成的片段 |
@@ -99,7 +99,7 @@ cli-bridge 不是一个功能，而是**四个杠杆**。理解它们，下面�
 ask_build(lane="gpt", task="generate a 1200×630 social card to assets/card.png", zone="assets")   # Codex image → file by path, no API key (paid ChatGPT plan)
 ask_gemini(task="find the bug across ./src — read the files you need", cwd="path/to/repo")         # 1M-token context
 ask_gemini(task="what's the current recommended API for <lib>? check the latest docs")            # fresh knowledge (Search grounding)
-ask_gemini(task="what's wrong in this UI?", images=["screenshot.png"])                             # vision (experimental)
+ask_apple(task="what's wrong in this UI?", images=["screenshot.png"])                              # vision, on-device, $0, offline
 ```
 
 ⚗️ = 实验性 / 取决于所装 CLI 的当前构建（例如 Grok Build 处于 beta）—— 用 `doctor deep` 核实。
@@ -271,7 +271,7 @@ curl 内部，绝不进入 argv），又或者使用内置的 **`cli-bridge-open
 - **注入防护是启发式的** —— 它捕捉高信号模式，并非全部；把被委派者的输出当作数据，而非指令。
 - **token/额度数字是估算**（chars/4 + 你的 `CREDITS_PER_1K`），绝不精确。
 - **成本档位是有出处的默认值，而非检测** —— 套餐事实带日期；快照过期时 `doctor` 会警告。
-- **实验性**（`qwen`、`copilot`、`grok`、社区 lane、Gemini `images=`）：标志未经实时验证 —— `doctor deep`
+- **实验性**（`qwen`、`copilot`、`grok`、社区 lane、`images=`）：标志未经实时验证 —— `doctor deep`
   会在你的机器上对照每个 CLI 的 `--help` 检查它们。
 
 ---

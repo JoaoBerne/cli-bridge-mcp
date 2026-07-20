@@ -100,7 +100,7 @@ puede lanzarla. Toma prestada la que le falta a tu host (debe estar instalada + 
 | **Imágenes** | Codex (`gpt-image-2`, **sin clave API** — plan ChatGPT de pago, no el gratuito) | tu host no sabe dibujar |
 | **Contexto enorme** | Gemini (ventana de 1 M de tokens) | un archivo/repo no cabe en el contexto de tu host |
 | **Conocimiento fresco** | Gemini (grounding con Google Search) · Grok (web/X en vivo) ⚗️ | vencer una fecha de corte: *«¿cuál es la API actual de `<lib>`?»* |
-| **Visión** | Gemini (`images=[…]`) ⚗️ | analizar una captura o un diagrama |
+| **Visión** | `images=[…]` en Codex · opencode · Ollama · Apple · Gemini ⚗️ | analizar una captura o un diagrama |
 | **Una segunda opinión gratis** | Gemini (nivel diario gratis) · opencode · Ollama (local, 0 $) | un contraste a 0 $ |
 | **Archivos generados** | cualquier lane de build → artifact-return | recibir un gráfico / PDF / diagrama **por ruta** |
 | **Vídeo** ⚗️ | Gemini (Veo) · Grok (Imagine) — *si tu CLI instalada lo expone* | necesitas un clip generado |
@@ -109,7 +109,7 @@ puede lanzarla. Toma prestada la que le falta a tu host (debe estar instalada + 
 ask_build(lane="gpt", task="generate a 1200×630 social card to assets/card.png", zone="assets")   # Codex image → file by path, no API key (paid ChatGPT plan)
 ask_gemini(task="find the bug across ./src — read the files you need", cwd="path/to/repo")         # 1M-token context
 ask_gemini(task="what's the current recommended API for <lib>? check the latest docs")            # fresh knowledge (Search grounding)
-ask_gemini(task="what's wrong in this UI?", images=["screenshot.png"])                             # vision (experimental)
+ask_apple(task="what's wrong in this UI?", images=["screenshot.png"])                              # vision, on-device, $0, offline
 ```
 
 ⚗️ = experimental / depende de la versión actual de la CLI instalada (p. ej. Grok Build está en beta) — verifica con `doctor deep`.
@@ -307,7 +307,7 @@ entrega, así que puedes confirmarlo en *tus* CLI — números en cualquier sent
 - **Las cifras de tokens/créditos son estimaciones** (chars/4 + tu `CREDITS_PER_1K`), nunca exactas.
 - **Los niveles de coste son defaults sacados de fuentes, no detección** — los datos de plan están
   fechados; `doctor` avisa cuando la instantánea está obsoleta.
-- **Experimental** (`qwen`, `copilot`, `grok`, lanes comunitarias, Gemini `images=`): los flags no
+- **Experimental** (`qwen`, `copilot`, `grok`, lanes comunitarias, `images=`): los flags no
   están verificados en vivo — `doctor deep` los comprueba contra el `--help` de cada CLI en tu
   máquina.
 

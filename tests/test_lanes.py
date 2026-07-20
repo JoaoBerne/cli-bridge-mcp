@@ -163,7 +163,7 @@ def test_ollama_argv_requires_hidethinking():
 def test_ollama_is_read_only_free_lane():
     lane = _lane("ollama")
     assert lane.cost_label == "free" and lane.is_paid is False
-    assert lane.caps == frozenset({"model"})              # no effort/agent — read-only, no build
+    assert not (lane.caps & {"effort", "agent"})          # no effort/agent — read-only, no build
     assert lanes.family_of(lane) == "ollama"              # distinct family for jury decorrelation
 
 
@@ -367,6 +367,35 @@ def test_sunset_prefers_alt_binary(monkeypatch):
 
 def test_has_required_key_default_true():
     assert _lane("gpt").has_required_key is True              # no availability_env -> always available
+
+
+def test_apple_lane_is_read_only_and_on_device():
+    lane = _lane("apple")
+    argv = lane.build_ask("Reply OK", "", "", "")
+    assert argv == ["respond", "Reply OK"]                   # `fm respond <task>`, nothing else
+    assert lane.build_ask("Reply OK", "system", "", "build") == ["respond", "-m", "system", "Reply OK"]
+    assert not (lane.caps & {"effort", "agent"})             # `fm respond` cannot write: no build mode
+    assert lane.cost_label == "free" and lane.is_paid is False
+    assert lanes.family_of(lane) == "apple"                  # own family — real jury decorrelation
+
+
+def test_applepcc_lane_is_opt_in_and_keyless(monkeypatch):
+    lane = _lane("applepcc")
+    assert lane.availability_env == "APPLE_FM_SERVE_URL"
+    monkeypatch.delenv("APPLE_FM_SERVE_URL", raising=False)
+    assert lane.has_required_key is False                    # hidden until you point it at a server
+    monkeypatch.setenv("APPLE_FM_SERVE_URL", "http://127.0.0.1:1976/v1")
+    assert lane.has_required_key is True
+    argv = lane.build_ask("Reply OK", lane.model_for(""), "", "")
+    assert argv == ["--base-url", "http://127.0.0.1:1976/v1", "--model", "pcc", "Reply OK"]
+    assert "--key-env" not in argv                           # `fm serve` is keyless by design
+
+
+def test_vision_lanes_declare_a_shape_for_their_images_cap():
+    # Vision is data, not a hardcoded lane key: every lane advertising `images` must say HOW it
+    # takes a path, and only a leading "-" means "argv flag" (see server._run_lane).
+    vision = {ln.key: ln.image_arg for ln in lanes.BUILTIN_LANES if "images" in ln.caps}
+    assert vision == {"gpt": "-i", "gemini": "@", "opencode": "-f", "ollama": "", "apple": "--image"}
 
 
 def test_openrouter_lane_is_opt_in(monkeypatch):

@@ -6,6 +6,34 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Apple Foundation Models — two lanes.** `ask_apple` spawns Apple's `fm` CLI for **on-device**
+  inference: $0, offline, private, and genuinely **unmetered** (`fm quota-usage` states the quota
+  applies to PCC only). Read-only by construction — `fm respond` has no write mode at all, so unlike
+  every agentic lane there is no `build` branch to gate. It also gets its own jury family, so it
+  decorrelates from every other vendor.
+- **`ask_applepcc` — Private Cloud Compute over HTTP (opt-in, hidden until `APPLE_FM_SERVE_URL`).**
+  PCC refuses inference in any process cli-bridge spawns — *"PCC inference is not available in this
+  context"*, sandboxed **or not** — while the identical command works in the user's own terminal:
+  the gate is **session attribution**, not permissions. So you run `fm serve --port 1976` yourself
+  and this lane is just an HTTP client to it through the bundled `cli-bridge-openai` bridge. Variant
+  recipe in `examples/apple-fm-serve.lane.json`.
+- **Vision generalized off Gemini — five lanes now take `images=[…]`.** It used to be hardcoded to
+  `lane.key == "gemini"`. A lane now declares the shape as data (`LaneSpec.image_arg`): a leading
+  `-` means an argv flag (`apple --image`, `gpt -i`, `opencode -f`), anything else is a path prefix
+  folded into the prompt (`gemini @`, `ollama` bare). All five verified live against a known image.
+
+### Changed
+- **`cli-bridge-openai`: `--key-env` is now optional.** Omit it for a deliberately keyless local
+  server (`fm serve`, llama.cpp, vLLM, LM Studio) and no `Authorization` header is sent. Naming an
+  env var that is *empty* still fails with `missing-auth` — that's a misconfigured cloud lane, not
+  an open server.
+
+### Fixed
+- **`cli-bridge-openai` now sends `stream: false` explicitly.** The OpenAI spec defaults it to
+  false, but Apple's `fm serve` streams SSE unless told otherwise — and the bridge parses a single
+  JSON object, so the response crashed with a `JSONDecodeError`.
+
 ## [0.1.4] - 2026-06-13
 
 ### Added

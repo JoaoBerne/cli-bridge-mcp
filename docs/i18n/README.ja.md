@@ -95,7 +95,7 @@ cli-bridge は単一機能ではなく、**4 つのレバー**です。これを
 | **画像** | Codex（`gpt-image-2`、**API キー不要**——有料 ChatGPT プラン、無料プラン不可） | ホストが描けないとき |
 | **巨大コンテキスト** | Gemini（100 万トークンの窓） | ファイル／リポジトリがホストのコンテキストに収まらないとき |
 | **新鮮な知識** | Gemini（Google 検索グラウンディング）· Grok（ライブ web/X）⚗️ | 学習打ち切りを越える：*「`<lib>` の現在の API は？」* |
-| **ビジョン** | Gemini（`images=[…]`）⚗️ | スクリーンショットや図を解析する |
+| **ビジョン** | Codex · opencode · Ollama · Apple · Gemini の `images=[…]` ⚗️ | スクリーンショットや図を解析する |
 | **無料のセカンドオピニオン** | Gemini（無料の日次枠）· opencode · Ollama（ローカル、0 $） | 0 $ のクロスチェック |
 | **生成ファイル** | 任意のビルドレーン → artifact-return | チャート／PDF／図を**パスで**受け取る |
 | **動画** ⚗️ | Gemini（Veo）· Grok（Imagine）——*インストール済み CLI が公開していれば* | 生成クリップが必要なとき |
@@ -104,7 +104,7 @@ cli-bridge は単一機能ではなく、**4 つのレバー**です。これを
 ask_build(lane="gpt", task="generate a 1200×630 social card to assets/card.png", zone="assets")   # Codex image → file by path, no API key (paid ChatGPT plan)
 ask_gemini(task="find the bug across ./src — read the files you need", cwd="path/to/repo")         # 1M-token context
 ask_gemini(task="what's the current recommended API for <lib>? check the latest docs")            # fresh knowledge (Search grounding)
-ask_gemini(task="what's wrong in this UI?", images=["screenshot.png"])                             # vision (experimental)
+ask_apple(task="what's wrong in this UI?", images=["screenshot.png"])                              # vision, on-device, $0, offline
 ```
 
 ⚗️ = 実験的／インストール済み CLI の現在のビルドに依存（例：Grok Build はベータ）——`doctor deep` で確認。
@@ -290,7 +290,7 @@ Aider、Goose、Plandex、Amp、Crush、Amazon Q Developer CLI、Droid。
 - **トークン／クレジットの数値は推定**（chars/4 ＋あなたの `CREDITS_PER_1K`）、決して正確ではありません。
 - **コストティアは出典付きのデフォルトで、検出ではない**——プランの事実は日付入り；スナップショットが古いと
   `doctor` が警告します。
-- **実験的**（`qwen`、`copilot`、`grok`、コミュニティレーン、Gemini `images=`）：フラグはライブ検証
+- **実験的**（`qwen`、`copilot`、`grok`、コミュニティレーン、`images=`）：フラグはライブ検証
   されていません——`doctor deep` があなたのマシンで各 CLI の `--help` に対して確認します。
 
 ---

@@ -481,12 +481,12 @@ async def _run_lane(lane: LaneSpec, args: dict, *, tool: str = "ask",
     # structured-output tools (terse=False) so JSON stays intact. Telemetry keys on the raw
     # task, not the prefixed prompt.
     task = preamble.with_role(_str(args, "role"), task)   # V.2: optional named persona
-    images = args.get("images")                           # V.3: vision via Gemini CLI @-file refs
-    if images and lane.key == "gemini" and isinstance(images, list):
-        refs = [f"@{os.path.abspath(os.path.expanduser(str(p)))}"
-                for p in images if str(p).strip()]
-        if refs:
-            task = f"{task}\n\n{' '.join(refs)}"
+    raw_images = args.get("images")                        # V.3: vision, shape declared per lane
+    img_paths = ([os.path.abspath(os.path.expanduser(str(p))) for p in raw_images if str(p).strip()]
+                 if raw_images and isinstance(raw_images, list) and "images" in lane.caps else [])
+    # Text-prefix lanes fold the paths into the prompt itself ("@" for gemini, bare for ollama).
+    if img_paths and not lane.image_arg.startswith("-"):
+        task = f"{task}\n\n{' '.join(lane.image_arg + p for p in img_paths)}"
     prompt = preamble.apply(task) if terse else task
     argv = [lane.bin] + lane.build_ask(prompt, model, effort, agent, lane.bin)
     # Native-session extras (conversation turns only): inserted just before the task — the
@@ -494,6 +494,10 @@ async def _run_lane(lane: LaneSpec, args: dict, *, tool: str = "ask",
     native_extra = args.get("_native_argv")
     if native_extra and len(argv) > 1:
         argv = argv[:-1] + [str(a) for a in native_extra] + argv[-1:]
+    # Flag lanes get their images AFTER that splice, and after the task: codex's `-i <FILE>...` and
+    # opencode's `-f` are variadic and would otherwise swallow the prompt (verified live 2026-07).
+    if img_paths and lane.image_arg.startswith("-"):
+        argv += [a for p in img_paths for a in (lane.image_arg, p)]
     # Some lanes select the model via ENV (e.g. vibe's VIBE_ACTIVE_MODEL), not a flag. Merge any
     # such overrides onto a COPY of the environment (a bare dict would drop the CLI's own PATH/auth).
     extra_env = lane.env_ask(model, effort, agent) if lane.env_ask else {}
