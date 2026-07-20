@@ -423,6 +423,47 @@ def models_from_file(path: str) -> list[tuple[str, str]]:
     return out
 
 
+def parse_model_ids(text: str) -> list[str]:
+    """Model ids out of a `list models` command's stdout. Every lane prints a different shape, but
+    all three installed ones put the id FIRST on its line, so take the first token and drop headers:
+
+        opencode models        -> `opencode/big-pickle`
+        ollama list            -> `NAME  ID  SIZE ...` then `gemma4:e4b-it-qat  ee66...`
+        cursor-agent           -> `Available models` then `auto - Auto (current, default)`
+
+    A real id is lowercase or carries an id separator (`/ : . -`); prose headers ("NAME",
+    "Available models") are neither, which is what tells them apart. Conservative on purpose: a
+    missed id costs a line of display, an invented one would be offered as a real choice."""
+    ids = []
+    for line in text.splitlines():
+        tok = line.split()[0] if line.split() else ""
+        if tok and not tok.isupper() and (tok.islower() or any(c in tok for c in "/:.-")):
+            ids.append(tok)
+    return ids
+
+
+# How long a listed set of models is trusted before it's worth re-listing. Long enough that the
+# subprocess is rare, short enough that a vendor adding a model shows up the same day.
+MODELS_TTL_S = 12 * 3600
+
+
+def known_models(lane: LaneSpec, now: float = 0.0) -> tuple[list[str], bool]:
+    """(model ids, stale) for a lane, WITHOUT spawning anything — safe to call while building tool
+    schemas. A CLI-maintained file is read live (always current); otherwise the last listing we
+    remembered is returned with whether it's due a refresh."""
+    if lane.models_file:
+        return [mid for mid, _ in models_from_file(lane.models_file)], False
+    if lane.models_args is None:
+        return [], False
+    import time
+
+    from . import telemetry
+    ids, fetched = telemetry.lane_models(lane.key)
+    # `fetched == 0` means never listed — stale by definition, and checked separately because a
+    # plain age comparison against epoch 0 depends on how big `now` happens to be.
+    return ids, not fetched or (now or time.time()) - fetched > MODELS_TTL_S
+
+
 _APPLE_SERVE_ENV = "APPLE_FM_SERVE_URL"
 
 # Starting `fm serve` yourself is NOT required — this one-liner does it for you. `fm` gates PCC by

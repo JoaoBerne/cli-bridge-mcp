@@ -12,6 +12,7 @@ so accounts can't get flagged for ToS-breaking token reuse. Read-only by default
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import os
@@ -526,7 +527,30 @@ async def _run_lane(lane: LaneSpec, args: dict, *, tool: str = "ask",
     _write_trace(lane, model, argv, expanded, timeout, res)
     if key and res.ok:                        # cache only successes; failures are transient
         telemetry.cache_put(key, res.ok, res.output, res.kind)
+    if res.ok:
+        _refresh_models_soon(lane)
     return res
+
+
+def _refresh_models_soon(lane: LaneSpec) -> None:
+    """Re-list this lane's models in the background when the remembered set has gone stale.
+
+    Listing costs a subprocess, so it must never sit in front of an answer — and it can't run
+    while tool schemas are built either (that would put a spawn on the listing path). Doing it
+    just after a lane has answered is the one moment it is both free of the caller's latency and
+    known to be working. Fire-and-forget: a failure leaves the previous list in place."""
+    _, stale = lanes_mod.known_models(lane)
+    if not stale or lane.models_args is None:
+        return
+    argv = [lane.bin] + lane.models_args       # bound here: the closure can't re-narrow the None
+
+    async def _go() -> None:
+        with contextlib.suppress(Exception):   # never let a background refresh reach a delegation
+            probe = await runner.arun(argv, 30)
+            if probe.ok:
+                telemetry.lane_models_set(lane.key, lanes_mod.parse_model_ids(probe.output))
+    with contextlib.suppress(RuntimeError):    # no running loop (sync CLI path) -> just skip
+        asyncio.get_running_loop().create_task(_go())
 
 
 async def _run_lane_maybe_convo(lane: LaneSpec, args: dict) -> tuple[runner.RunResult, str]:
@@ -938,6 +962,8 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
                                 text=f"[error] no such lane: {key or '(none)'}. Available: {avail}.")]
         if lane.models_args is not None:
             res = await runner.arun([lane.bin] + lane.models_args, 60)
+            if res.ok:      # remember it, so the `model` parameter can name these for free later
+                telemetry.lane_models_set(lane.key, lanes_mod.parse_model_ids(res.output))
             return [_emit(res.render(), label=f"list_models:{lane.key}")]
         # No list command, but the CLI may cache the set the server said this account can use.
         cached = models_from_file(lane.models_file) if lane.models_file else []
@@ -964,6 +990,8 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
             return [_emit(listing or f"[error] could not read {lane.models_file}",
                           label=f"list_{lane.key}_models")]
         res = await runner.arun([lane.bin] + lane.models_args, 60)
+        if res.ok:
+            telemetry.lane_models_set(lane.key, lanes_mod.parse_model_ids(res.output))
         return [_emit(res.render(), label=f"list_{lane.key}_models")]
 
     return [TextContent(type="text", text=f"[error] unknown tool: {name}")]

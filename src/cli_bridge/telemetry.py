@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import json
 import os
 import sqlite3
 import threading
@@ -78,6 +79,11 @@ CREATE TABLE IF NOT EXISTS lane_state (
   last_run_at REAL,
   total_runs INTEGER NOT NULL DEFAULT 0,
   total_failures INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS lane_models (
+  lane TEXT PRIMARY KEY,
+  ids TEXT NOT NULL,
+  fetched_at REAL NOT NULL
 );
 CREATE TABLE IF NOT EXISTS response_cache (
   key TEXT PRIMARY KEY,
@@ -751,6 +757,38 @@ def convo_list(limit: int = 30) -> list[dict]:
             return out
     except sqlite3.Error:
         return []
+
+
+def lane_models(lane: str) -> tuple[list[str], float]:
+    """This lane's last-seen model ids + when they were fetched. ([], 0.0) when unknown.
+    Listing a lane's models costs a subprocess, so the answer is remembered here and re-read for
+    free while building tool schemas — the caller sees what's available without paying for it."""
+    conn = _connect()
+    if conn is None or not lane:
+        return [], 0.0
+    try:
+        with _LOCK:
+            row = conn.execute("SELECT ids, fetched_at FROM lane_models WHERE lane=?",
+                               (lane,)).fetchone()
+        return (json.loads(row[0]), float(row[1])) if row else ([], 0.0)
+    except (sqlite3.Error, ValueError):
+        return [], 0.0
+
+
+def lane_models_set(lane: str, ids: list[str]) -> None:
+    """Remember a lane's model ids. Best-effort; an empty list is NOT stored, so a transient
+    failure to list can't erase a good answer and pass as "this lane has no models"."""
+    conn = _connect()
+    if conn is None or not (lane and ids):
+        return
+    try:
+        with _LOCK:
+            conn.execute("INSERT INTO lane_models (lane, ids, fetched_at) VALUES (?,?,?) "
+                         "ON CONFLICT(lane) DO UPDATE SET ids=excluded.ids, "
+                         "fetched_at=excluded.fetched_at", (lane, json.dumps(ids), _now()))
+            conn.commit()
+    except (sqlite3.Error, ValueError):
+        pass
 
 
 def convo_session(conversation_id: str, lane: str) -> tuple[str, int]:
