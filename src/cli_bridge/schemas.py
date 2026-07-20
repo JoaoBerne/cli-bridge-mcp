@@ -14,7 +14,7 @@ from mcp.types import Tool, ToolAnnotations
 
 from . import config, findings, orchestrate, preamble, router
 from .config import ASK_ALL_MAX_TIMEOUT_S, DEFAULT_TIMEOUT_S, MAX_TIMEOUT_S
-from .lanes import LaneSpec
+from .lanes import LaneSpec, models_from_file
 
 
 def _ask_schema(lane: LaneSpec) -> dict:
@@ -34,8 +34,13 @@ def _ask_schema(lane: LaneSpec) -> dict:
                          "reset (/compact)."},
     }
     if "model" in lane.caps:
+        # Name the models this ACCOUNT may actually use, right where the choice is made. Without
+        # it a caller defaults to whatever the CLI is configured for and never learns the plan
+        # already includes something better — a silent capability loss, not an error.
+        avail = [mid for mid, _ in models_from_file(lane.models_file)] if lane.models_file else []
         props["model"] = {"type": "string",
                           "description": "Model override. Empty = the lane's default."
+                          + (f" Available on YOUR plan: {', '.join(avail)}." if avail else "")
                           + (" Paid 'opencode-go/*' burns credits; empty = free."
                              if lane.key == "opencode" else "")}
     if "effort" in lane.caps:
@@ -85,7 +90,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             annotations=_ann(readOnlyHint=not can_write, openWorldHint=True,
                              destructiveHint=can_write),
         ))
-        if lane.models_args is not None:
+        if lane.models_args is not None or lane.models_file:
             tools.append(Tool(
                 name=f"list_{lane.key}_models",
                 description=f"List models reachable through {lane.display}.",
