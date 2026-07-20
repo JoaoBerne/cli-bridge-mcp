@@ -173,6 +173,38 @@ def test_ollama_spawn_env_strips_ansi():
     assert env == {"NO_COLOR": "1", "TERM": "dumb"}
 
 
+def test_models_from_file_reads_a_cli_cache(tmp_path):
+    # Shape of codex's own cache: {"models": [{"slug": ..., "description": ...}, ...]}
+    p = tmp_path / "cache.json"
+    p.write_text(json.dumps({"fetched_at": "x", "models": [
+        {"slug": "big", "description": "Frontier model"}, {"slug": "small"}]}))
+    assert lanes.models_from_file(str(p)) == [("big", "Frontier model"), ("small", "")]
+
+
+def test_models_from_file_accepts_other_shapes_and_never_raises(tmp_path):
+    bare = tmp_path / "bare.json"
+    bare.write_text(json.dumps(["a", {"id": "b"}, {"name": "c"}, {"nope": 1}, 7]))
+    assert lanes.models_from_file(str(bare)) == [("a", ""), ("b", ""), ("c", "")]
+    # These read VENDOR INTERNALS we don't control, so every failure mode must degrade to [] —
+    # a reshaped or deleted cache must never break tool listing (it's read while building schemas).
+    broken = tmp_path / "broken.json"
+    broken.write_text("{not json")
+    assert lanes.models_from_file(str(broken)) == []
+    assert lanes.models_from_file(str(tmp_path / "absent.json")) == []
+    assert lanes.models_from_file("") == []
+
+
+def test_gpt_lane_surfaces_the_models_its_plan_allows(tmp_path, monkeypatch):
+    from cli_bridge import schemas
+    p = tmp_path / "c.json"
+    p.write_text(json.dumps({"models": [{"slug": "gpt-x"}, {"slug": "gpt-y"}]}))
+    lane = _lane("gpt")
+    monkeypatch.setattr(lane, "models_file", str(p))
+    desc = schemas._ask_schema(lane)["properties"]["model"]["description"]
+    assert "gpt-x, gpt-y" in desc                     # named where the choice is actually made
+    assert f"list_{lane.key}_models" in [t.name for t in schemas._tools_for([lane])]
+
+
 def test_ollama_default_model_skips_header(monkeypatch):
     # `ollama list` prints a header row then model rows; the empty-model default is the first
     # model's first column. The header is skipped UNCONDITIONALLY (not by matching its text).

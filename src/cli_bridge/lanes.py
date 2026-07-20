@@ -78,6 +78,12 @@ class LaneSpec:
                                           # CLI's --help; if one vanishes the invocation is broken
                                           # (doctor deep flags the drift before a silent failure)
     caps: frozenset[str] = field(default_factory=frozenset)        # {"model","effort","agent","images"}
+    # Some CLIs expose NO `models` subcommand but do cache the list the server said this account
+    # may use. Point this at that file and cli-bridge reads the entitled set itself, so the caller
+    # picks from what is actually available instead of guessing (codex: only its configured model
+    # is otherwise discoverable, which silently hides better models the plan already includes).
+    # Undocumented vendor internals by nature — every read is best-effort and failure is silent.
+    models_file: str = ""
     # How this CLI takes an image path (only read when "images" is in caps, so "" is unambiguous):
     #   starts with "-"  -> an argv FLAG, appended after the task (`--image p` / `-i p` / `-f p`)
     #   anything else    -> a text PREFIX folded into the prompt ("@" for gemini, "" for ollama)
@@ -392,6 +398,31 @@ def _apple_ask(task, model, effort, agent, bin=""):  # Apple Foundation Models (
     return cmd + [task]
 
 
+def models_from_file(path: str) -> list[tuple[str, str]]:
+    """Read a CLI's own cached model list -> [(id, description)]. For CLIs that expose no `models`
+    subcommand but do cache what the server said THIS account may use (codex). Accepts a bare list
+    or {"models": [...]}, and entries that are plain strings or dicts under any usual id key.
+
+    Best-effort by design: this reads vendor internals we don't control, so a missing, moved or
+    reshaped file returns [] and the caller falls back to its normal message. Never raises."""
+    try:
+        with open(os.path.expanduser(path), encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return []
+    if isinstance(data, dict):
+        data = next((v for v in data.values() if isinstance(v, list)), [])
+    out = []
+    for item in data if isinstance(data, list) else []:
+        if isinstance(item, str):
+            out.append((item, ""))
+        elif isinstance(item, dict):
+            mid = next((str(item[k]) for k in ("slug", "id", "name", "model") if item.get(k)), "")
+            if mid:
+                out.append((mid, str(item.get("description", ""))))
+    return out
+
+
 _APPLE_SERVE_ENV = "APPLE_FM_SERVE_URL"
 
 
@@ -556,6 +587,10 @@ BUILTIN_LANES: list[LaneSpec] = [
                        "quotas from a shared agentic pool — many users have it at no extra cost.",
              help_args=["exec", "--help"], caps=frozenset({"model", "effort", "agent", "images"}),
              image_arg="-i",                       # `-i <FILE>...` — variadic, so it goes LAST
+             # Codex has no `models` subcommand; `doctor` reports only the ACTIVE model. This cache
+             # is the sole local source for the set the ACCOUNT may use — without it a caller can't
+             # tell that e.g. a frontier model is already included in the plan.
+             models_file="~/.codex/models_cache.json",
              probe_flags=("--sandbox", "-m", "-i"),
              client_ids=frozenset({"codex", "codex-mcp-client", "codex-cli"}),
              install_hint="npm i -g @openai/codex  (then `codex` to log in)",
@@ -711,14 +746,18 @@ BUILTIN_LANES: list[LaneSpec] = [
              models_args=None,                    # only two ids, both named in the note
              caps=frozenset({"model"}),
              client_ids=frozenset({"apple", "fm", "foundation-models"}),
-             install_hint=f"run `fm serve --port 1976` in YOUR OWN terminal, then export "
+             install_hint=f"run `fm serve --port 1976` in YOUR OWN terminal (a LaunchAgent does NOT "
+                          f"work — see note), then export "
                           f"{_APPLE_SERVE_ENV}=http://127.0.0.1:1976/v1",
-             note="Apple's server-side model, reached over HTTP through a `fm serve` you start "
-                  "yourself. This indirection is the point: PCC refuses inference in a spawned "
-                  "subprocess ('not available in this context'), so the `apple` lane can only do "
-                  "on-device — but your own `fm serve` process holds the session, and this lane is "
-                  "just an HTTP client to it. model=pcc (default) or system. Bigger and better at "
-                  "reasoning than on-device, still private (Apple's stateless PCC)."),
+             note="Apple's server-side model, reached over HTTP through a `fm serve` YOU start. "
+                  "The manual step cannot be automated: PCC was refused from a spawned subprocess, "
+                  "unsandboxed, via osascript, via `launchctl asuser`, under a pty, and from a "
+                  "LaunchAgent — only a shell the human typed into works. ⚠ MEASURED, don't assume "
+                  "it's the strong one: on a 12-probe reasoning set it scored 1/12, BELOW the "
+                  "on-device `apple` lane (2/12), and returned an empty completion on 3/12 hard "
+                  "prompts. Fast (~1s) and it obeys output schemas, but it does not do multi-step "
+                  "reasoning. Reach for it for speed on easy work, not for hard thinking; a local "
+                  "`ollama` model scored 8/12 on the same set. model=pcc (default) or system."),
     LaneSpec("openrouter", "OpenRouter (400+ models, OpenAI-compatible API)", "cli-bridge-openai",
              _openrouter_ask,
              cost_default="paid",

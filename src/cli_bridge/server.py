@@ -62,7 +62,7 @@ from .config import (
     SETUP_TEXT,
 )
 from .detect import installed_lanes
-from .lanes import LaneSpec, all_lanes
+from .lanes import LaneSpec, all_lanes, models_from_file
 
 # config.py is the single source of truth for env/timeouts/profile/onboarding. These thin
 # aliases keep the historical server.* call sites (and tests) working after the extraction.
@@ -939,7 +939,14 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
         if lane.models_args is not None:
             res = await runner.arun([lane.bin] + lane.models_args, 60)
             return [_emit(res.render(), label=f"list_models:{lane.key}")]
-        # No list command on this CLI — surface the resolved default + how to choose.
+        # No list command, but the CLI may cache the set the server said this account can use.
+        cached = models_from_file(lane.models_file) if lane.models_file else []
+        if cached:
+            listing = "\n".join(f"- {m}" + (f" — {d}" if d else "") for m, d in cached)
+            return [_emit(f"{lane.display}: the CLI exposes no model-list command; this is the set "
+                          f"it cached from the server for YOUR account (read from "
+                          f"{lane.models_file}).\n{listing}", label=f"list_models:{lane.key}")]
+        # Nothing discoverable — surface the resolved default + how to choose.
         dm = lane.model_for("")
         how = (f"pass model=… per call, or set CLI_BRIDGE_{lane.key.upper()}_MODEL"
                if "model" in lane.caps else "this lane uses its own model (not selectable here)")
@@ -949,8 +956,13 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
 
     if name.startswith("list_") and name.endswith("_models"):
         lane = _lane_by_key(name[5:-7], lanes)
-        if not lane or lane.models_args is None:
+        if not lane or (lane.models_args is None and not lane.models_file):
             return [TextContent(type="text", text=f"[error] no model list for: {name}")]
+        if lane.models_args is None:                      # cached-file lanes (see list_models above)
+            cached = models_from_file(lane.models_file)
+            listing = "\n".join(f"- {m}" + (f" — {d}" if d else "") for m, d in cached)
+            return [_emit(listing or f"[error] could not read {lane.models_file}",
+                          label=f"list_{lane.key}_models")]
         res = await runner.arun([lane.bin] + lane.models_args, 60)
         return [_emit(res.render(), label=f"list_{lane.key}_models")]
 

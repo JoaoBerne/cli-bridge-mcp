@@ -66,7 +66,7 @@ of success is *tested*, not trusted.
 | `lane_stats` / `reset_lane_state` | Per-lane health, cooldowns, and the "earn their seat" jury signal / clear a lane's counters. | A lane is misbehaving, or you want the seat report. |
 | `set_lane_cost` | Record what a lane costs *you* ("Codex is free on my plan") — persisted, no `setup` needed. | You tell it a pricing fact in passing. |
 | `doctor` / `setup` | Detect installed CLIs + resolved paths; `doctor` with `deep=true` (CLI: `doctor --deep`) validates each lane against its own `--help` on your machine. | First run, or when a lane breaks. |
-| `list_models` / `list_<lane>_models` | List a lane's models where the CLI exposes them. | You want to pick a specific model. |
+| `list_models` / `list_<lane>_models` | List a lane's models. Where the CLI has no `models` command but caches what the server said your account may use (`LaneSpec.models_file`), cli-bridge reads that instead — and names those ids in the `model` parameter's description, so the choice is informed *before* you make it rather than after. Best-effort: an absent or reshaped cache silently falls back. | You want to pick a specific model, or to find out your plan already includes a better one. |
 
 There's also a **human CLI** (`cli-bridge doctor|ask|ask-all|ask-best|build|review-diff|eval|…`) — the
 same engine from your terminal or CI (`--json` everywhere). `cli-bridge build <lane> "<task>"`
