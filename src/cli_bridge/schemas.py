@@ -26,7 +26,7 @@ def _ask_schema(lane: LaneSpec) -> dict:
         "task": {"type": "string", "description": "The prompt/question for the delegate."},
         "cwd": {"type": "string",
                 "description": "Directory the CLI runs in (so it sees those files). "
-                               "Empty = the host's launch dir."},
+                               "Empty = the host's workspace root, else the server's launch dir."},
         "timeout_s": {"type": "integer",
                       "description": f"Seconds before kill (default {DEFAULT_TIMEOUT_S}, "
                                      f"max {MAX_TIMEOUT_S})."},

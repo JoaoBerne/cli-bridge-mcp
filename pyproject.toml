@@ -1,6 +1,6 @@
 [project]
 name = "cli-bridge-mcp"
-version = "0.1.5"
+version = "0.2.0"
 description = "Consult a council of AI CLIs (Gemini, GPT, Claude, Mistral, Qwen, Copilot, OpenCode…) from inside any MCP client — free and ban-safe."
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -13,12 +13,14 @@ classifiers = [
   "License :: OSI Approved :: Apache Software License",
   "Operating System :: OS Independent",
 ]
-# Upper bound is load-bearing, not caution: mcp 2.0.0 REMOVED the low-level decorators this
-# server is built on (@server.list_tools/call_tool/list_prompts/get_prompt/list_resources/
-# read_resource all gone, replaced by add_request_handler/middleware; mcp.server.fastmcp deleted).
-# Without the cap a fresh install resolves to 2.x and every tool call dies with
-# "'Server' object has no attribute 'list_tools'". Verified: 1.29.0 (last 1.x) is fully green.
-dependencies = ["mcp>=1.2.0,<2"]
+# Both majors are supported: mcp 2.0.0 removed the low-level decorators this server was built on
+# (list_tools/call_tool/list_prompts/get_prompt/list_resources/read_resource) and changed how a
+# handler gets its request context. `mcp_compat.py` is the ONLY module that branches on the
+# version — see its docstring for what 2.x makes us re-implement by hand. CI runs the full suite
+# on both legs. The <3 cap stays because a 3.0 would spring the same trap: an install that
+# resolves to an unsupported major is a server that dies on the first tool call, not one that
+# fails loudly at import (verified the hard way — 0.1.4 shipped uninstallable).
+dependencies = ["mcp>=1.2.0,<3"]
 
 [project.urls]
 Homepage = "https://github.com/JoaoBerne/cli-bridge-mcp"
@@ -68,5 +70,7 @@ files = ["src/cli_bridge"]
 
 [[tool.mypy.overrides]]
 # The MCP SDK's published types are incomplete in spots; never let a stub gap fail the gate.
-module = "mcp.*"
+# jsonschema ships no stubs at all and comes in as a dependency OF mcp (used in mcp_compat to
+# reproduce the input validation mcp 1.x did for us) — same story, same treatment.
+module = ["mcp.*", "jsonschema"]
 ignore_missing_imports = true

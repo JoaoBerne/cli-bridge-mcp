@@ -383,6 +383,13 @@ def convo_log_dir() -> str:
     return os.environ.get("CLI_BRIDGE_CONVO_LOG_DIR", "").strip()
 
 
+def default_cwd() -> str:
+    """Directory a delegate runs in when the caller names no `cwd`. Empty = ask the host for its
+    MCP roots, and failing that keep the cwd we were launched with. Set this when the host
+    declares no roots (or declares the wrong one) and you want delegates in a specific repo."""
+    return os.environ.get("CLI_BRIDGE_DEFAULT_CWD", "").strip()
+
+
 # ── subagent-style overflow ───────────────────────────────────────────────────────────
 INLINE_MAX_CHARS = int_env("CLI_BRIDGE_INLINE_MAX_CHARS", 12000, 500, 1_000_000)
 OVERFLOW_DIR = os.environ.get("CLI_BRIDGE_OVERFLOW_DIR", "").strip() \

@@ -66,6 +66,25 @@ jobs:
       - name: Run tests
         run: pytest -q
 
+  # The compat layer in mcp_compat.py is the only thing letting this server run on both SDK
+  # majors, and an untested compat layer rots. The matrix above resolves whatever pip picks
+  # (1.x today); this leg pins the other side so a break on either one fails the PR.
+  test-mcp2:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install with mcp 2.x
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . 'mcp>=2,<3' pytest pytest-asyncio
+      - name: Show resolved SDK
+        run: python -c "from importlib.metadata import version; print('mcp', version('mcp'))"
+      - name: Run tests
+        run: pytest -q
+
   security:
     runs-on: ubuntu-latest
     permissions:
