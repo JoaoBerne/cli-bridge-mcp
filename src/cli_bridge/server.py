@@ -360,10 +360,13 @@ _RETRYABLE = {"failed", "spawn"}
 
 
 async def _spawn_with_retry(argv: list[str], timeout: int, cwd: str | None,
-                            env: dict | None = None) -> runner.RunResult:
+                            env: dict | None = None, *, retry: bool = True) -> runner.RunResult:
     """Run the CLI, retrying a TRANSIENT failure up to CLI_BRIDGE_RETRIES times with backoff —
-    so an occasionally-flaky lane 'works the first time' from the caller's point of view."""
-    attempts = config.retries() + 1
+    so an occasionally-flaky lane 'works the first time' from the caller's point of view.
+
+    `retry=False` for a spawn that is NOT replayable: the loop re-runs the SAME argv, which is
+    only safe when running it twice means the same thing as running it once."""
+    attempts = config.retries() + 1 if retry else 1
     res = await runner.arun(argv, timeout, cwd, env)
     n = 1
     while not res.ok and res.kind in _RETRYABLE and n < attempts:
@@ -490,11 +493,14 @@ async def _run_lane(lane: LaneSpec, args: dict, *, tool: str = "ask",
         task = f"{task}\n\n{' '.join(lane.image_arg + p for p in img_paths)}"
     prompt = preamble.apply(task) if terse else task
     argv = [lane.bin] + lane.build_ask(prompt, model, effort, agent, lane.bin)
-    # Native-session extras (conversation turns only): inserted just before the task — the
-    # last argv element for every built-in lane (custom lanes never set _native_argv).
+    # Native-session extras (conversation turns only): inserted just before the PROMPT, found by
+    # position rather than assumed to be the tail. Custom lanes can declare a native_session
+    # (lanes.py's JSON loader builds one), and a template may well end in a flag's value —
+    # splicing at the tail would then land between a flag and what it takes.
     native_extra = args.get("_native_argv")
     if native_extra and len(argv) > 1:
-        argv = argv[:-1] + [str(a) for a in native_extra] + argv[-1:]
+        i = argv.index(prompt) if prompt in argv else len(argv) - 1
+        argv = argv[:i] + [str(a) for a in native_extra] + argv[i:]
     # Flag lanes get their images AFTER that splice, and after the task: codex's `-i <FILE>...` and
     # opencode's `-f` are variadic and would otherwise swallow the prompt (verified live 2026-07).
     if img_paths and lane.image_arg.startswith("-"):
@@ -515,7 +521,14 @@ async def _run_lane(lane: LaneSpec, args: dict, *, tool: str = "ask",
     rec = telemetry.start(tool, lane.key, model, task, role=_str(args, "role"))
     timeout = _timeout(args.get("timeout_s"))
     t0 = time.monotonic()
-    res = await _spawn_with_retry(argv, timeout, expanded, spawn_env)
+    # A spawn carrying STATE is not idempotent, so replaying it does not retry — it corrupts.
+    # A minted --session-id collides on the second attempt ("Session ID … is already in use",
+    # which then MASKS the transient error that caused the retry); a --resume re-delivers the
+    # same delta into a session that already ingested it; a build agent re-edits a tree it has
+    # already changed. Gated on the session HANDLE, not on _native_argv: opencode's capture-first
+    # turn passes --print-logs with no handle, and it is still perfectly safe to retry.
+    res = await _spawn_with_retry(argv, timeout, expanded, spawn_env,
+                                  retry=not (agent == "build" or args.get("_native_sid")))
     res.latency_ms = int((time.monotonic() - t0) * 1000)
     res.model = model                          # provenance: the resolved model that actually ran
     if ro_before is not None and res.ok:       # read-only delegate that wrote files -> flag (no revert)
@@ -582,14 +595,22 @@ async def _run_lane_maybe_convo(lane: LaneSpec, args: dict) -> tuple[runner.RunR
     # Native session continuity (claude mint / opencode capture …): the lane's own session
     # carries the turns it has already seen, so the prompt replays only the DELTA other lanes
     # added since. Replay stays the cross-lane source of truth (sqlite records every turn).
-    ns = lane.native_session if config.native_sessions_enabled() else None
+    # Not under mock: nothing is spawned, so a handle committed here names a session that was
+    # never created. Turn mock off mid-thread and the next real turn resumes a ghost — with an
+    # empty replay prefix, so it has no context from either store.
+    ns = lane.native_session if config.native_sessions_enabled() and not config.mock() else None
     sid, last_seen = "", 0
     if ns:
         extra, sid, last_seen = conversations.native_step(ns, cid, lane.key)
         if extra:
             sub["_native_argv"] = extra
-    prefix, _trimmed = conversations.build_history_prefix(
+        if sid:                    # mint/resume only — a capture-first turn has no handle yet
+            sub["_native_sid"] = sid
+    prefix, trimmed = conversations.build_history_prefix(
         cid, lane.key, config.convo_max_chars(), since_turn=last_seen)
+    # The high-water mark this prompt actually delivers. -1 when the delta was cut to fit the
+    # budget, so it can never compare equal below.
+    covered = -1 if trimmed else conversations.head_turn(cid)
     if prefix:
         sub["task"] = f"{prefix}\n{task}"
     res = await _run_lane(lane, sub)
@@ -599,8 +620,17 @@ async def _run_lane_maybe_convo(lane: LaneSpec, args: dict) -> tuple[runner.RunR
         conversations.record_turn(cid, lane.key, "user", task)
         n = conversations.record_turn(cid, lane.key, "assistant", res.output)
         if ns:
-            conversations.native_commit(ns, cid, lane.key, sid,
-                                        f"{res.err}\n{res.output}", n)
+            # Keep the handle only if this lane's session now holds EVERY turn below n. Three
+            # ways the mark would otherwise lie: the delta was budget-trimmed, another lane
+            # appended a turn while this spawn was awaiting, or the append itself failed (n=0).
+            # A lying mark is permanent — later deltas filter on turn_number > last_turn, so the
+            # skipped turns are never sent to this lane again. Dropping the handle only costs a
+            # re-mint plus a full replay; replay remains the source of truth.
+            if n and n - 2 == covered:
+                conversations.native_commit(ns, cid, lane.key, sid,
+                                            f"{res.err}\n{res.output}", n)
+            else:
+                conversations.native_drop(cid, lane.key)
         await _maybe_compact_convo(cid, lane)
     return res, cid
 

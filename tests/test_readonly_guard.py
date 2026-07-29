@@ -73,7 +73,7 @@ def test_run_lane_flags_readonly_mutation(tmp_path, monkeypatch):
     monkeypatch.setenv("CLI_BRIDGE_STATE_DB", str(tmp_path / "t.sqlite"))
     _git_init(tmp_path)
 
-    async def fake_spawn(argv, timeout, expanded, env):
+    async def fake_spawn(argv, timeout, expanded, env, **kw):
         (tmp_path / "written_by_delegate.py").write_text("x = 1\n")     # delegate writes despite plan
         return RunResult(True, "here is my analysis", "ok")
 
@@ -91,7 +91,7 @@ def test_run_lane_build_run_not_flagged(tmp_path, monkeypatch):
     monkeypatch.setenv("CLI_BRIDGE_STATE_DB", str(tmp_path / "t.sqlite"))
     _git_init(tmp_path)
 
-    async def fake_spawn(argv, timeout, expanded, env):
+    async def fake_spawn(argv, timeout, expanded, env, **kw):
         (tmp_path / "built.py").write_text("x = 1\n")                   # build is ALLOWED to write
         return RunResult(True, "built it", "ok")
 
@@ -106,7 +106,7 @@ def test_run_lane_toggle_off_no_flag(tmp_path, monkeypatch):
     monkeypatch.setenv("CLI_BRIDGE_STATE_DB", str(tmp_path / "t.sqlite"))
     _git_init(tmp_path)
 
-    async def fake_spawn(argv, timeout, expanded, env):
+    async def fake_spawn(argv, timeout, expanded, env, **kw):
         (tmp_path / "x.py").write_text("x = 1\n")
         return RunResult(True, "analysis", "ok")
 

@@ -7,6 +7,35 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **A retry could corrupt what it was retrying.** `_spawn_with_retry` re-runs the *same argv*,
+  which is only a retry when running it twice means the same as running it once. It did not: a
+  freshly minted `--session-id` collided on the second attempt (`Session ID … is already in use`)
+  and that collision **masked the transient error that caused the retry**; a `--resume` re-delivered
+  the same delta into a session that had already ingested it; a `build` delegate replayed its
+  instructions against a tree it had already edited. One guard at the single spawn point, keyed on
+  the session *handle* rather than on `_native_argv` — opencode's capture-first turn carries only
+  log flags and stays safely retryable.
+- **The native-session high-water mark could claim turns the lane never received.** It was committed
+  as "this session holds everything below *n*" without checking the prompt delivered everything
+  below *n*. Three ways it lied: the delta was trimmed to fit the char budget, another lane appended
+  a turn while the spawn was awaiting, or the append itself failed. The lie was permanent — later
+  deltas filter on `turn_number > last_turn`, so those turns were never sent to that lane again, and
+  a later rolling summary was skipped too. The handle is now kept only when it is provably complete;
+  otherwise it is dropped and the next turn re-mints with a full replay. Replay was, and remains,
+  the source of truth: no stored turn is ever discarded.
+- **Mock mode recorded a session that was never created.** `CLI_BRIDGE_MOCK` returns without
+  spawning, yet still minted and committed a handle. Turning mock off mid-thread then resumed a
+  ghost session — with an empty replay prefix, so no context from either store.
+- **One ordinary failure un-benched a cooled lane.** `lane_state` writes `cooldown_until`
+  unconditionally, so a single `kind="failed"` run blanked an active quota/auth cooldown. Since a
+  direct `ask_<lane>` never checks cooldowns, that was enough to re-arm a dead lane for every later
+  fan-out. The bench now carries forward; success still clears it. `consecutive_failures` also
+  counts every consecutive failure instead of only the cooling kinds, so `doctor` stops reporting a
+  stale figure.
+- **The native-session argv splice assumed the prompt was the last argument.** Custom lanes can
+  declare a `native_session`, and a template may end in a flag's *value* — the extras then landed
+  between a flag and what it takes. Spliced by the prompt's position now; byte-identical for every
+  built-in lane.
 - **`mcp>=1.2.0` is now capped at `<2` — 0.1.4 is broken on a fresh install.** `mcp 2.0.0` removed
   the low-level decorators this server is built on (`@server.list_tools`, `call_tool`,
   `list_prompts`, `get_prompt`, `list_resources`, `read_resource`; `mcp.server.fastmcp` deleted
