@@ -34,17 +34,19 @@ jobs:
         id: tests
         run: pytest -q
 
-      # The dependency pin protects USERS, but it also means the steps above now only ever see
-      # the mcp we already know works — so an upstream break would stay invisible until someone
-      # hits it. This step deliberately installs the newest mcp to look for that. It must never
-      # fail the job: a broken future SDK is news, not a regression in this repo.
-      - name: Probe the newest mcp (informational, never fails the job)
+      # `mcp>=1.2.0,<3` protects USERS, but it also means every other job only ever sees a major
+      # we already support (tests.yml covers both 1.x and 2.x). The next break — a 3.0 — would
+      # stay invisible until someone hit it. So install the newest mcp FIRST and add our package
+      # with --no-deps, which is the only way past our own cap. Must never fail the job: a
+      # breaking future SDK is news, not a regression in this repo.
+      - name: Probe the newest mcp, cap ignored (informational, never fails the job)
         id: upstream
         continue-on-error: true
         run: |
           python -m venv /tmp/upstream
           /tmp/upstream/bin/pip install -q --upgrade pip
-          /tmp/upstream/bin/pip install -q . --upgrade --upgrade-strategy eager 'mcp' 2>&1 | tail -2
+          /tmp/upstream/bin/pip install -q --upgrade 'mcp' 2>&1 | tail -2
+          /tmp/upstream/bin/pip install -q --no-deps . 2>&1 | tail -2
           /tmp/upstream/bin/python -c "import cli_bridge.server" \
             && echo "ok=1" >> "$GITHUB_OUTPUT" \
             || echo "ok=0" >> "$GITHUB_OUTPUT"

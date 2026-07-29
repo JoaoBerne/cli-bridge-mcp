@@ -3,6 +3,7 @@ import asyncio
 
 from cli_bridge import server
 from cli_bridge.lanes import LaneSpec
+from cli_bridge.mcp_compat import attr  # mcp 2.0 renamed model fields to snake_case
 from cli_bridge.runner import RunResult
 
 
@@ -13,7 +14,7 @@ def test_ollama_surfaces_ask_and_list_tools_read_only():
     assert "ask_ollama" in names                       # the consult tool
     assert "list_ollama_models" in names               # surfaced because models_args is set
     ask = next(t for t in server._tools_for([ollama]) if t.name == "ask_ollama")
-    assert ask.annotations.readOnlyHint is True        # no agent cap → never advertises write
+    assert attr(ask.annotations, "readOnlyHint") is True   # no agent cap → never advertises write
 
 
 def test_slug_normalizes_host_names():
@@ -197,7 +198,7 @@ def test_host_lane_shown_by_default_model_optional(monkeypatch):
     tools = asyncio.run(server.list_tools())
     ask_claude = next((t for t in tools if t.name == "ask_claude"), None)
     assert ask_claude is not None
-    assert "model" not in ask_claude.inputSchema["required"]
+    assert "model" not in attr(ask_claude, "inputSchema")["required"]
 
 
 def test_host_lane_callable_without_model_by_default(monkeypatch):
@@ -222,7 +223,7 @@ def test_self_ask_tool_listed_and_requires_model_when_hidden(monkeypatch):
     tools = asyncio.run(server.list_tools())
     ask_claude = next((t for t in tools if t.name == "ask_claude"), None)
     assert ask_claude is not None
-    assert "model" in ask_claude.inputSchema["required"]
+    assert "model" in attr(ask_claude, "inputSchema")["required"]
 
 
 def test_self_ask_rejects_missing_model_when_hidden(monkeypatch):
@@ -430,5 +431,5 @@ def test_ann_helper_is_accepted_by_tool_and_coerced():
     t = Tool(name="x", description="d", inputSchema={"type": "object"},
              annotations=server._ann(readOnlyHint=True, destructiveHint=False))
     assert t.annotations is not None
-    assert t.annotations.readOnlyHint is True
-    assert t.annotations.destructiveHint is False
+    assert attr(t.annotations, "readOnlyHint") is True
+    assert attr(t.annotations, "destructiveHint") is False

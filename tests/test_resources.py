@@ -5,6 +5,7 @@ import json
 import pytest
 
 from cli_bridge import server
+from cli_bridge.mcp_compat import attr  # mcp 2.0 renamed model fields to snake_case
 
 
 def test_list_resources():
@@ -12,7 +13,7 @@ def test_list_resources():
     uris = {str(r.uri) for r in res}
     assert {"cli-bridge://config", "cli-bridge://lane-stats", "cli-bridge://usage-summary",
             "cli-bridge://workflow-schemas/review-diff"} <= uris
-    assert all(r.mimeType == "application/json" for r in res)
+    assert all(attr(r, "mimeType") == "application/json" for r in res)
 
 
 def test_read_config_resource(monkeypatch):

@@ -53,6 +53,20 @@ All notable changes to this project are documented here. The format follows
   throwaway venv — informational, never fails the job.
 
 ### Added
+- **Runs on `mcp` 2.x as well as 1.x** — the dependency opens back up to `mcp>=1.2.0,<3`. 2.0.0
+  removed all six low-level decorators this server was built on, moved the request context from
+  the server onto the handler, and renamed every model attribute to snake_case (camelCase
+  survives only as the wire alias, so `tool.inputSchema` and `params.clientInfo` raise). All of
+  that now lives in **one new module, `mcp_compat.py`** — `server.py`'s six handlers keep their
+  original name, signature and body, so nothing downstream moved. The adapters also re-implement
+  by hand what the 1.x `@call_tool()` decorator did for free: validating arguments against the
+  tool's `inputSchema`, and turning a raised exception into an `isError` result rather than a
+  JSON-RPC protocol error. The wire payload is identical on both majors. **CI runs the whole
+  suite on both** — an untested compat layer is one that has already broken. The `<3` cap stays:
+  an install resolving to an unsupported major is a server that dies on the first tool call, not
+  one that fails loudly at import.
+- **`CLI_BRIDGE_DEFAULT_CWD`** — pin the directory delegates run in when the caller names no
+  `cwd`. For hosts that declare no MCP roots, or declare the wrong one.
 - **Apple Foundation Models — two lanes.** `ask_apple` spawns Apple's `fm` CLI for **on-device**
   inference: $0, offline, private, and genuinely **unmetered** (`fm quota-usage` states the quota
   applies to PCC only). Read-only by construction — `fm respond` has no write mode at all, so unlike
@@ -70,6 +84,17 @@ All notable changes to this project are documented here. The format follows
   folded into the prompt (`gemini @`, `ollama` bare). All five verified live against a known image.
 
 ### Changed
+- **A delegate with no `cwd` now runs in the host's workspace, not wherever the server happened
+  to be launched.** Hosts start a user-scoped MCP server from `$HOME`, so the cwd we inherited
+  was an accident — and it decided real things. `claude --continue` and the `/resume` picker are
+  scoped to the current directory, so a delegated session was filed under `$HOME` and **invisible
+  from the repo it was about**; and an `agent="build"` delegate called without a `cwd` edited
+  files there. `_run_lane` now asks the host once for its MCP roots and uses the first existing
+  one. Precedence: the caller's `cwd` > `CLI_BRIDGE_DEFAULT_CWD` > first usable MCP root > the
+  inherited cwd (unchanged fallback, so a host that declares no roots behaves exactly as before).
+  Note this **narrows** where an unscoped `build` delegate can write. Roots are deprecated as of
+  protocol revision 2026-07-28 (SEP-2577) but still served; when a successor lands,
+  `server._workspace_root` is the only thing that changes.
 - **`cli-bridge-openai`: `--key-env` is now optional.** Omit it for a deliberately keyless local
   server (`fm serve`, llama.cpp, vLLM, LM Studio) and no `Authorization` header is sent. Naming an
   env var that is *empty* still fails with `missing-auth` — that's a misconfigured cloud lane, not

@@ -13,7 +13,8 @@ default. Pure-stdlib + `mcp` only.
 
 ```
 src/cli_bridge/
-  server.py     # MCP surface: @decorators, call_tool dispatch, hot path (_run_lane), request-context glue. Keep thin.
+  server.py     # MCP surface: handlers, call_tool dispatch, hot path (_run_lane), request-context glue. Keep thin.
+  mcp_compat.py # the ONLY file that branches on the mcp SDK major (1.x decorators vs 2.x add_request_handler, renamed fields)
   schemas.py    # tool-schema assembly (_tools_for/_ask_schema/_filter_tools) — pure, re-exported by server
   reports.py    # doctor/doctor_deep + _render_* markdown + setup recommendation (injected is_host/run_lane)
   prompts.py    # MCP prompt builders + _PROMPTS registry (host-native slash commands, pure)

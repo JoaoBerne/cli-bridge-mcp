@@ -17,6 +17,9 @@ import hashlib
 import json
 import os
 import time
+import urllib.parse
+import urllib.request
+import warnings
 
 from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
@@ -37,6 +40,7 @@ from . import (
     council,
     guards,
     jobs,
+    mcp_compat,
     orchestrate,
     preamble,
     prompts,
@@ -173,8 +177,8 @@ async def _emit_progress(done: int, total: int, msg: str = "") -> None:
     lanes done" instead of a frozen spinner. No-op when the host sent no progress token, or
     outside a request context (async jobs / human CLI / tests). NEVER raises into a delegation."""
     try:
-        ctx = server.request_context
-        token = ctx.meta.progressToken if ctx.meta else None
+        ctx = mcp_compat.request_ctx(server)
+        token = mcp_compat.progress_token(ctx.meta) if ctx else None
         if token is None:
             return
         await ctx.session.send_progress_notification(
@@ -192,7 +196,7 @@ async def _host_sample(prompt: str, max_tokens: int = 1024) -> str | None:
     try:
         from mcp.types import SamplingMessage
         from mcp.types import TextContent as _TC
-        ctx = server.request_context
+        ctx = mcp_compat.request_ctx(server)
         result = await ctx.session.create_message(
             messages=[SamplingMessage(role="user", content=_TC(type="text", text=prompt))],
             max_tokens=max_tokens,
@@ -216,8 +220,8 @@ def _host_name() -> str:
     if forced:
         return _slug(forced)
     try:
-        info = server.request_context.session.client_params.clientInfo  # type: ignore[union-attr]
-        return _slug(info.name)
+        params = mcp_compat.request_ctx(server).session.client_params
+        return _slug(mcp_compat.attr(params, "clientInfo").name)
     except Exception:
         return ""
 
@@ -248,7 +252,6 @@ def _host_lane(host: str) -> LaneSpec | None:
 
 # ─────────────────────────────── tool list (schemas built in schemas.py) ───────────────────────────────
 
-@server.list_tools()
 async def list_tools() -> list[Tool]:
     lanes, host = _active_lanes()
     tools = _tools_for(lanes)
@@ -264,13 +267,11 @@ async def list_tools() -> list[Tool]:
 
 # ─────────────────────────────── MCP prompts (builders + registry in prompts.py) ───────────────────────────
 
-@server.list_prompts()
 async def list_prompts() -> list[Prompt]:
     return [Prompt(name=name, description=spec["description"], arguments=spec["arguments"])
             for name, spec in _PROMPTS.items()]
 
 
-@server.get_prompt()
 async def get_prompt(name: str, arguments: dict | None) -> GetPromptResult:
     spec = _PROMPTS.get(name)
     if spec is None:
@@ -283,7 +284,6 @@ async def get_prompt(name: str, arguments: dict | None) -> GetPromptResult:
 
 # ─────────────────────────────── MCP resources (payloads in resources.py) ───────────────────────────────
 
-@server.list_resources()
 async def list_resources() -> list[Resource]:
     # uri is our own constant str; the SDK types it AnyUrl but pydantic coerces str at runtime.
     return [Resource(uri=uri, name=name, description=desc,  # type: ignore[arg-type]
@@ -291,7 +291,6 @@ async def list_resources() -> list[Resource]:
             for uri, (name, desc) in _RESOURCES.items()]
 
 
-@server.read_resource()
 async def read_resource(uri) -> str:
     key = str(uri)
     if key == "cli-bridge://config":
@@ -429,6 +428,60 @@ def _readonly_mutation_banner(paths: list[str]) -> str:
             f"unexpected (git checkout / git clean).\n{shown}{more}\n\n---\n\n")
 
 
+_workspace_cache: str | None = None
+
+
+def _path_from_root_uri(uri: str) -> str:
+    """`file:///Users/x/repo` -> `/Users/x/repo`. Non-file schemes and junk yield ""."""
+    parsed = urllib.parse.urlparse(uri)
+    if parsed.scheme != "file":
+        return ""
+    return urllib.request.url2pathname(parsed.path)   # handles %20 and Windows /C:/…
+
+
+async def _workspace_root() -> str:
+    """Where a delegate should run when the caller named no cwd. "" = keep the inherited cwd.
+
+    A host launches a user-scoped MCP server from $HOME, not from the project, so the cwd we
+    inherit is an accident — yet it decides real things. `claude --continue` and the /resume
+    picker are scoped to the current directory, so a delegated session filed under $HOME is
+    invisible from the repo it is about; and an agent='build' delegate with no cwd edits files
+    there. MCP roots are the protocol's own answer to "what is the workspace": ask once, keep it.
+    Deprecated in revision 2026-07-28 (SEP-2577) but still served — when a successor lands, this
+    function is the only thing that changes.
+    """
+    global _workspace_cache
+    forced = config.default_cwd()
+    if forced:                                 # explicit config always wins over asking the host
+        path = os.path.expanduser(forced)
+        if os.path.isdir(path):
+            return path
+        runner.log.warning("CLI_BRIDGE_DEFAULT_CWD=%r is not a directory; ignoring", forced)
+        return ""
+    if _workspace_cache is not None:
+        return _workspace_cache
+    ctx = mcp_compat.request_ctx(server)
+    if ctx is None:                            # no host to ask: human CLI, async job, tests
+        return ""
+    try:
+        caps = getattr(getattr(ctx.session, "client_params", None), "capabilities", None)
+        if getattr(caps, "roots", None) is None:
+            _workspace_cache = ""              # host declares no roots — don't ask on every call
+            return ""
+        with warnings.catch_warnings():        # mcp 2.x flags roots as deprecated; still served
+            warnings.simplefilter("ignore")
+            result = await ctx.session.list_roots()
+        for root in result.roots or []:
+            path = _path_from_root_uri(str(root.uri))
+            if path and os.path.isdir(path):
+                _workspace_cache = path
+                return path
+        _workspace_cache = ""                  # host answered, nothing usable in it
+        return ""
+    except Exception:                          # noqa: BLE001 — never break a delegation over this
+        return ""                              # uncached: a live host may answer next time
+
+
 async def _run_lane(lane: LaneSpec, args: dict, *, tool: str = "ask",
                     terse: bool = True) -> runner.RunResult:
     task = _str(args, "task")
@@ -468,6 +521,8 @@ async def _run_lane(lane: LaneSpec, args: dict, *, tool: str = "ask",
     expanded = os.path.expanduser(cwd) if cwd else None
     if expanded and not os.path.isdir(expanded):
         return runner.RunResult(False, f"cwd `{cwd}` is not an existing directory", "failed")
+    if expanded is None:                       # caller named none -> the host's workspace, if any
+        expanded = await _workspace_root() or None
     # Opt-in response cache (CLI_BRIDGE_CACHE_TTL_S>0): an identical call returns the stored
     # answer instead of re-spawning the CLI. Keyed on everything that changes the output,
     # incl. the terse level (it changes the prompt) and a build run is never served stale.
@@ -671,7 +726,6 @@ def _lane_by_key(key: str, lanes: list[LaneSpec]) -> LaneSpec | None:
 
 # ─────────────────────────────── tool dispatch ───────────────────────────────
 
-@server.call_tool()
 async def call_tool(name: str, args: dict) -> list[TextContent]:
     lanes, host = _active_lanes()
 
@@ -1216,6 +1270,14 @@ def _doctor(host: str) -> str:
 
 async def _doctor_deep(host: str, lanes: list[LaneSpec]) -> str:
     return await reports.doctor_deep(host, lanes, is_host=_is_host, run_lane=_run_lane)
+
+
+# Bind the six handlers above to the installed SDK. Kept here at the bottom (rather than as
+# @decorators) because mcp 2.0 removed them; mcp_compat is the only module that knows which
+# major is present. The functions themselves are untouched and still callable directly.
+mcp_compat.register(
+    server, list_tools=list_tools, call_tool=call_tool, list_prompts=list_prompts,
+    get_prompt=get_prompt, list_resources=list_resources, read_resource=read_resource)
 
 
 def main() -> None:

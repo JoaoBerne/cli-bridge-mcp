@@ -341,6 +341,12 @@ flag on its answer (surfaced, never auto-reverted — you decide).
 Delegate re-entry is depth-capped (`CLI_BRIDGE_MAX_DEPTH`, default 1) so a misconfigured delegate
 can't fork-bomb the council.
 
+**Where a delegate runs.** Pass `cwd` and that wins. Leave it out and cli-bridge asks the host for
+its **MCP workspace root** — because hosts launch a user-scoped MCP server from your home
+directory, so the directory it inherits is an accident, and it decides both where an unscoped
+`build` delegate writes and where the delegate's own session file gets filed. Override with
+`CLI_BRIDGE_DEFAULT_CWD` if your host declares no roots.
+
 ---
 
 ## Installation (≈5 min)

@@ -24,6 +24,7 @@ host (Claude/Codex/…) ──MCP/stdio──▶ cli-bridge ──spawn subproce
 | File | Responsibility | Rule of thumb |
 |------|----------------|---------------|
 | `server.py` | The MCP surface: list tools, dispatch calls, list/serve prompts. Thin glue. | **No business logic here** — it should only route. |
+| `mcp_compat.py` | The `mcp` 1.x/2.x seam. 2.0 removed the six low-level decorators, moved the request context onto the handler, and renamed model attributes to snake_case (camelCase survives only as the wire alias). Binds `server.py`'s six untouched handlers to whichever major is installed, and re-implements the envelope 1.x gave for free (input validation, `isError` on a raise). | **The only file that may branch on the SDK version.** Dropping 1.x = deleting one branch. |
 | `lanes.py` | The **lane registry**: one `LaneSpec` per CLI (claude/gpt/gemini/mistral/opencode/qwen/copilot/grok/ollama + the opt-in `openrouter` API lane) + the argv builders (`_claude_ask`, …) + the custom-lane JSON loader. `availability_env` hides an API lane until its key is set. | Add a CLI = add a `LaneSpec`. Never touch the server. |
 | `bridges/` | Bundled stdlib API bridges (`openai_compatible.py` = the `cli-bridge-openai` console script, `urllib` only). The runner spawns it like any lane; it reads the API key from the env var named in `--key-env` (the key VALUE never enters argv). | OPT-IN only — used by API lanes the user explicitly enables. No new dependency. |
 | `runner.py` | Runs a subprocess safely: timeout, process-tree kill, secret redaction, error classification (`quota`/`auth`/`timeout`/…), output cap. Returns a `RunResult`. | All "how do we spawn safely" lives here. |
@@ -49,7 +50,9 @@ host (Claude/Codex/…) ──MCP/stdio──▶ cli-bridge ──spawn subproce
    lane, and returns one `ask_<lane>` tool per remaining lane (+ `ask_all`, `doctor`, workflows…).
 2. The host calls a tool → **`call_tool`** dispatches by name.
 3. **`_run_lane`** (the heart):
-   - resolves the model (`lane.model_for`), the agent mode (plan/build), the effort, the cwd;
+   - resolves the model (`lane.model_for`), the agent mode (plan/build), the effort, the cwd
+     (caller's `cwd` > `CLI_BRIDGE_DEFAULT_CWD` > the host's first usable **MCP root** > the cwd
+     the server was launched with — see `_workspace_root`);
    - checks the **response cache** (if enabled) → return early on a hit;
    - prepends the **terse preamble** (unless this is a structured workflow);
    - builds the argv (`lane.build_ask(...)`) and calls **`runner.arun`**;
@@ -115,6 +118,9 @@ host (Claude/Codex/…) ──MCP/stdio──▶ cli-bridge ──spawn subproce
 7. **Stdlib + `mcp` only**: no new runtime dependencies.
 8. **Re-entry capped**: every spawn carries `CLI_BRIDGE_DEPTH`; `_run_lane` refuses past
    `CLI_BRIDGE_MAX_DEPTH` (default 1) so a delegate can't recurse into the bridge.
+9. **Both `mcp` majors work**: 1.x and 2.x, with every version branch confined to
+   `mcp_compat.py`. CI runs the full suite on both — a compat layer nobody tests is a compat
+   layer that has already broken.
 
 ## Extending it
 
