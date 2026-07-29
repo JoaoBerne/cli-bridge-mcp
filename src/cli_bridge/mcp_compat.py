@@ -22,13 +22,14 @@ from __future__ import annotations
 import contextvars
 import re
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, TypeVar
 
 import jsonschema
 from mcp import types as t
 
 _MISSING = object()
 _SNAKE = re.compile(r"(?<!^)([A-Z])")
+_M = TypeVar("_M")
 
 # 1.x publishes the live request context on the server; 2.x hands it to the handler instead.
 # The adapters below stash it here so `request_ctx()` answers the same question either way.
@@ -78,6 +79,19 @@ def register(
         ("resources/read", t.ReadResourceRequestParams, _on_read_resource),
     ):
         server.add_request_handler(method, params_type, handler)
+
+
+def from_wire(model: Callable[..., _M], **fields: Any) -> _M:
+    """Build an SDK model from its WIRE field names (`inputSchema`, `mimeType`, `isError`, …).
+
+    Both majors accept those at runtime — 1.x because they ARE the field names, 2.x because they
+    survive as pydantic aliases with populate_by_name. Statically it's another story: under 2.x
+    mypy sees `input_schema` and rejects the camelCase kwarg, and under 1.x it would reject the
+    snake_case one. No single spelling typechecks on both, so the kwargs are untyped here — in
+    the one module allowed to know about SDK versions — instead of 40-odd `type: ignore`s spread
+    across the tool schemas. The return type is preserved, so call sites stay fully checked.
+    """
+    return model(**fields)
 
 
 def attr(obj: Any, camel: str, default: Any = None) -> Any:
@@ -147,7 +161,7 @@ async def _on_read_resource(ctx: Any, params: Any) -> Any:
     text = await _H["read_resource"](params.uri)
     # 1.x wraps a str return as text/plain; keep that, so a host sees the same bytes on both.
     return t.ReadResourceResult(contents=[
-        t.TextResourceContents(uri=params.uri, mimeType="text/plain", text=text)])
+        from_wire(t.TextResourceContents, uri=params.uri, mimeType="text/plain", text=text)])
 
 
 async def _on_call_tool(ctx: Any, params: Any) -> Any:
@@ -160,8 +174,8 @@ async def _on_call_tool(ctx: Any, params: Any) -> Any:
                 jsonschema.validate(instance=args, schema=attr(tool, "inputSchema"))
             except jsonschema.ValidationError as e:
                 return _error_result(f"Input validation error: {e.message}")
-        return t.CallToolResult(content=list(await _H["call_tool"](params.name, args)),
-                                isError=False)
+        return from_wire(t.CallToolResult,
+                         content=list(await _H["call_tool"](params.name, args)), isError=False)
     except Exception as e:                     # noqa: BLE001 — a tool error, not a protocol error
         return _error_result(str(e))
 
@@ -174,4 +188,5 @@ async def _tool_def(name: str) -> Any:
 
 
 def _error_result(message: str) -> Any:
-    return t.CallToolResult(content=[t.TextContent(type="text", text=message)], isError=True)
+    return from_wire(t.CallToolResult,
+                     content=[t.TextContent(type="text", text=message)], isError=True)

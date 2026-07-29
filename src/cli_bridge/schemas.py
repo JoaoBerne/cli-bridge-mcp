@@ -15,6 +15,7 @@ from mcp.types import Tool, ToolAnnotations
 from . import config, findings, orchestrate, preamble, router
 from .config import ASK_ALL_MAX_TIMEOUT_S, DEFAULT_TIMEOUT_S, MAX_TIMEOUT_S
 from .lanes import LaneSpec, known_models
+from .mcp_compat import from_wire
 
 # Model ids named inline in the `model` parameter. Enough to show what a lane offers without
 # swamping the schema — lanes with hundreds of models point at their list tool for the rest.
@@ -79,7 +80,7 @@ def _ask_schema(lane: LaneSpec) -> dict:
 def _ann(**kw: bool) -> ToolAnnotations:
     """The MCP SDK types Tool(annotations=) as ToolAnnotations|None but accepts a plain dict of
     hints at runtime (pydantic coerces). This wraps the hint kwargs in that cast in ONE place, so
-    the ~40 Tool(...) sites stay readable AND mypy keeps flagging REAL arg-type errors elsewhere
+    the ~40 tool sites stay readable AND mypy keeps flagging REAL arg-type errors elsewhere
     (vs a blanket disable_error_code)."""
     return cast(ToolAnnotations, kw)
 
@@ -93,7 +94,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
         exp = " [experimental: flags not verified live — report breakage]" if lane.experimental else ""
         # A lane that can WRITE (opencode build) must not advertise read-only.
         can_write = "agent" in lane.caps
-        tools.append(Tool(
+        tools.append(from_wire(Tool,
             name=f"ask_{lane.key}",
             description=f"Consult {lane.display}. {lane.note}{paid}{limited}{exp}",
             inputSchema=_ask_schema(lane),
@@ -101,14 +102,14 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                              destructiveHint=can_write),
         ))
         if lane.models_args is not None or lane.models_file:
-            tools.append(Tool(
+            tools.append(from_wire(Tool,
                 name=f"list_{lane.key}_models",
                 description=f"List models reachable through {lane.display}.",
                 inputSchema={"type": "object", "properties": {}},
                 annotations=_ann(readOnlyHint=True, destructiveHint=False),
             ))
     if lanes:
-        tools.append(Tool(
+        tools.append(from_wire(Tool,
             name="ask_all",
             description=("Fan-out: ask the SAME question to every available lane in parallel and "
                          "get all answers side by side. Free, non-limited lanes only by default."),
@@ -141,7 +142,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             },
             annotations=_ann(readOnlyHint=True, openWorldHint=True, destructiveHint=False),
         ))
-        tools.append(Tool(
+        tools.append(from_wire(Tool,
             name="ask_all_async",
             description=("Like ask_all but NON-BLOCKING: starts the fan-out as a background job "
                          "and returns a job_id immediately (in <1s), so a slow council run can't "
@@ -163,7 +164,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             },
             annotations=_ann(readOnlyHint=True, openWorldHint=True, destructiveHint=False),
         ))
-        tools.append(Tool(
+        tools.append(from_wire(Tool,
             name="job_status",
             description="Status of an async job: running | succeeded | failed | cancelled | "
                         "interrupted. Pass the job_id returned by ask_all_async.",
@@ -172,7 +173,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                 "required": ["job_id"]},
             annotations=_ann(readOnlyHint=True, destructiveHint=False),
         ))
-        tools.append(Tool(
+        tools.append(from_wire(Tool,
             name="job_result",
             description="Fetch a finished async job's output (same body as ask_all; spills to a "
                         "file + preview if huge). Returns a 'still running' note if not done.",
@@ -181,7 +182,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                 "required": ["job_id"]},
             annotations=_ann(readOnlyHint=True, destructiveHint=False),
         ))
-        tools.append(Tool(
+        tools.append(from_wire(Tool,
             name="job_cancel",
             description="Cancel a running async job — kills the delegate CLIs' process groups.",
             inputSchema={"type": "object", "properties": {
@@ -189,14 +190,14 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                 "required": ["job_id"]},
             annotations=_ann(readOnlyHint=False, destructiveHint=False),
         ))
-        tools.append(Tool(
+        tools.append(from_wire(Tool,
             name="jobs_list",
             description="List recent async jobs (this session first, then persisted history) "
                         "with their status.",
             inputSchema={"type": "object", "properties": {}},
             annotations=_ann(readOnlyHint=True, destructiveHint=False),
         ))
-        tools.append(Tool(
+        tools.append(from_wire(Tool,
             name="batch_run",
             description=("Durable fan-out: run many INDEPENDENT asks in parallel (capped) in ONE "
                          "call instead of N — saves your context and quota. Each result is "
@@ -242,7 +243,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             },
             annotations=_ann(readOnlyHint=False, openWorldHint=True, destructiveHint=False),
         ))
-        tools.append(Tool(
+        tools.append(from_wire(Tool,
             name="workflow",
             description=("Run a ready-made multi-model workflow (a 'button') over the durable "
                          "batch substrate. refine_plan: let the council DEMOLISH your plan from "
@@ -332,7 +333,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             },
             annotations=_ann(readOnlyHint=False, openWorldHint=True, destructiveHint=False),
         ))
-        tools.append(Tool(
+        tools.append(from_wire(Tool,
             name="conversations_list",
             description="List recent round-table threads (id, lanes involved, turn count, last "
                         "activity, preview). Use it to recover a conversation id and continue a "
@@ -340,7 +341,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             inputSchema={"type": "object", "properties": {}},
             annotations=_ann(readOnlyHint=True, destructiveHint=False),
         ))
-        tools.append(Tool(
+        tools.append(from_wire(Tool,
             name="conversation_show",
             description="Show the full transcript of one round-table thread — every turn, "
                         "attributed by lane. Pass the conversation id.",
@@ -349,7 +350,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                 "required": ["conversation"]},
             annotations=_ann(readOnlyHint=True, destructiveHint=False),
         ))
-        tools.append(Tool(
+        tools.append(from_wire(Tool,
             name="list_models",
             description="List the models reachable through a lane so you can pick one. If that "
                         "CLI has no list command, shows its default model + how to choose. Pass "
@@ -359,7 +360,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                 "required": ["lane"]},
             annotations=_ann(readOnlyHint=True, destructiveHint=False),
         ))
-    tools.append(Tool(
+    tools.append(from_wire(Tool,
         name="doctor",
         description="Health check: which CLIs are installed, which is the host, paid lanes, "
                     "defaults, current cost profile. Pass deep=true to also probe each lane with a "
@@ -368,7 +369,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             "deep": {"type": "boolean", "description": "Live-probe each free lane's auth."}}},
         annotations=_ann(readOnlyHint=True, destructiveHint=False),
     ))
-    tools.append(Tool(
+    tools.append(from_wire(Tool,
         name="setup",
         description="Show the cost-profile choice (saver/balanced/max) to walk the user through "
                     "configuring how cli-bridge spends paid credits/quota. Call this on first use "
@@ -376,7 +377,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
         inputSchema={"type": "object", "properties": {}},
         annotations=_ann(readOnlyHint=True, destructiveHint=False),
     ))
-    tools.append(Tool(
+    tools.append(from_wire(Tool,
         name="usage_report",
         description="Local usage stats (this machine only): total runs, per-lane counts/success/"
                     "avg latency, ESTIMATED tokens (chars/4) and credits (if CLI_BRIDGE_<LANE>_"
@@ -389,7 +390,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                               "description": "text (default) or json."}}},
         annotations=_ann(readOnlyHint=True, destructiveHint=False),
     ))
-    tools.append(Tool(
+    tools.append(from_wire(Tool,
         name="usage_budget",
         description="Per-lane runs since UTC midnight vs an optional CLI_BRIDGE_<LANE>_DAILY_LIMIT "
                     "(ENFORCED at spawn once reached), plus estimated tokens/credits spent today. "
@@ -397,14 +398,14 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
         inputSchema={"type": "object", "properties": {}},
         annotations=_ann(readOnlyHint=True, destructiveHint=False),
     ))
-    tools.append(Tool(
+    tools.append(from_wire(Tool,
         name="lane_stats",
         description="Per-lane health: total runs, failures, consecutive failures/timeouts, and "
                     "any active cooldown (a lane in cooldown is skipped by ask_all until it clears).",
         inputSchema={"type": "object", "properties": {}},
         annotations=_ann(readOnlyHint=True, destructiveHint=False),
     ))
-    tools.append(Tool(
+    tools.append(from_wire(Tool,
         name="reset_lane_state",
         description="Clear a lane's cooldown + failure counters (e.g. after you re-logged in or "
                     "your quota reset). Pass the lane key, e.g. 'gemini'.",
@@ -414,7 +415,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
         annotations=_ann(readOnlyHint=False, destructiveHint=False),
     ))
     if lanes:
-        tools.append(Tool(
+        tools.append(from_wire(Tool,
             name="ask_cascade",
             description="Ask ONE model but with automatic fallback: tries lanes cheapest→strongest, "
                         "skipping cooled ones, and moves to the next on quota/auth/timeout/failure. "
@@ -441,7 +442,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             },
             annotations=_ann(readOnlyHint=True, openWorldHint=True, destructiveHint=False),
         ))
-        tools.append(Tool(
+        tools.append(from_wire(Tool,
             name="route_plan",
             description="Explain (without running anything) the order ask_cascade would try lanes "
                         "in, given current cost profile and lane cooldowns. Pass a `mode` to "
@@ -452,7 +453,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                          "description": "Preview ask_best's ordering for this mode."}}},
             annotations=_ann(readOnlyHint=True, destructiveHint=False),
         ))
-        tools.append(Tool(
+        tools.append(from_wire(Tool,
             name="ask_best",
             description=("Ask the BEST lane for the job: pick one lane by `mode` (fast/cheap/deep/"
                          "code/review/security) using cost, health and measured latency, then run "
@@ -478,7 +479,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             },
             annotations=_ann(readOnlyHint=True, openWorldHint=True, destructiveHint=False),
         ))
-        tools.append(Tool(
+        tools.append(from_wire(Tool,
             name="rate_lane",
             description=("Teach the router. Score how good a lane's answer was for a task-type "
                          "(mode) and `ask_best` will prefer the lanes that score well for that mode "
@@ -504,7 +505,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             },
             annotations=_ann(readOnlyHint=False, destructiveHint=False, openWorldHint=False),
         ))
-        tools.append(Tool(
+        tools.append(from_wire(Tool,
             name="set_lane_cost",
             description=("Teach the cost policy — the counterpart of rate_lane for money. When the "
                          "user tells you what a lane really costs THEM ('my opencode is on the Go "
@@ -532,7 +533,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             },
             annotations=_ann(readOnlyHint=False, destructiveHint=False, openWorldHint=False),
         ))
-        tools.append(Tool(
+        tools.append(from_wire(Tool,
             name="review_diff",
             description=("Multi-model code review of a git diff: several lanes review in parallel "
                          "with DIFFERENT focuses (correctness/security/tests/maintainability), "
@@ -566,7 +567,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             },
             annotations=_ann(readOnlyHint=True, openWorldHint=True, destructiveHint=False),
         ))
-        tools.append(Tool(
+        tools.append(from_wire(Tool,
             name="security_review",
             description=("OWASP-aware SECURITY review of a git diff: lanes review in parallel "
                          "across security categories (injection / auth & access control / "
@@ -594,7 +595,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
         ))
         build_lanes = [ln for ln in lanes if "agent" in ln.caps]
         if build_lanes:
-            tools.append(Tool(
+            tools.append(from_wire(Tool,
                 name="ask_build",
                 description=("DELEGATE real implementation work to another model — a second pair "
                              "of hands, not just advice. REACH FOR THIS (instead of editing "
@@ -682,7 +683,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                 annotations=_ann(readOnlyHint=False, openWorldHint=True,
                                  destructiveHint=True),   # direct mode writes the real repo
             ))
-            tools.append(Tool(
+            tools.append(from_wire(Tool,
                 name="ask_build_isolated",
                 description=("[legacy alias of ask_build mode=isolated] Run a build-capable lane in "
                              "WRITE mode but SAFELY: it edits a "
@@ -716,7 +717,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                 annotations=_ann(readOnlyHint=False, openWorldHint=True,
                                  destructiveHint=False),   # edits are isolated + discarded
             ))
-            tools.append(Tool(
+            tools.append(from_wire(Tool,
                 name="job_tail",
                 description=("Stream a running build's progress log (turn markers, agent output, "
                              "DoD results, steering applied). Pass the job_id from ask_build "
@@ -735,7 +736,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                 },
                 annotations=_ann(readOnlyHint=True, openWorldHint=False, destructiveHint=False),
             ))
-            tools.append(Tool(
+            tools.append(from_wire(Tool,
                 name="build_steer",
                 description=("Steer a running build like a human would. Queue an instruction for "
                              "the NEXT turn (e.g. 'use Tailwind, not inline CSS'), and/or "
@@ -757,7 +758,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                 },
                 annotations=_ann(readOnlyHint=False, openWorldHint=True, destructiveHint=False),
             ))
-        tools.append(Tool(
+        tools.append(from_wire(Tool,
             name="debate",
             description=("Multi-model debate: each lane answers the question, then sees the "
                          "others and REVISES over a bounded number of rounds, then a judge "
@@ -814,7 +815,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             },
             annotations=_ann(readOnlyHint=True, openWorldHint=True, destructiveHint=False),
         ))
-        tools.append(Tool(
+        tools.append(from_wire(Tool,
             name="consensus",
             description=("Council CONSENSUS: every lane answers blind, then each RANKS the "
                          "ANONYMIZED answers (no model can favour its own), the votes are "
@@ -856,7 +857,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             },
             annotations=_ann(readOnlyHint=True, openWorldHint=True, destructiveHint=False),
         ))
-        tools.append(Tool(
+        tools.append(from_wire(Tool,
             name="challenge",
             description=("Anti-sycophancy: hand a CLAIM to one OUTSIDE lane with a critical-"
                          "reassessment prompt and get its skeptical review — does it actually "
@@ -877,7 +878,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             },
             annotations=_ann(readOnlyHint=True, openWorldHint=True, destructiveHint=False),
         ))
-        tools.append(Tool(
+        tools.append(from_wire(Tool,
             name="premortem",
             description=("Multi-model PREMORTEM: each lane imagines the change/plan failed and "
                          "lists likely failure modes, root causes, early signs and mitigations; "
@@ -894,7 +895,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             },
             annotations=_ann(readOnlyHint=True, openWorldHint=True, destructiveHint=False),
         ))
-        tools.append(Tool(
+        tools.append(from_wire(Tool,
             name="test_plan",
             description=("Multi-model TEST PLAN from a git diff (default: working-tree changes) or "
                          "a description: the behaviors/edge cases to test and the minimal set of "
@@ -915,7 +916,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             },
             annotations=_ann(readOnlyHint=True, openWorldHint=True, destructiveHint=False),
         ))
-        tools.append(Tool(
+        tools.append(from_wire(Tool,
             name="commit_msg",
             description=("Generate a Conventional Commit message from your STAGED diff (falls "
                          "back to the working tree if nothing is staged). Read-only — returns "
@@ -932,7 +933,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             },
             annotations=_ann(readOnlyHint=True, openWorldHint=True, destructiveHint=False),
         ))
-        tools.append(Tool(
+        tools.append(from_wire(Tool,
             name="pr_describe",
             description=("Generate a PR title + description (Summary / Changes / Testing) from the "
                          "branch's diff and commit log vs a base (default origin/main, then main). "
@@ -960,7 +961,7 @@ def _self_ask_tool(lane: LaneSpec) -> Tool:
     schema = _ask_schema(lane)
     schema["required"] = ["task", "model"]
     can_write = "agent" in lane.caps
-    return Tool(
+    return from_wire(Tool,
         name=f"ask_{lane.key}",
         description=(f"Consult a DIFFERENT model of your own family via {lane.display}. "
                      "Requires an explicit `model` (e.g. a sibling like claude-opus-4-6); empty "
@@ -975,7 +976,7 @@ def _host_ask_tool(lane: LaneSpec) -> Tool:
     """ask_<host> as a NORMAL direct tool (default): the caller's own lane is visible and callable
     like any other (model optional). It still stays out of ask_all/ask_cascade fan-out."""
     can_write = "agent" in lane.caps
-    return Tool(
+    return from_wire(Tool,
         name=f"ask_{lane.key}",
         description=(f"Consult {lane.display} — your own lane (e.g. a fresh instance, or a sibling "
                      f"model via `model`). Kept out of ask_all/ask_cascade fan-out. {lane.note}"),
