@@ -6,6 +6,23 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **`mcp>=1.2.0` is now capped at `<2` — 0.1.4 is broken on a fresh install.** `mcp 2.0.0` removed
+  the low-level decorators this server is built on (`@server.list_tools`, `call_tool`,
+  `list_prompts`, `get_prompt`, `list_resources`, `read_resource`; `mcp.server.fastmcp` deleted
+  outright). With no upper bound, `pipx install cli-bridge-mcp` resolved `mcp` to 2.x and every
+  call died with `'Server' object has no attribute 'list_tools'`. The pin is load-bearing, not
+  caution. Verified: 1.29.0, the last 1.x, is fully green (709 passed). Migrating to the 2.x API
+  is tracked separately — the cap is the fix that unbreaks installs today.
+- **drift-check now names the right culprit, and can still see upstream breakage.** It opened
+  *"a CLI lane may be broken"* for a failure that was entirely the SDK, sending a reader through
+  lane builders for nothing. The job now checks `import cli_bridge.server` separately from the
+  test run and titles the issue from whichever step died. Deduplication moved from "any open
+  drift issue" to "an open issue with this title", so a real lane break is no longer swallowed by
+  an unrelated one still being open. And because the new dependency cap would otherwise leave the
+  nightly testing only the SDK we already know works, it also probes the newest `mcp` in a
+  throwaway venv — informational, never fails the job.
+
 ### Added
 - **Apple Foundation Models — two lanes.** `ask_apple` spawns Apple's `fm` CLI for **on-device**
   inference: $0, offline, private, and genuinely **unmetered** (`fm quota-usage` states the quota

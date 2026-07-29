@@ -23,23 +23,60 @@ jobs:
       - run: |
           python -m pip install --upgrade pip
           pip install -e . pytest pytest-asyncio
-      - name: Import + unit tests
-        id: check
+
+      # Split so the issue can name the RIGHT culprit. These fail for unrelated reasons, and
+      # "a lane changed its flags" sent a reader hunting through lane builders once when the real
+      # cause was the SDK removing the API the server is built on.
+      - name: Server still imports (dependency/API contract)
+        id: imports
+        run: python -c "import cli_bridge.server, cli_bridge.cli"
+      - name: Unit tests (lane builders + logic)
+        id: tests
         run: pytest -q
+
+      # The dependency pin protects USERS, but it also means the steps above now only ever see
+      # the mcp we already know works — so an upstream break would stay invisible until someone
+      # hits it. This step deliberately installs the newest mcp to look for that. It must never
+      # fail the job: a broken future SDK is news, not a regression in this repo.
+      - name: Probe the newest mcp (informational, never fails the job)
+        id: upstream
+        continue-on-error: true
+        run: |
+          python -m venv /tmp/upstream
+          /tmp/upstream/bin/pip install -q --upgrade pip
+          /tmp/upstream/bin/pip install -q . --upgrade --upgrade-strategy eager 'mcp' 2>&1 | tail -2
+          /tmp/upstream/bin/python -c "import cli_bridge.server" \
+            && echo "ok=1" >> "$GITHUB_OUTPUT" \
+            || echo "ok=0" >> "$GITHUB_OUTPUT"
+          /tmp/upstream/bin/pip show mcp | sed -n 's/^Version: /probed mcp /p'
+
       - name: Open an issue on failure
         if: failure()
         uses: actions/github-script@v7
         with:
           script: |
-            const title = "drift-check failed — a CLI lane may be broken";
-            const body = "The nightly drift-check run failed. A delegate CLI may have changed its " +
-              "flags, or a dependency broke. See the failing run: " +
-              `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            // Name the culprit from WHICH step died, so the issue points at the right code.
+            const brokeImport = "${{ steps.imports.outcome }}" === "failure";
+            const title = brokeImport
+              ? "drift-check failed — a dependency broke the server's API contract"
+              : "drift-check failed — a CLI lane may be broken";
+            const cause = brokeImport
+              ? "`import cli_bridge.server` itself failed, so this is NOT a lane: a dependency " +
+                "(most likely the `mcp` SDK) changed or removed something the server is built on. " +
+                "Check the installed version against the pin in pyproject.toml before touching " +
+                "any lane builder."
+              : "The server imports fine, so the dependencies are intact and this is logic or a " +
+                "delegate CLI that changed its flags. Start from the failing test names.";
+            const body = `The nightly drift-check run failed.\n\n${cause}\n\n` +
+              `Failing run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}` +
+              `/actions/runs/${context.runId}`;
+            // One open issue per CAUSE, not per repo: deduping on the label alone meant a real
+            // lane break stayed silent while an unrelated drift issue happened to be open.
             const existing = await github.rest.issues.listForRepo({
               owner: context.repo.owner, repo: context.repo.repo,
               state: "open", labels: "drift",
             });
-            if (existing.data.length === 0) {
+            if (!existing.data.some(i => i.title === title)) {
               await github.rest.issues.create({
                 owner: context.repo.owner, repo: context.repo.repo,
                 title, body, labels: ["drift"],
