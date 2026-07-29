@@ -246,3 +246,73 @@ def test_custom_lane_json_native_session(tmp_path):
         "mode": "capture", "first": [], "spawn": ["--vs"],
         "pattern": "sess-[0-9]+", "resume": ["--resume", "{sid}"]}
     assert by_key["badns"].native_session is None    # malformed block dropped, lane kept
+
+
+# ── the high-water mark must never claim more than the prompt delivered ───────────────────
+
+def test_turn_landing_during_the_spawn_invalidates_the_handle(monkeypatch):
+    # The commit reads MAX(turn_number) AFTER the spawn. If another lane appended a turn while
+    # this one was awaiting, that turn gets marked "already seen" by a session that never got
+    # it — and later deltas filter on turn_number > last_turn, so it is lost to this lane
+    # forever. Correctness beats the optimisation: drop the handle and full-replay instead.
+    lane = LaneSpec("claude", "Claude", "echo", lambda *a: [], native_session=MINT)
+    box, prompts = {}, []
+
+    async def fake_run_lane(ln, args, *, tool="ask", terse=True):
+        prompts.append(args["task"])
+        if box.get("cid"):                  # another lane answers mid-spawn
+            telemetry.convo_append(box["cid"], "ollama", "user", "MIDQ")
+            telemetry.convo_append(box["cid"], "ollama", "assistant", "MIDA")
+            box.pop("cid")
+        return RunResult(True, "answer", "ok")
+    monkeypatch.setattr(server, "_run_lane", fake_run_lane)
+
+    _res, cid = _convo(lane, {"task": "t1", "conversation": "new"})
+    box["cid"] = cid
+    _convo(lane, {"task": "t2", "conversation": cid})
+    _convo(lane, {"task": "t3", "conversation": cid})
+    assert "MIDQ" in prompts[-1]            # the interleaved turn still reaches this lane
+
+
+def test_trimmed_delta_invalidates_the_handle(monkeypatch):
+    # Same lie by a different route: the delta was cut to fit the char budget, so the session
+    # never received the turns that were cut. Needs a delta of several turns, so another lane
+    # piles them up between two turns of the native one.
+    monkeypatch.setenv("CLI_BRIDGE_CONVO_MAX_CHARS", "200")
+    lane = LaneSpec("claude", "Claude", "echo", lambda *a: [], native_session=MINT)
+
+    async def fake_run_lane(ln, args, *, tool="ask", terse=True):
+        return RunResult(True, "answer", "ok")
+    monkeypatch.setattr(server, "_run_lane", fake_run_lane)
+
+    _res, cid = _convo(lane, {"task": "t1", "conversation": "new"})
+    assert telemetry.convo_session(cid, "claude")[0]          # handle minted on turn 1
+    for i in range(6):                                        # other lane floods the thread
+        telemetry.convo_append(cid, "ollama", "user", f"Q{i} " + "x" * 120)
+        telemetry.convo_append(cid, "ollama", "assistant", f"A{i} " + "y" * 120)
+    _convo(lane, {"task": "t2", "conversation": cid})          # delta too big → trimmed
+    assert telemetry.convo_session(cid, "claude") == ("", 0)   # handle dropped, not advanced
+
+
+def test_mock_stores_no_native_handle(monkeypatch):
+    # Nothing is spawned under mock, so a stored handle names a session that never existed.
+    monkeypatch.setenv("CLI_BRIDGE_MOCK", "1")
+    lane = LaneSpec("claude", "Claude", "echo", lambda *a: [], native_session=MINT)
+    _res, cid = _convo(lane, {"task": "t1", "conversation": "new"})
+    assert telemetry.convo_session(cid, "claude") == ("", 0)
+
+
+def test_native_extra_never_splits_a_flag_from_its_value(monkeypatch):
+    # Custom lanes CAN declare a native_session, and their template may end in a flag's value.
+    lane = LaneSpec("mycli", "My", "echo",
+                    lambda task, m, e, a, b="": ["-p", task, "--output-format", "json"])
+    seen = []
+
+    async def cap(argv, timeout, cwd=None, env=None, **kw):
+        seen.append(list(argv))
+        return RunResult(True, "ok", "ok")
+    monkeypatch.setattr(server.runner, "arun", cap)
+
+    asyncio.run(server._run_lane(lane, {"task": "T", "_native_argv": ["--session-id", "S"]}))
+    assert seen[0][-2:] == ["--output-format", "json"]      # flag and value stay together
+    assert "--session-id" in seen[0]

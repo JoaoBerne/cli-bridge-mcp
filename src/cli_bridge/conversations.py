@@ -148,6 +148,13 @@ def native_step(ns: dict, conversation_id: str, lane_key: str) -> tuple[list[str
     return list(ns.get("spawn", [])), "", 0
 
 
+def head_turn(conversation_id: str) -> int:
+    """The newest stored turn number (0 when the thread is empty). Used to check that a native
+    session really holds everything below its high-water mark before that mark is committed."""
+    turns = telemetry.convo_turns(conversation_id)
+    return int(turns[-1].get("turn_number", 0)) if turns else 0
+
+
 def _fold_overlaps(conversation_id: str, last_seen: int) -> bool:
     """True when the thread's leading summary turn folds turns the native session has already
     seen verbatim (summary turn_number > last_seen ≥ a folded turn): the delta would duplicate

@@ -68,7 +68,7 @@ def test_run_lane_paces_before_spawn(monkeypatch):
         paced.append((key, interval))
         return 0.0
 
-    async def fake_spawn(argv, timeout, cwd, env=None):
+    async def fake_spawn(argv, timeout, cwd, env=None, **kw):
         return RunResult(True, "ok", "ok")
 
     monkeypatch.setattr(runner, "pace", fake_pace)
@@ -89,3 +89,20 @@ def test_stats_hint_on_burst_ratelimited_lane(monkeypatch):
     monkeypatch.setenv("CLI_BRIDGE_GEMINI_MIN_INTERVAL_S", "2")
     out2 = server._render_lane_stats()
     assert "CLI_BRIDGE_GEMINI_MIN_INTERVAL_S=2`" not in out2   # pacing set -> no nagging
+
+
+def test_hard_failure_does_not_erase_a_live_cooldown(tmp_path, monkeypatch):
+    # lane_state writes cooldown_until unconditionally, so a non-cooling failure used to blank
+    # an active quota bench. A direct ask_<lane> never checks cooldowns, so one hard-failing
+    # call was enough to re-arm a dead lane for every later fan-out.
+    monkeypatch.setenv("CLI_BRIDGE_STATE_DB", str(tmp_path / "s.sqlite"))
+    telemetry._reset_for_tests()
+    try:
+        telemetry.record(telemetry.start("ask", "gemini", "m", "t"), False, "quota", 0)
+        assert telemetry.cooldown_remaining("gemini") > 0
+        telemetry.record(telemetry.start("ask", "gemini", "m", "t"), False, "failed", 0)
+        assert telemetry.cooldown_remaining("gemini") > 0      # still benched
+        telemetry.record(telemetry.start("ask", "gemini", "m", "t"), True, "ok", 5)
+        assert telemetry.cooldown_remaining("gemini") == 0     # success still clears it
+    finally:
+        telemetry._reset_for_tests()

@@ -220,17 +220,22 @@ def _update_lane_state(conn: sqlite3.Connection, lane: str, ok: bool, kind: str,
         return
     row = conn.execute(
         "SELECT consecutive_failures, consecutive_timeouts, consecutive_empties, total_runs, "
-        "total_failures FROM lane_state WHERE lane=?", (lane,)).fetchone()
-    cf, ct, ce, total, tfail = row if row else (0, 0, 0, 0, 0)
+        "total_failures, cooldown_until FROM lane_state WHERE lane=?", (lane,)).fetchone()
+    cf, ct, ce, total, tfail, cooled = row if row else (0, 0, 0, 0, 0, None)
 
-    cooldown_until = None
+    cooldown_until = None                          # success clears the bench
     if ok:
         cf = ct = ce = 0
     else:
+        # Carry the existing bench forward. The UPDATE below writes this column unconditionally,
+        # so leaving it None let ONE non-cooling failure un-bench a lane that quota/auth had
+        # just cooled — and a direct ask_<lane> never checks cooldowns, so a single hard-failing
+        # call was enough to re-arm a dead lane for every later fan-out.
+        cooldown_until = cooled
         tfail += 1
         ct = ct + 1 if kind == "timeout" else 0
         ce = ce + 1 if kind == "empty" else 0      # silent empty (exit 0, no output) = likely quota
-        cf = cf + 1 if kind in _COOLING_KINDS else cf
+        cf += 1                                    # every consecutive failure, not just cooling ones
         if kind == "quota":
             cooldown_until = _now() + config.COOLDOWN_QUOTA_S
         elif kind == "auth":

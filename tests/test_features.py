@@ -53,6 +53,61 @@ def test_retry_succeeds_after_transient(monkeypatch):
     assert r.ok and calls["n"] == 3   # 1 + 2 retries
 
 
+def test_session_bearing_spawn_is_never_retried(monkeypatch, tmp_path):
+    # Replaying an argv is only a "retry" when running it twice means the same as running it
+    # once. A minted --session-id does not: attempt 1 creates the session, attempt 2 collides
+    # ("Session ID … is already in use") and that collision MASKS the transient error that
+    # triggered the retry — which is exactly how this was first seen in the wild.
+    monkeypatch.setenv("CLI_BRIDGE_STATE_DB", str(tmp_path / "s.sqlite"))
+    monkeypatch.setenv("CLI_BRIDGE_RETRIES", "3")
+    monkeypatch.setattr(server.asyncio, "sleep", _fast_sleep)
+    argvs = []
+
+    async def fail(argv, timeout, cwd=None, env=None):
+        argvs.append(list(argv))
+        return RunResult(False, "blip", "failed")            # a RETRYABLE kind
+    monkeypatch.setattr(server.runner, "arun", fail)
+
+    r = asyncio.run(server._run_lane(_lane(), {"task": "t", "_native_sid": "SID",
+                                               "_native_argv": ["--session-id", "SID"]}))
+    assert not r.ok and len(argvs) == 1
+
+
+def test_build_spawn_is_never_retried(monkeypatch, tmp_path):
+    # A build delegate edits the tree. Re-running it replays the same instructions against a
+    # tree it has already changed, which is not a retry either.
+    monkeypatch.setenv("CLI_BRIDGE_STATE_DB", str(tmp_path / "s.sqlite"))
+    monkeypatch.setenv("CLI_BRIDGE_RETRIES", "3")
+    monkeypatch.setattr(server.asyncio, "sleep", _fast_sleep)
+    calls = {"n": 0}
+
+    async def fail(argv, timeout, cwd=None, env=None):
+        calls["n"] += 1
+        return RunResult(False, "blip", "failed")
+    monkeypatch.setattr(server.runner, "arun", fail)
+
+    asyncio.run(server._run_lane(_lane(), {"task": "t", "agent": "build"}))
+    assert calls["n"] == 1
+
+
+def test_capture_first_turn_still_retries(monkeypatch, tmp_path):
+    # The guard keys on the session HANDLE, not on _native_argv: opencode's capture-first turn
+    # passes only verbose-log flags and holds no handle, so it stays safely retryable. Gating on
+    # _native_argv would silently remove that.
+    monkeypatch.setenv("CLI_BRIDGE_STATE_DB", str(tmp_path / "s.sqlite"))
+    monkeypatch.setenv("CLI_BRIDGE_RETRIES", "2")
+    monkeypatch.setattr(server.asyncio, "sleep", _fast_sleep)
+    calls = {"n": 0}
+
+    async def flaky(argv, timeout, cwd=None, env=None):
+        calls["n"] += 1
+        return RunResult(False, "blip", "failed") if calls["n"] < 3 else RunResult(True, "ok", "ok")
+    monkeypatch.setattr(server.runner, "arun", flaky)
+
+    r = asyncio.run(server._run_lane(_lane(), {"task": "t", "_native_argv": ["--print-logs"]}))
+    assert r.ok and calls["n"] == 3
+
+
 def test_retry_not_used_for_quota(monkeypatch):
     monkeypatch.setenv("CLI_BRIDGE_RETRIES", "3")
     monkeypatch.setattr(server.asyncio, "sleep", _fast_sleep)
