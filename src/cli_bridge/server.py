@@ -285,9 +285,10 @@ async def get_prompt(name: str, arguments: dict | None) -> GetPromptResult:
 # ─────────────────────────────── MCP resources (payloads in resources.py) ───────────────────────────────
 
 async def list_resources() -> list[Resource]:
-    # uri is our own constant str; the SDK types it AnyUrl but pydantic coerces str at runtime.
-    return [Resource(uri=uri, name=name, description=desc,  # type: ignore[arg-type]
-                     mimeType="application/json")
+    # uri is our own constant str (the SDK types it AnyUrl; pydantic coerces at runtime), and
+    # mimeType is the wire name — from_wire covers both, see mcp_compat.
+    return [mcp_compat.from_wire(Resource, uri=uri, name=name, description=desc,
+                                 mimeType="application/json")
             for uri, (name, desc) in _RESOURCES.items()]
 
 
