@@ -22,14 +22,13 @@ from __future__ import annotations
 import contextvars
 import re
 from collections.abc import Awaitable, Callable
-from typing import Any, TypeVar
+from typing import Any
 
 import jsonschema
 from mcp import types as t
 
 _MISSING = object()
 _SNAKE = re.compile(r"(?<!^)([A-Z])")
-_M = TypeVar("_M")
 
 # 1.x publishes the live request context on the server; 2.x hands it to the handler instead.
 # The adapters below stash it here so `request_ctx()` answers the same question either way.
