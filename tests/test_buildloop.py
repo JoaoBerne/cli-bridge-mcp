@@ -232,14 +232,21 @@ def test_job_cancel_propagates(repo, tmp_path):
 
 # ── lock held for the whole build ─────────────────────────────────────────────────────────────
 
-def test_second_build_same_zone_refused_while_first_holds_lock(repo, tmp_path):
-    # Acquire the zone lock out-of-band, then a build on that zone must refuse fast.
-    zone_rel = "frontend"
-    with buildloop.worktrees._zone_lock(str(repo), zone_rel):
-        report = asyncio.run(buildloop.run_build(
-            _state(tmp_path), run_lane=_writer_fake([]), lane=_lane(),
-            args={"task": "t", "target_dir": str(repo), "zone": "frontend"}, steer_grace_s=0))
-    assert "already running on zone" in report
+def test_second_build_same_zone_waits_while_first_holds_lock(repo, tmp_path):
+    # Hold the zone lock out-of-band: a build on that zone must not start until it is released.
+    prompts = []
+
+    async def scenario():
+        async with buildloop.worktrees._zone_lock(str(repo), "frontend"):
+            task = asyncio.create_task(buildloop.run_build(
+                _state(tmp_path), run_lane=_writer_fake(prompts), lane=_lane(),
+                args={"task": "t", "target_dir": str(repo), "zone": "frontend"}, steer_grace_s=0))
+            await asyncio.sleep(0.1)
+            assert prompts == [] and not task.done()           # parked behind the held lock
+        return await task
+
+    assert "built" in asyncio.run(scenario())
+    assert len(prompts) == 1                                    # ran once the lock was released
 
 
 def test_content_edit_of_untracked_file_is_not_a_zero_files_turn(repo, tmp_path):

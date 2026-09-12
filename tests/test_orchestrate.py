@@ -575,6 +575,43 @@ def test_converge_revise_then_converge_two_rounds():
     assert "CONVERGED" in report and "Round 2" in report
 
 
+def _converge_with(arbiter_ruling, peer_reply):
+    tel = FakeTelemetry()
+    lanes = _converge_lanes()
+
+    async def rl(lane, args, *, tool="ask", terse=True):
+        t = args["task"]
+        if "You are the ARBITER. Judge the PLAN" in t:
+            return RunResult(True, "VERDICT: APPROVE", "ok", 1)
+        if "Rule on EACH" in t:
+            return RunResult(True, arbiter_ruling, "ok", 1)
+        if "You are an independent reviewer" in t:
+            return peer_reply
+        return RunResult(True, "PLAN", "ok", 1)
+
+    return asyncio.run(orchestrate.converge(
+        run_lane=rl, resolve_lane=lanes.get, default_lanes=list(lanes.values()),
+        telemetry=tel, task="q", author_lane="gpt", max_rounds=1))
+
+
+def test_converge_arbiter_cannot_self_approve_when_no_peer_responded():
+    report = _converge_with("[]", RunResult(False, "", "timeout", 1))      # the peer lane died
+    assert "UNRESOLVED" in report and "(no-run)" in report                # peers must carry it
+
+
+def test_converge_reasonless_dismiss_counts_as_accepted_blocker():
+    report = _converge_with('[{"id":"ReviewerA-1","decision":"dismiss","reason":""}]',
+                            RunResult(True, '[{"title":"bug","detail":"d"}]\nSTANCE: APPROVE', "ok", 1))
+    assert "UNRESOLVED" in report and "Unresolved blocking issues" in report and "bug" in report
+
+
+def test_converge_deferred_issue_is_residual_not_blocking():
+    report = _converge_with('[{"id":"ReviewerA-1","decision":"defer","reason":"later"}]',
+                            RunResult(True, '[{"category":"performance","title":"slow path"}]\n'
+                                            "STANCE: APPROVE", "ok", 1))
+    assert "CONVERGED" in report and "Deferred (non-blocking)" in report and "slow path" in report
+
+
 def test_converge_needs_a_distinct_peer():
     tel = FakeTelemetry()
     lanes = {k: _lane(k) for k in ("gpt", "codex")}                      # both openai: no peer left

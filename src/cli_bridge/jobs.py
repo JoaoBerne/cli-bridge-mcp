@@ -29,7 +29,7 @@ class Job:
     preview: str
     created_at: float
     status: str = RUNNING
-    result: str | None = None
+    result: str | None = None       # only when the spill to disk failed
     error: str | None = None
     result_path: str | None = None
     task: asyncio.Task | None = field(default=None, repr=False)
@@ -44,7 +44,7 @@ def _new_id() -> str:
 
 def _spill(job_id: str, text: str) -> str | None:
     """Persist a finished job's result to the overflow dir so it can be fetched later (and,
-    if huge, streamed selectively). Best-effort — the in-memory copy is the primary store."""
+    if huge, streamed selectively). None if the write failed."""
     try:
         os.makedirs(config.OVERFLOW_DIR, exist_ok=True)
         path = os.path.join(config.OVERFLOW_DIR, f"{job_id}.txt")
@@ -78,8 +78,9 @@ def _read(path: str | None) -> str | None:
 async def _run(job: Job, make_coro: Callable[[], Awaitable[str]]) -> None:
     try:
         result = await make_coro()
-        job.result = result
         job.result_path = _spill(job.id, result)
+        if job.result_path is None:
+            job.result = result             # spill failed: keep it in memory
         job.status = SUCCEEDED
         telemetry.job_put(job.id, job.kind, SUCCEEDED, job.preview, result_path=job.result_path)
     except asyncio.CancelledError:

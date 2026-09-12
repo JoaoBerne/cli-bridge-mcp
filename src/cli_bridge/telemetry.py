@@ -12,7 +12,6 @@ every call is best-effort and must NEVER break a delegation if the DB is unavail
 from __future__ import annotations
 
 import contextlib
-import hashlib
 import json
 import os
 import sqlite3
@@ -60,13 +59,11 @@ CREATE TABLE IF NOT EXISTS runs (
   model TEXT,
   status TEXT NOT NULL,
   kind TEXT NOT NULL,
-  task_hash TEXT,
   task_preview TEXT,
   duration_ms INTEGER,
   output_chars INTEGER,
   input_chars INTEGER NOT NULL DEFAULT 0,
-  started_at REAL NOT NULL,
-  role TEXT NOT NULL DEFAULT ''
+  started_at REAL NOT NULL
 );
 CREATE TABLE IF NOT EXISTS lane_state (
   lane TEXT PRIMARY KEY,
@@ -155,7 +152,6 @@ CREATE INDEX IF NOT EXISTS idx_jury_outcomes ON jury_outcomes(lane, source);
 _MIGRATIONS = (
     ("runs", "input_chars", "INTEGER NOT NULL DEFAULT 0"),
     ("lane_state", "consecutive_empties", "INTEGER NOT NULL DEFAULT 0"),
-    ("runs", "role", "TEXT NOT NULL DEFAULT ''"),
 )
 
 
@@ -174,14 +170,10 @@ class RunStart:
     model: str
     task: str
     started_at: float
-    role: str = ""
 
 
-def start(tool: str, lane: str, model: str, task: str, role: str = "") -> RunStart:
-    # `role` is RECORDED, not acted on: at typical local volumes a (lane, role) bucket gets
-    # ~1-2 observations/week — far below the statistical power a routing decision needs. The
-    # column exists so long-horizon users can inspect their own data; no recommender on top.
-    return RunStart(tool=tool, lane=lane, model=model, task=task, started_at=_now(), role=role)
+def start(tool: str, lane: str, model: str, task: str) -> RunStart:
+    return RunStart(tool=tool, lane=lane, model=model, task=task, started_at=_now())
 
 
 def _store_transcripts() -> bool:
@@ -194,17 +186,16 @@ def record(run: RunStart, ok: bool, kind: str, output_chars: int, input_chars: i
     if conn is None:
         return
     duration_ms = int((_now() - run.started_at) * 1000)
-    task_hash = hashlib.sha1(run.task.encode("utf-8", "replace")).hexdigest()[:16]
     preview = (run.task[:120] if _store_transcripts() else run.task[:60]).replace("\n", " ")
     status = "ok" if ok else "error"
     try:
         with _LOCK:
             conn.execute(
-                "INSERT INTO runs (tool, lane, model, status, kind, task_hash, task_preview, "
-                "duration_ms, output_chars, input_chars, started_at, role) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                (run.tool, run.lane, run.model, status, kind, task_hash, preview,
-                 duration_ms, output_chars, input_chars, run.started_at, run.role))
+                "INSERT INTO runs (tool, lane, model, status, kind, task_preview, "
+                "duration_ms, output_chars, input_chars, started_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (run.tool, run.lane, run.model, status, kind, preview,
+                 duration_ms, output_chars, input_chars, run.started_at))
             _update_lane_state(conn, run.lane, ok, kind, run.model)
             conn.commit()
     except sqlite3.Error:

@@ -4,7 +4,6 @@ contract. Uses a real temp git repo (git only — no AI CLI, no network). The ag
 import asyncio
 import os
 import subprocess
-import sys
 
 import pytest
 
@@ -176,29 +175,20 @@ def test_direct_build_text_only_has_no_artifacts_section(repo):
 
 # ── per-zone lock ───────────────────────────────────────────────────────────────────────────
 
-def test_zone_lock_same_zone_refuses_second(tmp_path):
-    td = str(tmp_path)
-    with worktrees._zone_lock(td, "frontend"):
-        with pytest.raises(worktrees._BuildLocked):
-            with worktrees._zone_lock(td, "frontend"):
-                pass
+def test_zone_lock_same_zone_serialises(repo):
+    order = []
 
+    async def slow_agent(lane, args, *, tool="ask", terse=True):
+        order.append("in")
+        await asyncio.sleep(0.05)
+        order.append("out")
+        return RunResult(True, "ok", "ok", latency_ms=10)
 
-def test_zone_lock_disjoint_zones_both_held(tmp_path):
-    td = str(tmp_path)
-    with worktrees._zone_lock(td, "frontend"):
-        with worktrees._zone_lock(td, "backend"):     # different zone → no contention
-            pass
+    async def two():
+        a = {"task": "t", "target_dir": str(repo), "zone": "frontend"}
+        return await asyncio.gather(worktrees.ask_build_direct(_lane(), a, slow_agent),
+                                    worktrees.ask_build_direct(_lane(), a, slow_agent))
 
-
-@pytest.mark.skipif(sys.platform == "win32",
-                    reason="dead-pid lock reclaim is POSIX-only (Windows: lock is conservative, "
-                           "the error message tells the user to delete a stale lock)")
-def test_zone_lock_reclaims_dead_pid(tmp_path):
-    td = str(tmp_path)
-    path = worktrees._lock_path(td, "frontend")
-    with open(path, "w") as fh:
-        fh.write("999999999 123")                     # a pid that (almost certainly) does not exist
-    with worktrees._zone_lock(td, "frontend"):        # stale lock → reclaimed
-        pass
-    assert not os.path.exists(path)                    # released on exit
+    for report in asyncio.run(two()):
+        assert "# Direct build" in report
+    assert order == ["in", "out", "in", "out"]         # never two agents in one zone at once

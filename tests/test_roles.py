@@ -90,21 +90,6 @@ def test_doctor_surfaces_broken_roles_file(tmp_path, monkeypatch):
     assert "Roles file NOT loaded" in out
 
 
-def test_run_records_role_column(tmp_path, monkeypatch):
-    from cli_bridge import telemetry
-    monkeypatch.setenv("CLI_BRIDGE_STATE_DB", str(tmp_path / "state.sqlite"))
-    monkeypatch.setenv("CLI_BRIDGE_TELEMETRY", "on")
-    telemetry._reset_for_tests()
-    try:
-        rec = telemetry.start("ask", "fakelane", "m", "t", role="security")
-        telemetry.record(rec, True, "ok", output_chars=1)
-        conn = telemetry._connect()
-        row = conn.execute("SELECT role FROM runs ORDER BY id DESC LIMIT 1").fetchone()
-        assert row[0] == "security"
-    finally:
-        telemetry._reset_for_tests()
-
-
 def test_example_roles_file_is_valid():
     from pathlib import Path
     path = Path(__file__).resolve().parent.parent / "examples" / "roles.example.json"

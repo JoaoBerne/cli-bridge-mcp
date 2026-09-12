@@ -513,71 +513,56 @@ def _opencode_default_model(bin_name: str) -> str:
     return _current_opencode_free_model(bin_name) or _OPENCODE_FREE_SEED
 
 
-# TTL cache instead of @lru_cache: lru_cache would memoize a "no free model" result forever,
-# so installing opencode (or a new free model appearing) after the first probe would never be
-# picked up. A short TTL re-probes periodically; a positive result is cached longer.
-_OPENCODE_MODEL_TTL_S = 300
+# TTL cache instead of @lru_cache: lru_cache would memoize a "no model" result forever, so
+# installing the CLI (or a new model appearing / being pulled) after the first probe would never
+# be picked up. A short TTL re-probes periodically; a failure returns "" and is NOT cached.
+_MODEL_PROBE_TTL_S = 300
 _opencode_model_cache: dict[str, tuple[float, str]] = {}
+_ollama_model_cache: dict[str, tuple[float, str]] = {}
+
+
+def _probe_cached(cache: dict, argv: list[str], pick, timeout: int = 5) -> str:
+    """Run `argv`, hand its non-empty stripped stdout lines to `pick`, cache the pick per binary."""
+    import time
+    now = time.time()
+    hit = cache.get(argv[0])
+    if hit and now - hit[0] < _MODEL_PROBE_TTL_S:
+        return hit[1]
+    try:
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=max(1, timeout),
+                              check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""  # transient failure: don't cache, re-probe next call
+    if proc.returncode != 0:
+        return ""
+    result = pick([line.strip() for line in proc.stdout.splitlines() if line.strip()])
+    cache[argv[0]] = (now, result)
+    return result
 
 
 def _current_opencode_free_model(bin_name: str) -> str:
-    import time
-    now = time.time()
-    hit = _opencode_model_cache.get(bin_name)
-    if hit and now - hit[0] < _OPENCODE_MODEL_TTL_S:
-        return hit[1]
     try:
         timeout = int(os.environ.get("CLI_BRIDGE_OPENCODE_MODELS_TIMEOUT", "").strip()
                       or _OPENCODE_MODELS_TIMEOUT_S)
     except ValueError:
         timeout = _OPENCODE_MODELS_TIMEOUT_S
-    try:
-        proc = subprocess.run([bin_name, "models"], capture_output=True, text=True,
-                              timeout=max(1, timeout), check=False)
-    except (OSError, subprocess.TimeoutExpired):
-        return ""  # transient failure: don't cache, re-probe next call
-    if proc.returncode != 0:
-        return ""
-    models = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
     # Cost-safety: ONLY the `-free` Zen tier is $0. A bare `opencode/<model>` (Zen) bills
     # per-token at API cost, and `opencode-go/*` spends prepaid credits — neither is a safe
     # DEFAULT. So an empty model resolves only to a `-free` model, never silently to a paid one.
     # De-pinned + future-proof: pick by PATTERN (any `-free`), sorted for a stable choice — so a
     # retired free model is replaced by whatever `-free` model exists THEN, with no code change.
-    free = sorted(m for m in models if m.startswith("opencode/") and m.endswith("-free"))
-    result = free[0] if free else ""
-    _opencode_model_cache[bin_name] = (now, result)
-    return result
-
-
-# ollama requires a model arg (`ollama run <model>`), so an empty model must resolve to one that
-# is actually pulled. Mirror the opencode probe: DISCOVER live, never hardcode an id. A short TTL
-# picks up a freshly `ollama pull`ed model; "" on failure re-probes next call.
-_OLLAMA_MODEL_TTL_S = 300
-_ollama_model_cache: dict[str, tuple[float, str]] = {}
+    return _probe_cached(_opencode_model_cache, [bin_name, "models"], lambda models: next(
+        iter(sorted(m for m in models if m.startswith("opencode/") and m.endswith("-free"))), ""),
+        timeout)
 
 
 def _current_ollama_model(bin_name: str) -> str:
-    import time
-    now = time.time()
-    hit = _ollama_model_cache.get(bin_name)
-    if hit and now - hit[0] < _OLLAMA_MODEL_TTL_S:
-        return hit[1]
-    try:
-        proc = subprocess.run([bin_name, "list"], capture_output=True, text=True,
-                              timeout=5, check=False)
-    except (OSError, subprocess.TimeoutExpired):
-        return ""  # transient failure: don't cache, re-probe next call
-    if proc.returncode != 0:
-        return ""
-    rows = [line for line in proc.stdout.splitlines() if line.strip()]
-    # The first row is the header (NAME ID SIZE MODIFIED). Skip it UNCONDITIONALLY rather than
-    # matching the literal header text — ollama may localize or reorder columns. Take the first
-    # column (model name) of the first model row.
-    models = rows[1:]
-    result = models[0].split()[0] if models else ""
-    _ollama_model_cache[bin_name] = (now, result)
-    return result
+    # ollama requires a model arg (`ollama run <model>`), so an empty model must resolve to one
+    # that is actually pulled. `ollama list` prints a header row (NAME ID SIZE MODIFIED) then one
+    # row per model: skip the header UNCONDITIONALLY (ollama may localize or reorder columns) and
+    # take the first column of the first model row.
+    return _probe_cached(_ollama_model_cache, [bin_name, "list"],
+                         lambda rows: rows[1].split()[0] if len(rows) > 1 else "")
 
 
 # Cost facts (cost_default / cost_note / docs/COSTS.md) were last verified against vendor

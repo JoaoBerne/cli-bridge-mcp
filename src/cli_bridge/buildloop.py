@@ -32,7 +32,6 @@ import asyncio
 import contextlib
 import os
 import subprocess
-import time
 from dataclasses import dataclass, field
 
 from . import worktrees
@@ -60,6 +59,7 @@ class BuildState:
     note: str = "starting"
     steer_q: list[str] = field(default_factory=list)
     interrupt_requested: bool = False
+    steer_evt: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
     turn_task: asyncio.Task | None = field(default=None, repr=False)
 
 
@@ -79,8 +79,10 @@ def steer(job_id: str, instruction: str, interrupt: bool = False) -> str:
     instruction = (instruction or "").strip()
     if instruction:
         st.steer_q.append(instruction)
+        st.steer_evt.set()
     if interrupt:
         st.interrupt_requested = True
+        st.steer_evt.set()
         if st.turn_task is not None and not st.turn_task.done():
             st.turn_task.cancel()
         return ("interrupting the current turn; files written so far are kept"
@@ -259,23 +261,20 @@ async def run_build(state: BuildState, *, run_lane, lane, args: dict,
     model, effort = args.get("model"), args.get("effort")
     timeout_s = args.get("timeout_s")
 
-    try:
-        with worktrees._zone_lock(target_dir, zone_rel):
-            before0 = worktrees._porcelain(root)
-            dirty = sorted(p for p, st in before0.items()
-                           if st != "??" and worktrees._in_zone(p, zone_rel))
-            if dirty and not confirm_dirty:
-                return ("[error] zone has uncommitted TRACKED changes; commit/stash them or pass "
-                        f"confirm_dirty=true. Dirty: {', '.join(dirty[:20])}")
-            _append(state.log_path,
-                    f"# build start · lane={lane.display} · zone={zone_label}"
-                    f"{' · ' + scaffold_note if scaffold_note else ''}\n")
-            return await _loop(state, run_lane=run_lane, lane=lane, task=task, interface=interface,
-                               dod_text=dod_text, dod_cmd=dod_cmd, model=model, effort=effort,
-                               timeout_s=timeout_s, before0=before0, scaffold_note=scaffold_note,
-                               steer_grace_s=steer_grace_s)
-    except worktrees._BuildLocked as e:
-        return f"[error] {e}"
+    async with worktrees._zone_lock(target_dir, zone_rel):
+        before0 = worktrees._porcelain(root)
+        dirty = sorted(p for p, st in before0.items()
+                       if st != "??" and worktrees._in_zone(p, zone_rel))
+        if dirty and not confirm_dirty:
+            return ("[error] zone has uncommitted TRACKED changes; commit/stash them or pass "
+                    f"confirm_dirty=true. Dirty: {', '.join(dirty[:20])}")
+        _append(state.log_path,
+                f"# build start · lane={lane.display} · zone={zone_label}"
+                f"{' · ' + scaffold_note if scaffold_note else ''}\n")
+        return await _loop(state, run_lane=run_lane, lane=lane, task=task, interface=interface,
+                           dod_text=dod_text, dod_cmd=dod_cmd, model=model, effort=effort,
+                           timeout_s=timeout_s, before0=before0, scaffold_note=scaffold_note,
+                           steer_grace_s=steer_grace_s)
 
 
 async def _loop(state, *, run_lane, lane, task, interface, dod_text, dod_cmd, model, effort,
@@ -355,17 +354,14 @@ async def _loop(state, *, run_lane, lane, task, interface, dod_text, dod_cmd, mo
 
 
 async def _wait_for_steer(state: BuildState, grace_s: float) -> bool:
-    """After a no-DoD turn with nothing queued, poll briefly for a late steer/interrupt so the
+    """After a no-DoD turn with nothing queued, wait briefly for a late steer/interrupt so the
     user can react to what they just watched. Returns True if something arrived."""
-    if grace_s <= 0:
-        return bool(state.steer_q) or state.interrupt_requested
-    state.note = "idle — send build_steer to continue, or it finishes shortly"
-    deadline = time.monotonic() + grace_s
-    while time.monotonic() < deadline:
-        if state.steer_q or state.interrupt_requested:
-            return True
-        await asyncio.sleep(0.2)
-    return False
+    if grace_s > 0:
+        state.note = "idle — send build_steer to continue, or it finishes shortly"
+        state.steer_evt.clear()
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(state.steer_evt.wait(), grace_s)
+    return bool(state.steer_q) or state.interrupt_requested
 
 
 def _report(state: BuildState, res, outcome: str, scaffold_note: str, *,

@@ -22,14 +22,13 @@ run is injected via `run_lane` so the orchestration is testable without an AI CL
 """
 from __future__ import annotations
 
+import asyncio
 import contextlib
-import hashlib
 import mimetypes
 import os
 import shutil
 import subprocess
 import tempfile
-import time
 
 from .lanes import LaneSpec
 
@@ -210,67 +209,13 @@ def _build_brief(task: str, zone_label: str, *, interface: str = "", dod: str = 
     return "\n".join(parts)
 
 
-class _BuildLocked(Exception):
-    """Raised when another build already holds this zone's lock."""
+# ponytail: in-process lock; two servers on one repo no longer serialise — bring back a file lock
+# if that happens.
+_ZONE_LOCKS: dict[tuple[str, str], asyncio.Lock] = {}
 
 
-def _lock_path(target_dir: str, zone_rel: str) -> str:
-    h = hashlib.sha256(f"{os.path.abspath(target_dir)}\x00{zone_rel}".encode()).hexdigest()[:16]
-    return os.path.join(tempfile.gettempdir(), f"cli-bridge-build-{h}.lock")
-
-
-def _pid_alive(pid: int) -> bool:
-    if os.name == "nt":
-        return True            # staleness reclaim is POSIX-only; never reclaim on Windows
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except (PermissionError, OSError):
-        return True            # exists but not ours, or unknown — treat as live (conservative)
-    return True
-
-
-def _read_lock_pid(path: str) -> int | None:
-    try:
-        with open(path) as fh:
-            return int(fh.read().split()[0])
-    except (OSError, ValueError, IndexError):
-        return None
-
-
-def _acquire(path: str) -> int | None:
-    try:
-        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    except FileExistsError:
-        return None
-    os.write(fd, f"{os.getpid()} {int(time.time())}".encode())
-    return fd
-
-
-@contextlib.contextmanager
-def _zone_lock(target_dir: str, zone_rel: str):
-    """Atomic per-ZONE lock (O_CREAT|O_EXCL, cross-platform). Two builds on DISJOINT zones of the
-    same repo run fine; two on the SAME zone — the second is refused. A lock left by a dead pid is
-    reclaimed once. The pid+timestamp is for staleness only, not ownership."""
-    path = _lock_path(target_dir, zone_rel)
-    fd = _acquire(path)
-    if fd is None:                                   # held — is the holder still alive?
-        old = _read_lock_pid(path)
-        if old is None or not _pid_alive(old):       # stale → reclaim once
-            with contextlib.suppress(OSError):
-                os.unlink(path)
-            fd = _acquire(path)
-    if fd is None:
-        raise _BuildLocked(
-            f"another build is already running on zone '{zone_rel}' of {target_dir} "
-            f"(lock {path}); wait for it, or delete the lock file if it is stale.")
-    try:
-        yield
-    finally:
-        os.close(fd)
-        with contextlib.suppress(OSError):
-            os.unlink(path)
+def _zone_lock(target_dir: str, zone_rel: str) -> asyncio.Lock:
+    return _ZONE_LOCKS.setdefault((os.path.abspath(target_dir), zone_rel), asyncio.Lock())
 
 
 def _relposix(p: str) -> str:
@@ -445,37 +390,34 @@ async def ask_build_direct(lane: LaneSpec, args: dict, run_lane,
         zone_label = raw_target if raw_target != "." else target_dir
     os.makedirs(zone_abs, exist_ok=True)
 
-    try:
-        with _zone_lock(target_dir, zone_rel):
-            before = _porcelain(root)
-            dirty = sorted(p for p, st in before.items()
-                           if st != "??" and _in_zone(p, zone_rel))
-            if dirty and not confirm_dirty:
-                listing = "\n".join(f"  {p}" for p in dirty[:20])
-                return (f"[error] zone '{zone_label}' has uncommitted TRACKED changes — a direct "
-                        "build could clobber them. Commit/stash them, or pass confirm_dirty=true "
-                        f"to build anyway.\nDirty in zone:\n{listing}")
+    async with _zone_lock(target_dir, zone_rel):
+        before = _porcelain(root)
+        dirty = sorted(p for p, st in before.items()
+                       if st != "??" and _in_zone(p, zone_rel))
+        if dirty and not confirm_dirty:
+            listing = "\n".join(f"  {p}" for p in dirty[:20])
+            return (f"[error] zone '{zone_label}' has uncommitted TRACKED changes — a direct "
+                    "build could clobber them. Commit/stash them, or pass confirm_dirty=true "
+                    f"to build anyway.\nDirty in zone:\n{listing}")
 
-            brief = _build_brief(task, zone_label,
-                                 interface=str(args.get("interface") or ""),
-                                 dod=str(args.get("dod") or ""))
-            sub = {"task": brief, "agent": "build", "cwd": target_dir,
-                   "model": args.get("model"), "effort": args.get("effort"),
-                   "timeout_s": args.get("timeout_s")}
-            res = await run_lane(lane, sub, tool="ask_build")
+        brief = _build_brief(task, zone_label,
+                             interface=str(args.get("interface") or ""),
+                             dod=str(args.get("dod") or ""))
+        sub = {"task": brief, "agent": "build", "cwd": target_dir,
+               "model": args.get("model"), "effort": args.get("effort"),
+               "timeout_s": args.get("timeout_s")}
+        res = await run_lane(lane, sub, tool="ask_build")
 
-            after = _porcelain(root)
-            violations = _zone_violations(before, after, zone_rel)
-            if violations:
-                # Reject: undo the in-zone work (scoped), leave any escaped files for the user to
-                # inspect (auto-deleting them could destroy host work we can't attribute).
-                _revert_zone(root, zone_rel)
-                return _report_violation(lane, res, root, zone_label, violations)
+        after = _porcelain(root)
+        violations = _zone_violations(before, after, zone_rel)
+        if violations:
+            # Reject: undo the in-zone work (scoped), leave any escaped files for the user to
+            # inspect (auto-deleting them could destroy host work we can't attribute).
+            _revert_zone(root, zone_rel)
+            return _report_violation(lane, res, root, zone_label, violations)
 
-            artifacts = _zone_artifacts(root, zone_rel, before, after)
-            diff = _zone_diff(root, zone_rel, exclude=[a["path"] for a in artifacts])
-    except _BuildLocked as e:
-        return f"[error] {e}"
+        artifacts = _zone_artifacts(root, zone_rel, before, after)
+        diff = _zone_diff(root, zone_rel, exclude=[a["path"] for a in artifacts])
 
     return _report_direct(lane, res, diff, root, zone_label, scaffold_note, artifacts)
 

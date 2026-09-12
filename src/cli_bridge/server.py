@@ -576,7 +576,7 @@ async def _run_lane(lane: LaneSpec, args: dict, *, tool: str = "ask",
     # Opt-in read-only guard: snapshot the workspace before a 'plan' delegate runs (no-op unless
     # CLI_BRIDGE_VERIFY_PLAN_READONLY is on and cwd is a git repo).
     ro_before, ro_root = _readonly_guard_snapshot(agent, expanded)
-    rec = telemetry.start(tool, lane.key, model, task, role=_str(args, "role"))
+    rec = telemetry.start(tool, lane.key, model, task)
     timeout = _timeout(args.get("timeout_s"))
     t0 = time.monotonic()
     # A spawn carrying STATE is not idempotent, so replaying it does not retry — it corrupts.

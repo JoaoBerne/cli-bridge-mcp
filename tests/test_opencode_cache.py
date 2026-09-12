@@ -41,7 +41,7 @@ def test_positive_result_is_cached(monkeypatch):
 
 def test_ttl_expiry_reprobes(monkeypatch):
     lanes._opencode_model_cache.clear()
-    monkeypatch.setattr(lanes, "_OPENCODE_MODEL_TTL_S", 0)            # everything is stale
+    monkeypatch.setattr(lanes, "_MODEL_PROBE_TTL_S", 0)            # everything is stale
     calls = {"n": 0}
 
     def fake_run(argv, **kw):
