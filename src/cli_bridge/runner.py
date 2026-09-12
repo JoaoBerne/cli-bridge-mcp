@@ -310,8 +310,13 @@ async def _arun_streamed(proc, argv: list[str], timeout_s: int, on_line, log_pat
         await _terminate(proc)
         if log_fh:
             log_fh.close()
+        partial = ("".join(out_lines) or "".join(err_lines)).strip()   # keep what streamed before the kill
         log.error("%s timed out after %ss (process group killed)", argv[0], timeout_s)
-        return RunResult(False, f"`{argv[0]}` timed out after {timeout_s}s", "timeout")
+        return RunResult(
+            False,
+            _clip(f"`{argv[0]}` timed out after {timeout_s}s"
+                  + (f"\n{partial}" if partial else "")),
+            "timeout")
     except asyncio.CancelledError:
         if guard:
             guard.cancel()

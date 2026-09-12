@@ -117,6 +117,17 @@ def test_timeout_kills_grandchild():
         os.remove(marker)
 
 
+def test_timeout_preserves_streamed_partial():
+    # streamed path (on_line set): a line arrives, then the process hangs past the timeout.
+    # Regression: the timeout branch used to drop already-streamed output — the sibling `stalled`
+    # branch kept it. no_output_timeout=0 disables the stall guard so the overall timeout fires.
+    r = asyncio.run(runner.arun(
+        ["sh", "-c", "echo PARTIAL_MARKER; sleep 30"], 2,
+        on_line=lambda *_: None, no_output_timeout=0))
+    assert not r.ok and r.kind == "timeout"
+    assert "PARTIAL_MARKER" in r.output
+
+
 def test_output_capped():
     r = _run(["sh", "-c", "yes x | head -c 300000"], 30)
     assert "clipped at" in r.output and len(r.output) < runner.MAX_OUTPUT_CHARS + 500
