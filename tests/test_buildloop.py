@@ -78,6 +78,24 @@ def test_steer_block_appears_in_next_turn(repo, tmp_path):
     assert "built" in report
 
 
+def test_run_build_accepts_an_existing_file_as_zone(repo, tmp_path):
+    # Same FileExistsError as the sync direct build, on the steerable (async) path.
+    (repo / "calc.py").write_text("v1\n")
+    _git(["add", "-A"], repo)
+    _git(["commit", "-qm", "calc"], repo)
+
+    async def fake(lane, args, *, tool="ask", terse=True):
+        with open(os.path.join(args["cwd"], "calc.py"), "w") as fh:
+            fh.write("v2\n")
+        return RunResult(True, "edited calc.py", "ok", latency_ms=10)
+    report = asyncio.run(buildloop.run_build(
+        _state(tmp_path), run_lane=fake, lane=_lane(),
+        args={"task": "t", "target_dir": str(repo), "zone": "calc.py", "dod_cmd": ["true"]},
+        steer_grace_s=0))
+    assert "done (Definition of Done passed)" in report
+    assert (repo / "calc.py").read_text() == "v2\n"
+
+
 # ── DoD gate ────────────────────────────────────────────────────────────────────────────────
 
 def test_dod_pass_marks_done_first_turn(repo, tmp_path):

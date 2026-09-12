@@ -113,6 +113,17 @@ def test_direct_in_zone_build_leaves_host_work_alone(repo):
     assert (repo / "backend" / "server.py").read_text() == "# host\n"
 
 
+def test_direct_build_accepts_an_existing_file_as_zone(repo):
+    # A zone may be a single tracked FILE. makedirs(zone, exist_ok=True) used to raise
+    # FileExistsError on it, so a direct build on zone="calc.py" crashed before running.
+    (repo / "calc.py").write_text("v1\n")
+    _git(["add", "-A"], repo)
+    _git(["commit", "-qm", "calc"], repo)
+    report = _run({"task": "t", "target_dir": str(repo), "zone": "calc.py"}, {"calc.py": "v2\n"})
+    assert "# Direct build" in report and "REJECTED" not in report
+    assert (repo / "calc.py").read_text() == "v2\n"
+
+
 # ── dirty-zone guard ────────────────────────────────────────────────────────────────────────
 
 def _commit_tracked_front(repo):

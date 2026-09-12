@@ -388,7 +388,10 @@ async def ask_build_direct(lane: LaneSpec, args: dict, run_lane,
     zone_label = os.path.relpath(zone_abs, target_dir)
     if zone_label == ".":
         zone_label = raw_target if raw_target != "." else target_dir
-    os.makedirs(zone_abs, exist_ok=True)
+    # Create a NEW zone dir; an existing zone is left as is, and it may be a file ('calc.py'):
+    # makedirs(exist_ok=True) still raises FileExistsError on an existing file.
+    if not os.path.exists(zone_abs):
+        os.makedirs(zone_abs)
 
     async with _zone_lock(target_dir, zone_rel):
         before = _porcelain(root)
