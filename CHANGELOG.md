@@ -6,6 +6,9 @@ All notable changes to this project are documented here. The format follows
 
 ## 0.3.0 — unreleased
 
+- Requires Python 3.12+ (was 3.10; 3.10 reaches end of life in October 2026). CI runs 3.12, 3.13 and 3.14.
+- Marketing copy removed: banner, badges wall, `docs/COMPARISON.md`, and the MCP instructions text is now a plain tool list.
+
 "Too much stuff, nobody can follow it." The MCP surface shrinks from ~37 tool names to 15 fixed
 tools + `ask_<lane>`, and the ring of things bolted on around the core is gone. Nothing you
 could do before is lost: every removed tool folds into a parameter of one that stays.

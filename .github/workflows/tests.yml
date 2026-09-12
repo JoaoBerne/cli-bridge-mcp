@@ -42,17 +42,17 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.12", "3.13", "3.14"]
         include:
           # prove portability (a stated invariant). macOS minutes bill at 10× on GitHub-hosted
           # runners, so we keep a single macOS job (newest Python) and cover both ends of the
           # version range on Windows (2×) instead. Full cross-product on demand via workflow_dispatch.
           - os: macos-latest
-            python-version: "3.13"
+            python-version: "3.14"
           - os: windows-latest
-            python-version: "3.10"
+            python-version: "3.12"
           - os: windows-latest
-            python-version: "3.13"
+            python-version: "3.14"
     steps:
       - uses: actions/checkout@v5
       - name: Set up Python ${{ matrix.python-version }}

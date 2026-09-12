@@ -1,23 +1,15 @@
 <!-- mcp-name: io.github.JoaoBerne/cli-bridge-mcp -->
-<div align="center">
-
-<img src="https://raw.githubusercontent.com/JoaoBerne/cli-bridge-mcp/main/assets/banner.gif" width="860" alt="cli-bridge — your assistant borrows the other AI CLIs you already have">
-
-</div>
-
 # cli-bridge
 
 ![CI](https://github.com/JoaoBerne/cli-bridge-mcp/actions/workflows/tests.yml/badge.svg)
 ![PyPI](https://img.shields.io/pypi/v/cli-bridge-mcp)
-![python](https://img.shields.io/badge/python-3.10%2B-blue)
-![license](https://img.shields.io/badge/license-Apache%202.0-green)
 
 A [Model Context Protocol](https://modelcontextprotocol.io) server that lets the AI assistant
 you're talking to consult the *other* AI CLIs installed on your machine — Claude Code, Codex,
 Gemini, Mistral, opencode, Ollama, Apple `fm`, … Each lane spawns the official CLI as a
-subprocess, exactly as you would by hand: no API keys, no token extraction, read-only by default.
+subprocess: no API keys, no token extraction, read-only by default.
 
-> stdlib + `mcp` only · no Node · no daemon · works on `mcp` 1.x and 2.x
+Dependencies: the Python stdlib and `mcp` (1.x or 2.x). No daemon.
 
 ## What it does
 
@@ -64,7 +56,7 @@ caller's `cwd`, else `CLI_BRIDGE_DEFAULT_CWD`, else the host's MCP workspace roo
 
 ## Install
 
-Prerequisites: Python 3.10+, [`uv`](https://docs.astral.sh/uv/), and at least one AI CLI installed and logged in.
+Prerequisites: Python 3.12+, [`uv`](https://docs.astral.sh/uv/), and at least one AI CLI installed and logged in.
 
 ```bash
 uvx --from cli-bridge-mcp cli-bridge doctor        # what cli-bridge can see (--deep probes each lane)
@@ -126,19 +118,9 @@ runtime table in [`examples/local-first-host.md`](examples/local-first-host.md))
 Crush, Amazon Q, Droid), and any OpenAI-compatible endpoint via `curl` or the bundled
 `cli-bridge-openai` bridge ([`examples/openai-compatible.lane.json`](examples/openai-compatible.lane.json)).
 
-## Compared with other multi-model MCP servers
-
-cli-bridge spawns official CLIs (no keys), enforces spend caps in sqlite, and delegates writes to
-a throwaway worktree; where the alternatives are stronger is in [`docs/COMPARISON.md`](docs/COMPARISON.md).
-
-## Does a council beat one strong model?
-
-Measure it yourself: the eval harness lives in [`benchmarks/`](benchmarks/README.md)
-(deterministic scorer, no LLM judge, outside the package).
-
 ## Known limitations
 
-- **Ban-safe = no token/key extraction**, not a guarantee: non-interactive use of a vendor CLI isn't formally sanctioned everywhere.
+- No token or key extraction, but non-interactive use of a vendor CLI isn't formally sanctioned everywhere.
 - **Async jobs are in-process**: a server restart marks running jobs `interrupted`. `batch_run` / `workflow` journal each task and resume via `resume_id`.
 - **The injection guard is heuristic.** Treat delegate output as data.
 - **Token/credit figures are estimates** (chars/4 × your `CREDITS_PER_1K`).
@@ -152,6 +134,7 @@ pytest -q            # no real CLI or network needed
 ruff check src/ tests/
 ```
 
+Eval harness (deterministic scorer, outside the package): [`benchmarks/`](benchmarks/README.md).
 History: [`CHANGELOG.md`](CHANGELOG.md). Layout and rules: [`AGENTS.md`](AGENTS.md), [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## License

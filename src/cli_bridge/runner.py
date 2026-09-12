@@ -234,7 +234,7 @@ async def _terminate(proc) -> None:
             return
     try:
         await asyncio.wait_for(proc.wait(), timeout=3)
-    except (asyncio.TimeoutError, ProcessLookupError):
+    except (TimeoutError, ProcessLookupError):
         try:
             _kill_tree(proc.pid, signal.SIGKILL)
         except (ProcessLookupError, PermissionError, OSError):
@@ -304,7 +304,7 @@ async def _arun_streamed(proc, argv: list[str], timeout_s: int, on_line, log_pat
 
     try:
         await asyncio.wait_for(core, timeout=timeout_s)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         if guard:
             guard.cancel()
         await _terminate(proc)
@@ -384,7 +384,7 @@ async def arun(argv: list[str], timeout_s: int, cwd: str | None = None,
 
     try:
         out_b, err_b = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         await _terminate(proc)
         log.error("%s timed out after %ss (process group killed)", argv[0], timeout_s)
         return RunResult(False, f"`{argv[0]}` timed out after {timeout_s}s", "timeout")
