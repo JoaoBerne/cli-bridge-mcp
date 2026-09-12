@@ -34,7 +34,7 @@ conversation that survives `/compact`. `conversations` lists or replays threads.
 15 fixed tools + one `ask_<lane>` per installed CLI:
 
 - **Consult**: `ask_<lane>`, `ask_all`, `ask_cascade`, `ask_best`, `conversations`, `list_models`
-- **Build**: `ask_build` (`mode=isolated` → diff, `mode=direct` → zone-guarded writes, `async=true` → steerable via `job`)
+- **Build**: `ask_build` (`mode=isolated` → diff, `mode=direct` → zone-guarded writes; with `mode=direct`, `async=true` → steerable via `job`)
 - **Review**: `review_diff` (`focus=code|security`), `debate` (`vote=judge|borda`), `workflow` (presets: `refine_plan`, `map_review`, `research_verify`, `fanout_compare`, `converge`, `premortem`, `test_plan`, `challenge`), `git_text` (`kind=commit|pr`)
 - **Operate**: `job` (`action=status|result|cancel|list|tail|steer`), `rate_lane`, `set_lane_cost`, `doctor`, `setup`
 
