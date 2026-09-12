@@ -600,12 +600,12 @@ async def converge(*, run_lane, resolve_lane, default_lanes, telemetry, task: st
         _rid, presults = await batch_run(ptasks, run_lane=run_lane, resolve_lane=resolve_lane,
                                          default_lane=panel[0], telemetry=telemetry, run_id=run_id,
                                          progress=progress)
-        peers, issues = [], []
+        peer_rows, issues = [], []
         for p, r in zip(panel, presults, strict=False):
             lab = labels[p.key]
             raised = _peer_issues(r["output"], lab) if r["ok"] else []
             issues += raised
-            peers.append({"peer": lab, "stance": _parse_stance(r["output"]) if r["ok"] else ABSTAIN,
+            peer_rows.append({"peer": lab, "stance": _parse_stance(r["output"]) if r["ok"] else ABSTAIN,
                           "responded": bool(r["ok"]), "issues": len(raised)})
         # 3. arbiter adjudicates EVERY issue with a mandatory reason (fail-closed in the parser)
         decision: dict[str, str] = {}
@@ -615,10 +615,10 @@ async def converge(*, run_lane, resolve_lane, default_lanes, telemetry, task: st
             decision = _parse_adjudications(jr.output if jr.ok else "", issues)
         accepted = [i for i in issues if decision.get(i.id) == ACCEPT]
         deferred = [i for i in issues if decision.get(i.id) == DEFER]
-        history.append({"round": rnd, "blind_verdict": blind, "peers": peers,
+        history.append({"round": rnd, "blind_verdict": blind, "peers": peer_rows,
                         "accepted": len(accepted), "deferred": len(deferred)})
         # 4. no-self-approval, fail-closed: the peers must carry it, not the arbiter alone
-        responders = [p for p in peers if p["responded"]]
+        responders = [p for p in peer_rows if p["responded"]]
         converged = (blind == APPROVE and bool(responders)
                      and all(p["stance"] == APPROVE for p in responders) and not accepted)
         if converged or rnd == max_rounds:

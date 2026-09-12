@@ -785,8 +785,8 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
         return [_emit(await fn(targets, args, _run_lane, progress=_emit_progress), label="debate")]
 
     if name == "git_text":
-        fn = {"commit": workflows.commit_msg, "pr": workflows.pr_describe}.get(_str(args, "kind"))
-        if fn is None:
+        git_fn = {"commit": workflows.commit_msg, "pr": workflows.pr_describe}.get(_str(args, "kind"))
+        if git_fn is None:
             return [TextContent(type="text", text="[error] kind must be commit or pr")]
         key = _str(args, "lane")
         if key:
@@ -794,7 +794,7 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
             targets = [ln] if ln else []
         else:
             targets = _ask_all_targets(lanes, _ask_all_include_paid(args))
-        return [_emit(await fn(targets, args, _run_lane), label="git_text")]
+        return [_emit(await git_fn(targets, args, _run_lane), label="git_text")]
 
     if name == "ask_build":
         key = _str(args, "lane")
@@ -1046,7 +1046,7 @@ async def _run_workflow_preset(args: dict, lanes: list[LaneSpec]) -> list[TextCo
     def _resolve(k):
         return _lane_by_key(k, lanes)
 
-    common = dict(run_lane=_run_lane, resolve_lane=_resolve, default_lanes=default_lanes,
+    common: dict[str, Any] = dict(run_lane=_run_lane, resolve_lane=_resolve, default_lanes=default_lanes,
                   telemetry=telemetry, run_id=_str(args, "resume_id"))
     judge = _str(args, "judge_lane") or None
     ln = _lane_by_key(_str(args, "lane"), lanes)
