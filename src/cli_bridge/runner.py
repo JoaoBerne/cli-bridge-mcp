@@ -87,6 +87,14 @@ def _is_policy_refusal(text: str) -> bool:
     return bool(_POLICY.search(text or ""))
 
 
+# A headless CLI can hit a tool it may not run, auto-deny it and exit 0 with an explanation
+# instead of an answer — `agy -p` prints "jetski: no output produced — a tool required the
+# "command" permission that headless mode cannot prompt for, so it was auto-denied". Without
+# this, that explanation is returned (and shown, and cached) as the lane's answer. Both phrases
+# must co-occur, so an answer that merely discusses denied permissions can't misfire.
+_TOOL_DENIED = re.compile(r"no output produced.*auto-denied", re.I | re.S)
+
+
 def _failure_kind(out: str, err: str) -> str:
     """Classify a delegate result's failure (shared by the exit-0 and non-zero paths)."""
     if _is_policy_refusal(out) or _is_policy_refusal(err):
@@ -159,6 +167,8 @@ class RunResult:
                      "lane is cooled down after repeated empties)",
             "policy": " - this CLI refused on usage-policy grounds; revise the request or skip "
                       "this lane",
+            "denied": " - this CLI's headless mode auto-denied a tool it needed; allow that tool "
+                      "in the CLI's own settings, or ask another lane",
             "stalled": " - this CLI produced no output for a long stretch and was killed; "
                        "retry or try another lane",
         }.get(self.kind, "")
@@ -207,6 +217,10 @@ def _ok_or_empty(out: str, err: str, argv: list[str]) -> RunResult:
     # streams AND the combined blob so a refusal split across stdout+stderr is still caught.
     if _is_policy_refusal(out) or _is_policy_refusal(err) or _is_policy_refusal(f"{out}\n{err}"):
         return RunResult(False, _clip(text), "policy", 0)
+    # Exit 0 but a tool was auto-denied and nothing was answered: soft failure, not an answer.
+    # Its own kind (not "empty") so it never benches the lane — it depends on the task, not quota.
+    if _TOOL_DENIED.search(f"{out}\n{err}"):
+        return RunResult(False, _clip(text), "denied", 0)
     return RunResult(True, _clip(text), "ok", 0)
 
 

@@ -94,6 +94,23 @@ def test_policy_refusal_split_across_streams():
     assert not r.ok and r.kind == "policy"
 
 
+_AGY_DENIED = ('jetski: no output produced — a tool required the "command" permission that '
+               'headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under '
+               'permissions.allow in settings.json.')
+
+
+def test_headless_tool_denial_is_soft_failure():
+    # agy -p exits 0 with this explanation instead of an answer: it must not pass as the answer.
+    r = _run(["sh", "-c", f"echo {repr(_AGY_DENIED)}"], 30)
+    assert not r.ok and r.kind == "denied" and "auto-denied" in r.output
+
+
+def test_tool_denial_fingerprint_does_not_misfire():
+    text = "Some CLIs auto-denied tools in the past; here is the answer: 42."
+    r = _run(["sh", "-c", f"echo {repr(text)}"], 30)
+    assert r.ok and r.kind == "ok"
+
+
 def test_failure_kind_unit():
     # Direct coverage of the shared classifier (council review asked for it).
     assert runner._failure_kind("", "RESOURCE_EXHAUSTED") == "quota"
