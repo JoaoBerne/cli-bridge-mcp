@@ -40,7 +40,7 @@ def test_instructions_cover_the_new_capabilities():
     instr = server.INSTRUCTIONS.lower()
     assert "round-table" in instr or "conversation" in instr
     assert "ask_build" in server.INSTRUCTIONS
-    assert "when not to" in instr          # the "don't convene for one-liners" guardrail
+    assert "trivial edits" in instr          # the "don't delegate one-liners" guardrail
 
 
 def test_setup_recommends_a_concrete_config(monkeypatch):

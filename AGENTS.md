@@ -39,7 +39,7 @@ src/cli_bridge/
   bridges/       # openai_compatible.py = cli-bridge-openai (urllib only; used by the applepcc lane and HTTP lanes)
 tests/           # pytest; unit + cross-host integration (no real CLI needed)
 benchmarks/      # eval harness (council vs single model), outside the package and CI: eval.py, tests/, fixtures/evalset/
-docs/            # TOOLS, ARCHITECTURE, HOSTS, BUDGET, COSTS, COMPARISON
+docs/            # TOOLS, ARCHITECTURE, HOSTS, BUDGET, COSTS
 examples/        # lane JSON recipes (local-runtime, apple-fm-serve, openai-compatible, community, free-apis), mcp.example.json, local-first-host.md
 plugin/          # Claude Code plugin manifest (wires the MCP server; no skills)
 assets/          # README banner/mark/social (generated, do not hand-edit)
