@@ -175,7 +175,8 @@ async def ask_best(lanes: list[LaneSpec], args: dict, *, run_lane, emit) -> list
         trace = cascade_trace(attempts, chosen=chosen).replace("cheapest→strongest", f"mode '{mode}'")
         hint = (f"\n_Tip: `rate_lane(lane=\"{chosen.key}\", mode=\"{mode}\", score=1..5)` to teach "
                 "the router which lane wins this kind of task on your machine._")
-        return [emit(f"{res.output}\n\n{trace}{hint}", label="ask_best")]
+        lessons = telemetry.render_lessons(mode)
+        return [emit(f"{res.output}\n\n{trace}{hint}{lessons}", label="ask_best")]
     return [TextContent(type="text", text=(
         f"[error] all lanes failed for mode '{mode}': "
         + ", ".join(f"{ln.key}={r.kind}" for ln, r in attempts)

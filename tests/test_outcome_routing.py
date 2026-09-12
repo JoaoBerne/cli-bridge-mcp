@@ -46,6 +46,33 @@ def test_rate_lane_noop_when_telemetry_off(monkeypatch):
     assert telemetry.rate_lane("gemini", "deep", 5) == {}
 
 
+# ── lessons: the note column is re-surfaced, not dead storage ────────────────────────────
+
+def test_lane_lessons_returns_recent_notes_by_mode():
+    telemetry.rate_lane("gpt", "code", 2, "missed a caller, no grep")
+    telemetry.rate_lane("gemini", "code", 5, "grepped callers first")
+    telemetry.rate_lane("gpt", "review", 3, "other mode note")
+    notes = [x["note"] for x in telemetry.lane_lessons("code")]
+    assert notes == ["grepped callers first", "missed a caller, no grep"]  # newest first
+    assert telemetry.lane_lessons("review") == [
+        {"lane": "gpt", "score": 3.0, "note": "other mode note"}]
+
+
+def test_lane_lessons_skips_empty_and_respects_limit():
+    telemetry.rate_lane("gpt", "code", 5)               # no note -> excluded
+    telemetry.rate_lane("gpt", "code", 4, "kept")
+    assert telemetry.lane_lessons("code") == [{"lane": "gpt", "score": 4.0, "note": "kept"}]
+    assert telemetry.lane_lessons("code", limit=0) == []
+
+
+def test_render_lessons_block_and_empty():
+    assert telemetry.render_lessons("code") == ""       # nothing rated yet
+    telemetry.rate_lane("gpt", "code", 2, "no grep")
+    block = telemetry.render_lessons("code")
+    assert "_Past lessons (mode 'code'):_" in block
+    assert "- gpt (2/5): no grep" in block
+
+
 # ── router: quality steers, but only with enough data ────────────────────────────────────
 
 def _two_free_lanes():

@@ -382,6 +382,36 @@ def lane_quality(mode: str = "") -> dict:
             for lane, n, avg in rows}
 
 
+def lane_lessons(mode: str = "", limit: int = 3) -> list[dict]:
+    """Recent non-empty rating notes for a task-type — the NARRATIVE the router learned,
+    surfaced to the host before it trusts a pick. Complements lane_quality's hidden numeric
+    avg (which is why a lane won/burned, not just how often). Best-effort: [] on error."""
+    conn = _connect()
+    if conn is None or limit < 1:
+        return []
+    try:
+        with _LOCK:
+            q = ("SELECT lane, score, note FROM lane_ratings WHERE note != '' "
+                 + ("AND mode=? " if mode else "")
+                 + "ORDER BY created_at DESC LIMIT ?")
+            params = (mode, limit) if mode else (limit,)
+            rows = conn.execute(q, params).fetchall()
+    except sqlite3.Error:
+        return []
+    return [{"lane": lane, "score": score, "note": note} for lane, score, note in rows]
+
+
+def render_lessons(mode: str = "", limit: int = 3) -> str:
+    """Markdown block of recent lessons for a mode, or '' if none. Appended to routing output
+    so the host reads the narrative before trusting the numeric pick. Best-effort: '' on error."""
+    lessons = lane_lessons(mode, limit)
+    if not lessons:
+        return ""
+    head = f"_Past lessons (mode '{mode}'):_" if mode else "_Past lessons:_"
+    body = "\n".join(f"- {x['lane']} ({x['score']:g}/5): {x['note']}" for x in lessons)
+    return f"\n\n{head}\n{body}"
+
+
 def jury_put(run_id: str, rows, source: str = "live") -> None:
     """Best-effort: record each verifier's jury vote vs the final verdict. `rows` = iterable of
     (lane, vote, final_verdict, agreed) where agreed is 1/0/None. This is the raw signal behind

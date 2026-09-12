@@ -780,9 +780,10 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
         if mode and mode in router.MODES:
             perf = telemetry.lane_perf()
             quality = telemetry.lane_quality(mode)
-            return [TextContent(type="text", text=router.explain_mode(
+            explain = router.explain_mode(
                 lanes, telemetry.cooldown_remaining, lambda k: perf.get(k, {}), mode, include_paid,
-                quality_of=lambda k: quality.get(k, {})))]
+                quality_of=lambda k: quality.get(k, {}))
+            return [TextContent(type="text", text=explain + telemetry.render_lessons(mode))]
         return [TextContent(type="text", text=router.explain(
             lanes, telemetry.cooldown_remaining, include_paid))]
 
