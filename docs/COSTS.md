@@ -21,7 +21,7 @@ Three exhaustion behaviours matter more than sticker price:
 
 ## 1. Genuinely free ($0, card-free where stated) — verified 2026-06
 
-### BYO-API curl lanes (the backbone of the $0 council — see `examples/free-apis.json`)
+### BYO-API curl lanes (the $0 lanes — see `examples/free-apis.json`)
 
 | Provider | Free models (June 2026) | Limits | Card? | Exhaustion | Source |
 |---|---|---|---|---|---|

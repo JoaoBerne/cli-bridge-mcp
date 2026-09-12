@@ -46,7 +46,7 @@ host (Claude/Codex/…) ──MCP/stdio──▶ cli-bridge ──spawn subproce
 | `preamble.py` | The terse response-style preamble prepended to delegate prompts. | Prose only — never on structured (JSON) workflows. |
 | `cli.py` | Human/CI entry point (`cli-bridge …`) over the same internals. | Thin wrappers. |
 
-Outside the package: `tests/` (no real CLI or network), `benchmarks/` (the council-vs-single eval
+Outside the package: `tests/` (no real CLI or network), `benchmarks/` (the several-models-vs-one eval
 harness, `PYTHONPATH=src python benchmarks/eval.py`), `examples/` (lane JSON recipes),
 `plugin/` (the Claude Code plugin manifest).
 

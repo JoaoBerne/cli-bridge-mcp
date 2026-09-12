@@ -1,7 +1,7 @@
 [project]
 name = "cli-bridge-mcp"
 version = "0.3.0"
-description = "Consult a council of AI CLIs (Gemini, GPT, Claude, Mistral, Qwen, Copilot, OpenCode…) from inside any MCP client — free and ban-safe."
+description = "Expose the other AI CLIs installed on your machine (Gemini, Codex, Claude Code, Mistral, opencode, Ollama…) as MCP tools. Spawns the official CLI; no API keys."
 readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.12"

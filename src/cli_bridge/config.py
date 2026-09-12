@@ -303,7 +303,7 @@ REVIEW_DEFAULT_TIMEOUT_S = int_env("CLI_BRIDGE_REVIEW_TIMEOUT_S", 180, 1, MAX_TI
 # Largest diff (chars) fed into a review prompt; bigger diffs are truncated with a note so the
 # prompt stays within model context instead of erroring or getting silently dropped.
 REVIEW_DIFF_MAX_CHARS = int_env("CLI_BRIDGE_REVIEW_DIFF_MAX_CHARS", 60000, 2000, 1_000_000)
-# Per-file cap (chars) for files injected into a debate/consensus CONTEXT PACK (the grounding
+# Per-file cap (chars) for files injected into a debate CONTEXT PACK (the grounding
 # contract): same truncate-with-a-marker policy as review diffs.
 CONTEXT_FILE_MAX_CHARS = int_env("CLI_BRIDGE_CONTEXT_FILE_MAX_CHARS", 16000, 500, 1_000_000)
 

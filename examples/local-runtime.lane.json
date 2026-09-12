@@ -5,7 +5,7 @@
     "//2": "offline, read-only. A lane auto-hides when its binary isn't on PATH, so unused entries are harmless.",
     "//3": "Per-runtime bin / argv / gotchas: the table at the end of examples/local-first-host.md.",
     "//4": "JURY CAVEAT: a local runtime of open weights correlates with OTHER local runtimes of the same",
-    "//5": "weights (ollama, lms, mlx, llama.cpp) — real jury decorrelation comes from distinct VENDORS, not a",
+    "//5": "weights (ollama, lms, mlx, llama.cpp) — real decorrelation between reviewers comes from distinct VENDORS, not a",
     "//6": "second runtime of the same model. Use these for $0/offline, not diversity.",
 
     "key": "lmstudio",

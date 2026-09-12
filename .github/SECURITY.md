@@ -22,7 +22,7 @@ cli-bridge handles two kinds of untrusted data:
 
 ### What cli-bridge does about it
 
-- **Ban-safe by construction.** It only ever spawns the official CLI you already run. It never
+- **No credential extraction, by construction.** It only ever spawns the official CLI you already run. It never
   extracts tokens, reads credential files, or sends your API keys anywhere. (Test: `test_isolation.py`.)
 - **No pollution of your CLI config.** The only things it writes are an overflow temp file, the
   local telemetry sqlite, and an optional log. Never to `~/.gemini`, `~/.codex`, etc.
@@ -33,7 +33,7 @@ cli-bridge handles two kinds of untrusted data:
   injection / tool-poisoning signals and, in `warn`, prepends a banner telling the host to treat
   the text as **data, not instructions**; in `strict`, it withholds the body. Runs after redaction.
 - **Read-only by default.** A delegate can only edit files with an explicit `agent: build`. The
-  recommended way to use write mode is **`ask_build_isolated`**, which runs the agent in a
+  recommended way to use write mode is **`ask_build`** (its default `mode=isolated`), which runs the agent in a
   throwaway git worktree and returns a diff — your real repository is never modified.
 - **Cost safety.** A missing/empty model never resolves to a paid model; `ask_all`/`ask_cascade`
   exclude limited/paid lanes by default.
@@ -44,7 +44,7 @@ cli-bridge handles two kinds of untrusted data:
 ### What it does NOT protect against
 
 - **It is not a sandbox.** A delegate CLI runs with your user's permissions. In `agent: build`
-  (outside `ask_build_isolated`) it can modify files; only run write mode on code you trust.
+  (outside `ask_build mode=isolated`) it can modify files; only run write mode on code you trust.
 - **The guard is heuristic.** It catches high-signal patterns, not every possible injection. In
   `warn` mode the text still reaches the host — treat delegated output as untrusted input.
 - **It can't vet the models themselves.** A compromised or malicious model could emit harmful
@@ -68,6 +68,6 @@ cli-bridge handles two kinds of untrusted data:
 ## Hardening checklist for sensitive use
 
 - Set `CLI_BRIDGE_GUARD=strict`.
-- Use `ask_build_isolated` instead of raw `agent: build`.
+- Use `ask_build` (isolated mode) instead of raw `agent: build`.
 - Keep `CLI_BRIDGE_STORE_TRANSCRIPTS` unset.
 - Run from a directory that contains only what the delegate should see.

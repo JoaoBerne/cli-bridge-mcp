@@ -5,8 +5,8 @@ repo. `CLAUDE.md` is a symlink to this file.
 
 ## What this is
 
-An MCP server that lets the host AI consult **other** AI CLIs as a council. Each lane spawns
-the official CLI as a subprocess (ban-safe: no token extraction, no API keys). Read-only by
+An MCP server that exposes the **other** AI CLIs on the machine as tools. Each lane spawns
+the official CLI as a subprocess (no token extraction, no API keys). Read-only by
 default. Pure-stdlib + `mcp` only. Default surface: 15 fixed tools + `ask_<lane>` per installed
 CLI (`schemas.DEFAULT_TOOLS`, `CLI_BRIDGE_TOOLS` to widen).
 
@@ -38,7 +38,7 @@ src/cli_bridge/
   cli.py         # human/CI entry point (cli-bridge ...) over the same internals
   bridges/       # openai_compatible.py = cli-bridge-openai (urllib only; used by the applepcc lane and HTTP lanes)
 tests/           # pytest; unit + cross-host integration (no real CLI needed)
-benchmarks/      # eval harness (council vs single model), outside the package and CI: eval.py, tests/, fixtures/evalset/
+benchmarks/      # eval harness (several models vs one), outside the package and CI: eval.py, tests/, fixtures/evalset/
 docs/            # TOOLS, ARCHITECTURE, HOSTS, BUDGET, COSTS
 examples/        # lane JSON recipes (local-runtime, apple-fm-serve, openai-compatible, community, free-apis), mcp.example.json, local-first-host.md
 plugin/          # Claude Code plugin manifest (wires the MCP server; no skills)

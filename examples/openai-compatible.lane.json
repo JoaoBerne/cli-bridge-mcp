@@ -9,7 +9,7 @@
     "//6": "VALUE is never put in argv (invisible in `ps`).",
     "//7": "OPT-IN: availability_env hides this lane until that env var is set, so adding the",
     "//8": "recipe never changes your surface until you export the key. (OpenRouter itself is",
-    "//9": "built in as `ask_openrouter` — this is the template for OTHER providers.)",
+    "//9": "see examples/free-apis.json for OpenRouter — this is the template for OTHER providers.)",
 
     "key": "together",
     "display": "Together AI (OpenAI-compatible, API key)",

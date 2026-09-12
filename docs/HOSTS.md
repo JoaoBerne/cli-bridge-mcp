@@ -42,13 +42,13 @@ cli-bridge is most useful when the host *decides* to consult it. The host alread
 tool descriptions (which lead with *when* to delegate), but you can make it proactive by adding a
 rule to your host's instructions file. Paste this:
 
-> You have the **cli-bridge** MCP server — a council of other AI CLIs. Consult it proactively when:
+> You have the **cli-bridge** MCP server — the other AI CLIs on this machine as tools. Use it when:
 > - you're about to ship risky code → `review_diff` (`focus=security` for OWASP)
 > - you're stuck or hitting a dead-end → ask a different model (`ask_best`, `ask_cascade`)
 > - it's a high-stakes decision → `debate` / `workflow preset=converge`
 > - a task fits another model's strength (huge context → Gemini, image generation → GPT/Codex)
 >
-> Do **not** convene the council for trivial edits or things you're already sure of.
+> Do **not** delegate trivial edits or things you're already sure of.
 
 Where the instructions file lives, per host:
 

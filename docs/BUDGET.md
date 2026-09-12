@@ -34,7 +34,7 @@ Practical guidance:
   and a paid lane without `CLI_BRIDGE_<LANE>_CREDITS_PER_1K` always estimates to 0 — the
   cap can never trigger for it. `doctor` warns loudly when your cap is unenforceable.
 - Both gates **fail open** if local telemetry is unavailable: a broken sqlite file must
-  not take the council down. (Telemetry is on by default.)
+  not take the server down. (Telemetry is on by default.)
 
 ## How spend is estimated (honestly)
 

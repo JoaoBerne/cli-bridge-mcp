@@ -168,7 +168,7 @@ def _render_job_status(st: dict) -> str:
     if st.get("error"):
         lines.append(f"error: {st['error']}")
     if st["status"] == jobs.SUCCEEDED:
-        lines.append(f"Fetch it with `job_result {st['id']}`.")
+        lines.append(f"Fetch it with `job(action=result, job_id='{st['id']}')`.")
     elif st["status"] == jobs.RUNNING:
         if st.get("kind") == "build":
             lines.append(f"Follow with `job(action=tail, job_id='{st['id']}')`, "
