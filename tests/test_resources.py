@@ -11,8 +11,7 @@ from cli_bridge.mcp_compat import attr  # mcp 2.0 renamed model fields to snake_
 def test_list_resources():
     res = asyncio.run(server.list_resources())
     uris = {str(r.uri) for r in res}
-    assert {"cli-bridge://config", "cli-bridge://lane-stats", "cli-bridge://usage-summary",
-            "cli-bridge://workflow-schemas/review-diff"} <= uris
+    assert {"cli-bridge://config", "cli-bridge://lane-stats", "cli-bridge://usage-summary"} <= uris
     assert all(attr(r, "mimeType") == "application/json" for r in res)
 
 
@@ -23,14 +22,6 @@ def test_read_config_resource(monkeypatch):
     assert data["guard"] == "strict"
     assert isinstance(data["lanes"], list) and data["lanes"]
     assert {"key", "installed", "cost", "caps"} <= set(data["lanes"][0])
-
-
-def test_read_review_schema_resource():
-    out = asyncio.run(server.read_resource("cli-bridge://workflow-schemas/review-diff"))
-    schema = json.loads(out)
-    assert schema["properties"]["findings"]["type"] == "array"
-    sev = schema["properties"]["findings"]["items"]["properties"]["severity"]["enum"]
-    assert "blocker" in sev
 
 
 def test_read_lane_stats_and_usage_are_json(monkeypatch, tmp_path):

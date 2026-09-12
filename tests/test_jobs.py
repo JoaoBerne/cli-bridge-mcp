@@ -130,12 +130,12 @@ def test_ask_all_async_dispatch(monkeypatch):
     monkeypatch.setattr(server, "_run_lane", fake_run_lane)
 
     async def scenario():
-        out = await server.call_tool("ask_all_async", {"task": "hi"})
+        out = await server.call_tool("ask_all", {"task": "hi", "async": True})
         text = out[0].text
         assert text.startswith("Started background job `job_")
         job_id = text.split("`")[1]
         await _drain()
-        res = await server.call_tool("job_result", {"job_id": job_id})
+        res = await server.call_tool("job", {"action": "result", "job_id": job_id})
         return res[0].text
     body = asyncio.run(scenario())
     assert "## Council —" in body and "lane answer" in body

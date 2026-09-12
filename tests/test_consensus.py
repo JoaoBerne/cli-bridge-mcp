@@ -139,5 +139,5 @@ def test_consensus_dispatch(isolate, monkeypatch):
     monkeypatch.setattr(server, "_run_lane", fake_run_lane)
 
     out = asyncio.run(server.call_tool(
-        "consensus", {"task": "decide", "synthesize": True}))[0].text
+        "debate", {"task": "decide", "vote": "borda", "synthesize": True}))[0].text
     assert "# Consensus" in out and "dispatched final" in out

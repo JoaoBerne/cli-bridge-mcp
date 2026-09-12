@@ -182,38 +182,13 @@ def allowed_lanes() -> set[str]:
     return {p.strip() for p in raw.split(",") if p.strip()} if raw else set()
 
 
-def _tool_set(var: str) -> set[str]:
-    raw = os.environ.get(var, "").strip()
+def tools() -> set[str]:
+    """CLI_BRIDGE_TOOLS: unset = the default (lean) surface · 'all' = every registered tool ·
+    a comma list = exactly those names (+ doctor/setup + every ask_<lane>) · the word 'default'
+    in a list expands to the default set (CLI_BRIDGE_TOOLS=default,batch_run).
+    CLI_BRIDGE_LEAN / _ENABLED_TOOLS / _DISABLED_TOOLS are no longer read — harmless if still set."""
+    raw = os.environ.get("CLI_BRIDGE_TOOLS", "")
     return {t.strip().lower() for t in raw.split(",") if t.strip()}
-
-
-def disabled_tools() -> set[str]:
-    """Tool NAMES to hide from the listing (CLI_BRIDGE_DISABLED_TOOLS=debate,premortem,...).
-    Trims the schema context every host pays per request — the 2026 consensus is 5-15 tools, with
-    sharp degradation past ~20 (and ~33 here). Essential tools (doctor/setup) can't be hidden."""
-    return _tool_set("CLI_BRIDGE_DISABLED_TOOLS")
-
-
-def enabled_tools() -> set[str]:
-    """Allowlist (CLI_BRIDGE_ENABLED_TOOLS=ask_best,ask_all,review_diff). When set, ONLY these
-    (+ essentials + the ask_<lane> per installed lane if named) are exposed — a one-env 'lean
-    mode'. Empty = expose everything not in the denylist."""
-    return _tool_set("CLI_BRIDGE_ENABLED_TOOLS")
-
-
-def lean() -> bool:
-    """CLI_BRIDGE_LEAN=1 → expose only the curated 'core' surface (the daily-driver tools), the
-    rest hidden behind this one opt-in. Honours an explicit ENABLED/DISABLED list if also set
-    (that wins). Off by default — no host loses a tool unless it opts in."""
-    return os.environ.get("CLI_BRIDGE_LEAN", "").strip().lower() in {"1", "true", "yes", "on"}
-
-
-def hide_host() -> bool:
-    """CLI_BRIDGE_HIDE_HOST=1 → hide the caller's OWN lane (legacy behaviour: ask_<host> is then
-    only reachable as an explicit-model SIBLING consult). Off by default — the host's own lane is
-    a normal, visible tool you can call directly. It still never joins ask_all/ask_cascade fan-out
-    (asking your own running model in a parallel council is redundant)."""
-    return os.environ.get("CLI_BRIDGE_HIDE_HOST", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def build_disabled() -> bool:
@@ -235,10 +210,9 @@ def strip_nesting_env() -> bool:
     """CLI_BRIDGE_STRIP_NESTING_ENV=1 → when spawning a delegate CLI, drop the HOST's own
     session-marker env vars (CLAUDE_*/CODEX_* by default). Some CLIs refuse to run as a "nested
     session" when they see their own markers — the symptom is EMPTY output when cli-bridge runs
-    INSIDE Claude Code / Codex and spawns `claude` / `codex`. Opt-in, default OFF (consistent with
-    HIDE_HOST / LEAN — flip the default on after a real soak). This is a FUNCTION fix, NOT
-    credential isolation: auth tokens are deliberately kept (see strip_nesting) so the child can
-    still authenticate."""
+    INSIDE Claude Code / Codex and spawns `claude` / `codex`. Opt-in, default OFF. This is a
+    FUNCTION fix, NOT credential isolation: auth tokens are deliberately kept (see strip_nesting)
+    so the child can still authenticate."""
     return os.environ.get("CLI_BRIDGE_STRIP_NESTING_ENV", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
@@ -409,14 +383,6 @@ def telemetry_enabled() -> bool:
     return os.environ.get("CLI_BRIDGE_TELEMETRY", "").strip().lower() not in {"0", "false", "off", "no"}
 
 
-def echo_task() -> bool:
-    """CLI_BRIDGE_ECHO_TASK=off hides the '▶ lane — asked: …' header prepended to delegation
-    results. On by default: when the user re-reads the conversation in their CLI, each answer
-    shows WHO was asked WHAT without scrolling back to the tool-call arguments."""
-    return os.environ.get("CLI_BRIDGE_ECHO_TASK", "").strip().lower() \
-        not in {"0", "false", "off", "no"}
-
-
 def show_trace() -> bool:
     """CLI_BRIDGE_TRACE_FOOTER=off hides the JSON trace footer in workflow reports
     (terminal-friendly; distinct from CLI_BRIDGE_TRACE_DIR, which dumps raw traces)."""
@@ -533,13 +499,14 @@ INSTRUCTIONS = (
     "for `setup`; one sentence from the user is enough to record.\n"
     "• ROUND-TABLE memory: every `ask_<lane>` returns a thread id (no need to pass "
     "conversation='new'); reuse it — even on a DIFFERENT lane — for a multi-turn, multi-model "
-    "thread that SURVIVES your context reset (/compact). `conversations_list` / `conversation_show` "
-    "to recover and read.\n"
-    "• Delegate REAL WORK safely: `ask_build_isolated` runs a build agent in a throwaway git "
-    "worktree and returns a DIFF — your repo is never touched. Council tools advise; this one "
-    "acts, safely.\n"
-    "• `review_diff` / `security_review` / `debate` / `premortem` / `test_plan` for structured "
-    "workflows. `doctor` to see what's installed.\n\n"
+    "thread that SURVIVES your context reset (/compact). `conversations` (no id = list, id = "
+    "transcript) to recover and read.\n"
+    "• Delegate REAL WORK safely: `ask_build` runs a build agent in a throwaway git worktree and "
+    "returns a DIFF — your repo is never touched. Council tools advise; this one acts, safely. "
+    "Long runs: async=true, then `job` (status/result/tail/steer/cancel).\n"
+    "• `review_diff` (focus=security for OWASP) / `debate` (vote=borda picks the peer-ranked best) "
+    "/ `workflow` presets (premortem, test_plan, challenge, jury, converge…) / `git_text` "
+    "(kind=commit|pr) for structured workflows. `doctor` to see what's installed.\n\n"
     "WHEN TO CONSULT: a hard or ambiguous problem, a second opinion before shipping something "
     "risky or hard to reverse, a domain a particular model is strong at, a debugging dead-end. "
     "WHEN NOT TO: trivial edits, simple "

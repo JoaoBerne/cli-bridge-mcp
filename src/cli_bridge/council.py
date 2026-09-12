@@ -90,22 +90,19 @@ async def ask_cascade(lanes: list[LaneSpec], args: dict, *, run_lane, emit) -> l
     if not task:
         return [TextContent(type="text", text="[error] task is required")]
     include_paid = config.include_paid_resolved(args.get("include_paid"))
+    if bool(args.get("dry_run")):              # explain the order, spawn nothing
+        return [TextContent(type="text", text=router.explain(
+            lanes, telemetry.cooldown_remaining, include_paid))]
     ordered = router.order_lanes(lanes, telemetry.cooldown_remaining, include_paid)
     if not ordered:
         return [TextContent(type="text", text=(
             "[error] no lanes eligible for cascade. Install/login a CLI, or set include_paid=true "
             "/ CLI_BRIDGE_PROFILE=max to allow limited/paid lanes."))]
-    escalate = bool(args.get("escalate"))
-    sub = {"task": _escalate_task(task) if escalate else task,
-           "cwd": _s(args, "cwd"), "timeout_s": args.get("timeout_s")}
-    if escalate:
-        chosen, attempts = await _run_chain_escalate(ordered, sub, run_lane=run_lane)
-    else:
-        chosen, attempts = await run_chain(ordered, sub, "ask_cascade", run_lane=run_lane)
+    sub = {"task": task, "cwd": _s(args, "cwd"), "timeout_s": args.get("timeout_s")}
+    chosen, attempts = await run_chain(ordered, sub, "ask_cascade", run_lane=run_lane)
     if chosen is not None:
         res = next(r for ln, r in attempts if ln is chosen)
-        out = res.output.replace(_ESCALATE, "").rstrip() if escalate else res.output
-        return [emit(f"{out}\n\n{cascade_trace(attempts, chosen=chosen)}",
+        return [emit(f"{res.output}\n\n{cascade_trace(attempts, chosen=chosen)}",
                      label="ask_cascade")]
     return [TextContent(type="text", text=(
         "[error] all lanes failed in cascade: "
@@ -125,30 +122,6 @@ async def run_chain(ordered: list[LaneSpec], sub: dict, tool: str, *, run_lane
     return None, attempts
 
 
-_ESCALATE = "[ESCALATE]"
-
-
-def _escalate_task(task: str) -> str:
-    return (f"{task}\n\n(If you are NOT highly confident this fully and correctly answers it, end "
-            f"your reply with the token {_ESCALATE} on its own line so a stronger model takes over.)")
-
-
-async def _run_chain_escalate(ordered: list[LaneSpec], sub: dict, *, run_lane
-                              ) -> tuple[LaneSpec | None, list[tuple[LaneSpec, runner.RunResult]]]:
-    """Like run_chain but a SUCCESS that self-reports low confidence ([ESCALATE]) is NOT accepted
-    while a stronger lane remains — confidence-escalate, not just failure-fallback. The last lane's
-    answer is always accepted (nowhere left to escalate). Self-report is noisy → opt-in only."""
-    attempts: list[tuple[LaneSpec, runner.RunResult]] = []
-    for i, lane in enumerate(ordered):
-        res = await run_lane(lane, sub, tool="ask_cascade")
-        attempts.append((lane, res))
-        if res.ok and not (_ESCALATE in res.output and i < len(ordered) - 1):
-            return lane, attempts
-    # All lanes either failed or escalated; if the last one answered (ok), take it.
-    last_lane, last_res = attempts[-1] if attempts else (None, None)
-    return (last_lane if last_res and last_res.ok else None), attempts
-
-
 # ── best (route by mode, then cascade within the ordered list) ─────────────────────────────
 
 async def ask_best(lanes: list[LaneSpec], args: dict, *, run_lane, emit) -> list[TextContent]:
@@ -162,6 +135,10 @@ async def ask_best(lanes: list[LaneSpec], args: dict, *, run_lane, emit) -> list
     include_paid = config.include_paid_resolved(args.get("include_paid"))
     perf = telemetry.lane_perf()
     quality = telemetry.lane_quality(mode)
+    if bool(args.get("dry_run")):              # explain the order, spawn nothing
+        return [TextContent(type="text", text=router.explain_mode(
+            lanes, telemetry.cooldown_remaining, lambda k: perf.get(k, {}), mode, include_paid,
+            quality_of=lambda k: quality.get(k, {})) + telemetry.render_lessons(mode))]
     ordered = router.order_for_mode(lanes, telemetry.cooldown_remaining, lambda k: perf.get(k, {}),
                                     mode, include_paid, quality_of=lambda k: quality.get(k, {}))
     if not ordered:

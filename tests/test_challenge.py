@@ -50,7 +50,8 @@ def test_challenge_dispatch_picks_explicit_lane(isolate, monkeypatch):
         return RunResult(True, "critique", "ok")
     monkeypatch.setattr(server, "_run_lane", fake_run_lane)
 
-    out = asyncio.run(server.call_tool("challenge", {"task": "claim", "lane": "gpt"}))[0].text
+    out = asyncio.run(server.call_tool(
+        "workflow", {"preset": "challenge", "task": "claim", "lane": "gpt"}))[0].text
     assert used["lane"] == "gpt" and "skeptic: GPT" in out
 
 

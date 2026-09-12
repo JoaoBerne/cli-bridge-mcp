@@ -45,10 +45,10 @@ def test_thread_memory_crosses_lanes(monkeypatch):
     assert "explain X" in seen["gpt"]            # the earlier user turn too
     assert "do you agree?" in seen["gpt"]        # the new prompt
 
-    # conversation_show renders both lanes' turns; conversations_list surfaces the thread id.
-    shown = asyncio.run(server.call_tool("conversation_show", {"conversation": cid}))[0].text
+    # conversations(id) renders both lanes' turns; conversations() surfaces the thread id.
+    shown = asyncio.run(server.call_tool("conversations", {"id": cid}))[0].text
     assert "gemini-says: hello" in shown and "gpt-says: hello" in shown
-    listed = asyncio.run(server.call_tool("conversations_list", {}))[0].text
+    listed = asyncio.run(server.call_tool("conversations", {}))[0].text
     assert cid in listed
 
 

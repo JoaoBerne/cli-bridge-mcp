@@ -1,11 +1,13 @@
-"""budget.check_spawn — the single pre-spawn spend guard (run limit + credit cap)."""
+"""The pre-spawn spend guards in server._run_lane (run limit + credit cap) — docs/BUDGET.md."""
 
+import asyncio
 import os
 
 import pytest
 
-from cli_bridge import budget, telemetry
+from cli_bridge import server, telemetry
 from cli_bridge.lanes import LaneSpec
+from cli_bridge.runner import RunResult
 
 
 def _lane(key="fakelane", cost="free"):
@@ -15,47 +17,41 @@ def _lane(key="fakelane", cost="free"):
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch):
     for k in list(os.environ):
-        if k.startswith("CLI_BRIDGE_FAKELANE_") or k == "CLI_BRIDGE_DAILY_CREDIT_CAP":
+        if k.startswith("CLI_BRIDGE_FAKELANE_") or k in {
+                "CLI_BRIDGE_DAILY_CREDIT_CAP", "CLI_BRIDGE_MOCK", "CLI_BRIDGE_DEPTH"}:
             monkeypatch.delenv(k, raising=False)
+
+
+def _run(monkeypatch, lane):
+    """Drive _run_lane with a counting fake spawn; returns (result, spawns)."""
+    spawned = {"n": 0}
+
+    async def fake_arun(argv, timeout, cwd=None, env=None):
+        spawned["n"] += 1
+        return RunResult(True, "x", "ok")
+    monkeypatch.setattr(server.runner, "arun", fake_arun)
+    return asyncio.run(server._run_lane(lane, {"task": "hi"})), spawned["n"]
 
 
 def test_no_limits_allows(monkeypatch):
     monkeypatch.setattr(telemetry, "lane_runs_today", lambda lane: 999)
-    assert budget.check_spawn(_lane()) is None
+    r, n = _run(monkeypatch, _lane())
+    assert r.ok and n == 1
 
 
 def test_daily_limit_blocks_at_limit(monkeypatch):
     monkeypatch.setenv("CLI_BRIDGE_FAKELANE_DAILY_LIMIT", "5")
     monkeypatch.setattr(telemetry, "lane_runs_today", lambda lane: 5)
-    reason = budget.check_spawn(_lane())
-    assert reason is not None
-    assert "daily run limit" in reason and "5/5" in reason
+    r, n = _run(monkeypatch, _lane())
+    assert r.kind == "blocked" and n == 0
+    assert "daily run limit" in r.output and "5/5" in r.output
 
 
 def test_daily_limit_allows_below_limit(monkeypatch):
     monkeypatch.setenv("CLI_BRIDGE_FAKELANE_DAILY_LIMIT", "5")
     monkeypatch.setattr(telemetry, "lane_runs_today", lambda lane: 4)
-    assert budget.check_spawn(_lane()) is None
-
-
-def test_daily_limit_applies_to_free_lanes(monkeypatch):
-    # The run limit is the universal cap — free quota'd lanes are gated too.
-    monkeypatch.setenv("CLI_BRIDGE_FAKELANE_DAILY_LIMIT", "0")
-    monkeypatch.setattr(telemetry, "lane_runs_today", lambda lane: 0)
-    assert budget.check_spawn(_lane(cost="free")) is not None
-
-
-def test_credit_cap_blocks_paid_lane(monkeypatch):
-    monkeypatch.setenv("CLI_BRIDGE_DAILY_CREDIT_CAP", "2")
-    monkeypatch.setattr(telemetry, "est_credits_today", lambda: 2.5)
-    reason = budget.check_spawn(_lane(cost="paid"))
-    assert reason is not None and "credit cap" in reason
-
-
-def test_credit_cap_allows_paid_lane_under_cap(monkeypatch):
-    monkeypatch.setenv("CLI_BRIDGE_DAILY_CREDIT_CAP", "2")
-    monkeypatch.setattr(telemetry, "est_credits_today", lambda: 1.0)
-    assert budget.check_spawn(_lane(cost="paid")) is None
+    r, _ = _run(monkeypatch, _lane())
+    assert r.ok
 
 
 def test_credit_cap_gates_rated_limited_lane(monkeypatch):
@@ -63,13 +59,15 @@ def test_credit_cap_gates_rated_limited_lane(monkeypatch):
     monkeypatch.setenv("CLI_BRIDGE_DAILY_CREDIT_CAP", "2")
     monkeypatch.setenv("CLI_BRIDGE_FAKELANE_CREDITS_PER_1K", "0.1")
     monkeypatch.setattr(telemetry, "est_credits_today", lambda: 3.0)
-    assert budget.check_spawn(_lane(cost="limited")) is not None
+    r, n = _run(monkeypatch, _lane(cost="limited"))
+    assert r.kind == "blocked" and "credit cap" in r.output and n == 0
 
 
 def test_credit_cap_ignores_unrated_free_lane(monkeypatch):
     monkeypatch.setenv("CLI_BRIDGE_DAILY_CREDIT_CAP", "2")
     monkeypatch.setattr(telemetry, "est_credits_today", lambda: 99.0)
-    assert budget.check_spawn(_lane(cost="free")) is None
+    r, _ = _run(monkeypatch, _lane(cost="free"))
+    assert r.ok
 
 
 def test_lane_runs_today_counts_only_today_and_lane(tmp_path, monkeypatch):

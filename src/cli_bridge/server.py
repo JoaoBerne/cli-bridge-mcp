@@ -2,8 +2,7 @@
 
 Low-level MCP server so we can filter tools per client at list time:
 - only lanes whose CLI is installed are exposed,
-- the *calling* client's own lane is shown as a normal tool but kept out of fan-out
-  (CLI_BRIDGE_HIDE_HOST=1 hides it entirely, sibling-model-consult only),
+- the *calling* client's own lane is shown as a normal tool but kept out of fan-out,
 detected from the MCP `clientInfo.name` (with a CLI_BRIDGE_HOST env override).
 
 Every lane spawns the official CLI as a subprocess — no token extraction, no API keys,
@@ -33,7 +32,6 @@ from mcp.types import (
 )
 
 from . import (
-    budget,
     buildloop,
     config,
     conversations,
@@ -84,12 +82,10 @@ OVERFLOW_TTL_H = config.int_env("CLI_BRIDGE_OVERFLOW_TTL_H", 24, 0, 24 * 365)
 # doctor_deep keep a thin wrapper further down: they need the host-detection + lane-runner
 # couplings that stay in server.py, injected the same way council.py takes run_lane.)
 _tools_for = schemas._tools_for
-_self_ask_tool = schemas._self_ask_tool
 _host_ask_tool = schemas._host_ask_tool
 _filter_tools = schemas._filter_tools
 _ann = schemas._ann
 _PROMPTS = prompts._PROMPTS
-_REVIEW_DIFF_SCHEMA = resources._REVIEW_DIFF_SCHEMA
 _RESOURCES = resources._RESOURCES
 _config_snapshot = resources._config_snapshot
 _render_usage = reports._render_usage
@@ -97,7 +93,6 @@ _render_budget = reports._render_budget
 _render_job_status = reports._render_job_status
 _render_jobs_list = reports._render_jobs_list
 _render_lane_stats = reports._render_lane_stats
-_echo_header = reports._echo_header
 _setup_recommendation = reports._setup_recommendation
 _rel_time = reports._rel_time
 _parse_since = reports._parse_since
@@ -242,9 +237,8 @@ def _active_lanes() -> tuple[list[LaneSpec], str]:
 
 
 def _host_lane(host: str) -> LaneSpec | None:
-    """The caller's OWN installed lane. Visible as a normal ask_<host> tool by default; with
-    CLI_BRIDGE_HIDE_HOST=1 it is hidden and only reachable as an explicit-model SIBLING consult.
-    Returned separately from the delegates either way, so it never joins a fan-out."""
+    """The caller's OWN installed lane. Visible as a normal ask_<host> tool, but returned
+    separately from the delegates so it never joins a fan-out."""
     if not host:
         return None
     return next((ln for ln in installed_lanes(all_lanes()) if _is_host(ln, host)), None)
@@ -257,12 +251,9 @@ async def list_tools() -> list[Tool]:
     tools = _tools_for(lanes)
     own = _host_lane(host)
     if own:
-        if config.hide_host():
-            if "model" in own.caps:                # legacy: reach a sibling model of your own family
-                tools.insert(0, _self_ask_tool(own))
-        else:
-            tools.insert(0, _host_ask_tool(own))   # visible by default: a normal direct ask_<host>
-    return _filter_tools(tools)
+        tools.insert(0, _host_ask_tool(own))       # a normal direct ask_<host>, never in fan-out
+    always = {f"ask_{ln.key}" for ln in lanes} | ({f"ask_{own.key}"} if own else set())
+    return _filter_tools(tools, always)
 
 
 # ─────────────────────────────── MCP prompts (builders + registry in prompts.py) ───────────────────────────
@@ -300,8 +291,6 @@ async def read_resource(uri) -> str:
         return json.dumps(telemetry.lane_stats(), indent=2)
     if key == "cli-bridge://usage-summary":
         return json.dumps(telemetry.usage_report(), indent=2)
-    if key == "cli-bridge://workflow-schemas/review-diff":
-        return json.dumps(_REVIEW_DIFF_SCHEMA, indent=2)
     raise ValueError(f"unknown resource: {key}")
 
 
@@ -507,11 +496,24 @@ async def _run_lane(lane: LaneSpec, args: dict, *, tool: str = "ask",
             f"{config.max_depth()}); refusing to spawn another to avoid recursion. Raise "
             "CLI_BRIDGE_MAX_DEPTH only if you deliberately want nested delegation."),
             "blocked")
-    # Spend guard (budget.py): the one pre-spawn chokepoint — per-lane daily run limit
-    # (any lane) + daily credit cap (paid or CREDITS_PER_1K-rated lanes).
-    block_reason = budget.check_spawn(lane)
-    if block_reason:
-        return runner.RunResult(False, block_reason, "blocked")
+    # Spend guards (docs/BUDGET.md): a per-lane daily run limit (any lane) and a daily credit cap
+    # (paid or CREDITS_PER_1K-rated lanes). Estimates only; a broken telemetry never blocks.
+    limit = config.lane_env_int(lane.key, "DAILY_LIMIT")
+    if limit is not None and limit >= 0:
+        runs = telemetry.lane_runs_today(lane.key)
+        if runs >= limit:
+            return runner.RunResult(False, (
+                f"daily run limit reached for '{lane.key}' ({runs}/{limit} runs since UTC "
+                f"midnight). Raise CLI_BRIDGE_{lane.key.upper()}_DAILY_LIMIT or wait for the "
+                "UTC reset."), "blocked")
+    cap = config.daily_credit_cap()
+    if cap > 0 and (lane.is_paid or config.lane_env_float(lane.key, "CREDITS_PER_1K") is not None):
+        spent = telemetry.est_credits_today()
+        if spent >= cap:
+            return runner.RunResult(False, (
+                f"daily credit cap reached (~{spent}/{cap:g} est. credits today); lane "
+                f"'{lane.key}' refused because it spends credits. Raise "
+                "CLI_BRIDGE_DAILY_CREDIT_CAP or use a free, unrated lane."), "blocked")
     agent = _str(args, "agent").lower()
     if agent not in {"", "plan", "build"}:    # never let a hallucinated value enable writes
         agent = "plan"
@@ -740,20 +742,6 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
         text = await _doctor_deep(host, lanes) if bool(args.get("deep")) else _doctor(host)
         return [_emit(text, label="doctor", guard=False)]
 
-    if name == "usage_report":
-        since_s = _parse_since(_str(args, "since"))
-        rep = telemetry.usage_report(since_s=since_s)
-        # output_format is the project-wide name; accept legacy `format` too (no break).
-        if (_str(args, "output_format") or _str(args, "format")).lower() == "json":
-            return [_emit(json.dumps(rep, indent=2), label="usage_report", guard=False)]
-        return [_emit(_render_usage(rep), label="usage_report", guard=False)]
-
-    if name == "usage_budget":
-        return [_emit(_render_budget(telemetry.usage_budget()), label="usage_budget", guard=False)]
-
-    if name == "lane_stats":
-        return [_emit(_render_lane_stats(), label="lane_stats", guard=False)]
-
     if name == "reset_lane_state":
         lane_key = _str(args, "lane")
         ok = telemetry.reset_lane(lane_key) if lane_key else False
@@ -762,7 +750,7 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
         return [TextContent(type="text", text=msg)]
 
     if name == "ask_cascade":
-        return await _ask_cascade(lanes, args)
+        return await council.ask_cascade(lanes, args, run_lane=_run_lane, emit=_emit)
 
     if name == "ask_best":
         return await _ask_best(lanes, args)
@@ -773,111 +761,93 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
     if name == "set_lane_cost":
         return _set_lane_cost(args)
 
-    if name == "route_plan":
-        include_paid = (bool(args["include_paid"]) if args.get("include_paid") is not None
-                        else _profile() == "max")
-        mode = _str(args, "mode").lower()
-        if mode and mode in router.MODES:
-            perf = telemetry.lane_perf()
-            quality = telemetry.lane_quality(mode)
-            explain = router.explain_mode(
-                lanes, telemetry.cooldown_remaining, lambda k: perf.get(k, {}), mode, include_paid,
-                quality_of=lambda k: quality.get(k, {}))
-            return [TextContent(type="text", text=explain + telemetry.render_lessons(mode))]
-        return [TextContent(type="text", text=router.explain(
-            lanes, telemetry.cooldown_remaining, include_paid))]
-
     if name == "ask_all":
-        return await _ask_all(lanes, args)
-
-    if name == "ask_all_async":
         if not _str(args, "task"):
             return [TextContent(type="text", text="[error] task is required")]
-        job_id = jobs.start_job("ask_all", lambda: _ask_all_body(lanes, dict(args)),
-                                preview=_str(args, "task"))
-        return [TextContent(type="text", text=(
-            f"Started background job `{job_id}` (ask_all). It runs while you keep working. "
-            f"Check it with `job_status {job_id}`, fetch the answer with `job_result {job_id}`."))]
-
-    if name == "job_status":
-        info = jobs.status(_str(args, "job_id"))
-        if info is None:
-            return [TextContent(type="text", text=f"[error] unknown job_id: {_str(args, 'job_id')}")]
-        if info.get("kind") == "build":                # fold in live build progress
-            snap = buildloop.snapshot(_str(args, "job_id"))
-            if snap:
-                info = {**info, **snap}
-        return [TextContent(type="text", text=_render_job_status(info))]
-
-    if name == "job_result":
-        r = jobs.result(_str(args, "job_id"))
-        if r is None:
-            return [TextContent(type="text", text=f"[error] unknown job_id: {_str(args, 'job_id')}")]
-        st, body = r
-        if st == jobs.RUNNING:
+        if bool(args.get("async")):
+            job_id = jobs.start_job("ask_all", lambda: _ask_all_body(lanes, dict(args)),
+                                    preview=_str(args, "task"))
             return [TextContent(type="text", text=(
-                "Job still running — poll `job_status` and fetch again when it's succeeded."))]
-        if not body:
-            return [TextContent(type="text", text=f"[{st}] job produced no output.")]
-        return [_emit(body, label="job_result")]
+                f"Started background job `{job_id}` (ask_all). Fetch with "
+                f"`job(action=result, job_id=\"{job_id}\")`."))]
+        return [_emit(await _ask_all_body(lanes, args), label="ask_all")]
 
-    if name == "job_cancel":
-        st = jobs.cancel(_str(args, "job_id"))
-        msg = {"unknown": f"[error] unknown job_id: {_str(args, 'job_id')}",
-               "cancelling": "Cancellation requested — the delegates' process groups are being "
-                             "killed; poll `job_status` for the final state."}.get(
-            st, f"Job is already **{st}** — nothing to cancel.")
-        return [TextContent(type="text", text=msg)]
-
-    if name == "jobs_list":
-        return [TextContent(type="text", text=_render_jobs_list(jobs.listing()))]
+    if name == "job":
+        action = _str(args, "action")
+        job_id = _str(args, "job_id")
+        if action == "status":
+            info = jobs.status(job_id)
+            if info is None:
+                return [TextContent(type="text", text=f"[error] unknown job_id: {job_id}")]
+            if info.get("kind") == "build":            # fold in live build progress
+                snap = buildloop.snapshot(job_id)
+                if snap:
+                    info = {**info, **snap}
+            return [TextContent(type="text", text=_render_job_status(info))]
+        if action == "result":
+            r = jobs.result(job_id)
+            if r is None:
+                return [TextContent(type="text", text=f"[error] unknown job_id: {job_id}")]
+            st, body = r
+            if st == jobs.RUNNING:
+                return [TextContent(type="text", text=(
+                    "Job still running — poll `job(action=status)` and fetch again when it's "
+                    "succeeded."))]
+            if not body:
+                return [TextContent(type="text", text=f"[{st}] job produced no output.")]
+            return [_emit(body, label="job_result")]
+        if action == "cancel":
+            st = jobs.cancel(job_id)
+            msg = {"unknown": f"[error] unknown job_id: {job_id}",
+                   "cancelling": "Cancellation requested — the delegates' process groups are "
+                                 "being killed; poll `job(action=status)` for the final state."}.get(
+                st, f"Job is already **{st}** — nothing to cancel.")
+            return [TextContent(type="text", text=msg)]
+        if action == "list":
+            return [TextContent(type="text", text=_render_jobs_list(jobs.listing()))]
+        if action == "tail":
+            tailed = buildloop.tail(job_id, int(args.get("offset") or 0))
+            if tailed is None:
+                return [TextContent(type="text", text=(
+                    "No live build for that job_id (it may have finished — use "
+                    "`job(action=result)`, or it was started in another server process)."))]
+            new_offset, chunk = tailed
+            body = chunk if chunk else "_(no new output yet)_"
+            return [_emit(f"offset={new_offset}\n{body}", label="job_tail", guard=False)]
+        if action == "steer":
+            msg = buildloop.steer(job_id, _str(args, "instruction"),
+                                  interrupt=bool(args.get("interrupt")))
+            if msg == "unknown":
+                return [TextContent(type="text", text=(
+                    "No live build for that job_id (already finished, or started elsewhere)."))]
+            return [TextContent(type="text", text=msg)]
+        return [TextContent(type="text", text=f"[error] unknown action: {action or '(none)'}")]
 
     if name == "review_diff":
-        return await _review_diff(lanes, args)
-
-    if name == "security_review":
+        # Same cost policy as ask_all: free/non-limited reviewers unless the caller widens.
         targets = _ask_all_targets(lanes, _ask_all_include_paid(args))
-        return [_emit(await workflows.security_review(targets, args, _run_lane),
-                      label="security_review")]
+        fn = (workflows.security_review if _str(args, "focus") == "security"
+              else workflows.review_diff)
+        return [_emit(await fn(targets, args, _run_lane), label="review_diff")]
 
     if name == "debate":
         targets = _ask_all_targets(lanes, _ask_all_include_paid(args))
-        return [_emit(await workflows.debate(targets, args, _run_lane, progress=_emit_progress),
-                      label="debate")]
+        fn = workflows.consensus if _str(args, "vote").lower() == "borda" else workflows.debate
+        return [_emit(await fn(targets, args, _run_lane, progress=_emit_progress), label="debate")]
 
-    if name == "consensus":
-        targets = _ask_all_targets(lanes, _ask_all_include_paid(args))
-        return [_emit(await workflows.consensus(targets, args, _run_lane, progress=_emit_progress),
-                      label="consensus")]
-
-    if name == "challenge":
+    if name == "git_text":
+        fn = {"commit": workflows.commit_msg, "pr": workflows.pr_describe}.get(_str(args, "kind"))
+        if fn is None:
+            return [TextContent(type="text", text="[error] kind must be commit or pr")]
         key = _str(args, "lane")
         if key:
             ln = _lane_by_key(key, lanes)
             targets = [ln] if ln else []
         else:
             targets = _ask_all_targets(lanes, _ask_all_include_paid(args))
-        return [_emit(await workflows.challenge(targets, args, _run_lane), label="challenge")]
+        return [_emit(await fn(targets, args, _run_lane), label="git_text")]
 
-    if name in ("commit_msg", "pr_describe"):
-        key = _str(args, "lane")
-        if key:
-            ln = _lane_by_key(key, lanes)
-            targets = [ln] if ln else []
-        else:
-            targets = _ask_all_targets(lanes, _ask_all_include_paid(args))
-        fn = workflows.commit_msg if name == "commit_msg" else workflows.pr_describe
-        return [_emit(await fn(targets, args, _run_lane), label=name)]
-
-    if name == "premortem":
-        targets = _ask_all_targets(lanes, _ask_all_include_paid(args))
-        return [_emit(await workflows.premortem(targets, args, _run_lane), label="premortem")]
-
-    if name == "test_plan":
-        targets = _ask_all_targets(lanes, _ask_all_include_paid(args))
-        return [_emit(await workflows.test_plan(targets, args, _run_lane), label="test_plan")]
-
-    if name in ("ask_build", "ask_build_isolated"):
+    if name == "ask_build":
         key = _str(args, "lane")
         if key:
             lane = _lane_by_key(key, lanes)
@@ -890,8 +860,8 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
         if "agent" not in lane.caps:
             return [TextContent(type="text", text=(
                 f"[error] lane '{key}' has no build/write mode."))]
-        mode = _str(args, "mode") or "isolated"      # ask_build_isolated == ask_build mode=isolated
-        if name == "ask_build" and mode == "direct":
+        mode = _str(args, "mode") or "isolated"
+        if mode == "direct":
             if bool(args.get("dry_run")):            # preview the brief, launch nothing
                 zlabel = _str(args, "zone") or _str(args, "target_dir") or "the target directory"
                 brief = worktrees._build_brief(_str(args, "task"), zlabel,
@@ -912,9 +882,10 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
                 state.log_path = jobs.log_path_for(job_id)
                 buildloop.register(job_id, state)
                 return [TextContent(type="text", text=(
-                    f"Steerable build started: `{job_id}`. Follow it with `job_tail {job_id}`, "
-                    f"steer with `build_steer {job_id} \"…\"` (interrupt=true to cut a turn), "
-                    f"fetch the result with `job_result {job_id}`."))]
+                    f"Steerable build started: `{job_id}`. Follow it with `job(action=tail, "
+                    f"job_id=\"{job_id}\")`, steer with `job(action=steer, job_id=\"{job_id}\", "
+                    f"instruction=\"…\")` (interrupt=true to cut a turn), fetch the result with "
+                    f"`job(action=result, job_id=\"{job_id}\")`."))]
             return [_emit(await worktrees.ask_build_direct(
                 lane, args, _run_lane, build_disabled=config.build_disabled()), label="ask_build")]
         architect = None
@@ -925,25 +896,7 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
                 return [TextContent(type="text", text=(
                     f"[error] no such architect_lane: {akey}."))]
         return [_emit(await worktrees.ask_build_isolated(lane, args, _run_lane, architect=architect),
-                      label=name)]
-
-    if name == "job_tail":
-        tailed = buildloop.tail(_str(args, "job_id"), int(args.get("offset") or 0))
-        if tailed is None:
-            return [TextContent(type="text", text=(
-                "No live build for that job_id (it may have finished — use `job_result`, or it "
-                "was started in another server process)."))]
-        new_offset, chunk = tailed
-        body = chunk if chunk else "_(no new output yet)_"
-        return [_emit(f"offset={new_offset}\n{body}", label="job_tail", guard=False)]
-
-    if name == "build_steer":
-        msg = buildloop.steer(_str(args, "job_id"), _str(args, "instruction"),
-                              interrupt=bool(args.get("interrupt")))
-        if msg == "unknown":
-            return [TextContent(type="text", text=(
-                "No live build for that job_id (already finished, or started elsewhere)."))]
-        return [TextContent(type="text", text=msg)]
+                      label="ask_build")]
 
     if name == "batch_run":
         raw = args.get("tasks")
@@ -977,33 +930,30 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
         if bool(args.get("async")):
             job_id = jobs.start_job("batch", _batch_body, preview=f"{len(tasks)} tasks")
             return [TextContent(type="text", text=(
-                f"Batch started: `{job_id}`. Poll `job_status {job_id}`, fetch `job_result "
-                f"{job_id}`."))]
+                f"Batch started: `{job_id}`. Fetch with `job(action=result, job_id=\"{job_id}\")`."))]
         return [_emit(await _batch_body(), label="batch_run")]
 
     if name == "workflow":
         return await _run_workflow_preset(args, lanes)
 
-    if name == "conversations_list":
-        rows = telemetry.convo_list()
-        if not rows:
-            return [_emit("No round-table threads yet. Start one: call any ask_<lane> with "
-                          "conversation='new', then reuse the returned id (on any lane).",
-                          label="conversations_list", guard=False)]
-        lines = ["# Round-table conversations", ""]
-        for row in rows:
-            lanes_txt = ", ".join(row["lanes"]) or "—"
-            lines.append(f"- **{row['conversation_id']}** · {row['turns']} turns · {lanes_txt} · "
-                         f"{_rel_time(row['last_at'])}\n      {row['preview']}")
-        return [_emit("\n".join(lines), label="conversations_list", guard=False)]
-
-    if name == "conversation_show":
-        cid = _str(args, "conversation").strip()
+    if name == "conversations":
+        cid = _str(args, "id")
+        if not cid:
+            rows = telemetry.convo_list()
+            if not rows:
+                return [_emit("No round-table threads yet. Start one: call any ask_<lane> (it "
+                              "returns a thread id), then reuse that id on any lane.",
+                              label="conversations", guard=False)]
+            lines = ["# Round-table conversations", ""]
+            for row in rows:
+                lanes_txt = ", ".join(row["lanes"]) or "—"
+                lines.append(f"- **{row['conversation_id']}** · {row['turns']} turns · {lanes_txt} · "
+                             f"{_rel_time(row['last_at'])}\n      {row['preview']}")
+            return [_emit("\n".join(lines), label="conversations", guard=False)]
         turns = telemetry.convo_turns(cid)
         if not turns:
-            return [_emit(f"[conversation: {cid or '(none)'}] no turns found. "
-                          "List threads with conversations_list.",
-                          label="conversation_show", guard=False)]
+            return [_emit(f"[conversation: {cid}] no turns found. List threads with "
+                          "`conversations` (no id).", label="conversations", guard=False)]
         parts = [f"# Conversation {cid}", ""]
         for t in turns:
             if t["role"] == "summary":
@@ -1011,21 +961,14 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
             else:
                 who = "User" if t["role"] == "user" else (t["lane"] or "assistant")
             parts.append(f"## Turn {t['turn_number']} — {who}\n{t['content']}")
-        return [_emit("\n\n".join(parts), label="conversation_show")]
+        return [_emit("\n\n".join(parts), label="conversations")]
 
     if name.startswith("ask_"):
         key = name[4:]
         lane = _lane_by_key(key, lanes)
         if not lane:
-            # The host's OWN lane. Visible/callable by default; in CLI_BRIDGE_HIDE_HOST mode it is
-            # allowed only with an explicit model (a SIBLING consult, not re-asking yourself).
-            own = _host_lane(host)
+            own = _host_lane(host)                 # the host's OWN lane: callable, never in fan-out
             if own and own.key == key:
-                if config.hide_host() and not _str(args, "model"):
-                    return [TextContent(type="text", text=(
-                        f"[error] ask_{key} is your own family — pass an explicit `model` to "
-                        "consult a SIBLING model (e.g. claude-opus-4-6). Re-asking the model "
-                        "you're already running is pointless."))]
                 lane = own
             else:
                 avail = ", ".join(ln.key for ln in lanes) or "none installed"
@@ -1036,7 +979,6 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
         out = res.render()
         if cid:
             out = f"[conversation: {cid}] — reuse this id (on any lane) to continue the thread.\n\n{out}"
-        out = _echo_header(lane.key, res.model, _str(args, "task")) + out
         return [_emit(out, label=f"ask_{lane.key}")]
 
     if name == "list_models":
@@ -1066,26 +1008,7 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
                       f"Default model: {dm or '(the CLI default)'}. To choose: {how}.",
                       label=f"list_models:{lane.key}", guard=False)]
 
-    if name.startswith("list_") and name.endswith("_models"):
-        lane = _lane_by_key(name[5:-7], lanes)
-        if not lane or (lane.models_args is None and not lane.models_file):
-            return [TextContent(type="text", text=f"[error] no model list for: {name}")]
-        if lane.models_args is None:                      # cached-file lanes (see list_models above)
-            cached = models_from_file(lane.models_file)
-            listing = "\n".join(f"- {m}" + (f" — {d}" if d else "") for m, d in cached)
-            return [_emit(listing or f"[error] could not read {lane.models_file}",
-                          label=f"list_{lane.key}_models")]
-        res = await runner.arun([lane.bin] + lane.models_args, 60)
-        if res.ok:
-            telemetry.lane_models_set(lane.key, lanes_mod.parse_model_ids(res.output))
-        return [_emit(res.render(), label=f"list_{lane.key}_models")]
-
     return [TextContent(type="text", text=f"[error] unknown tool: {name}")]
-
-
-async def _ask_cascade(lanes: list[LaneSpec], args: dict) -> list[TextContent]:
-    # Thin glue: the cascade itself lives in council.py; inject the host couplings.
-    return await council.ask_cascade(lanes, args, run_lane=_run_lane, emit=_emit)
 
 
 async def _ask_best(lanes: list[LaneSpec], args: dict) -> list[TextContent]:
@@ -1161,15 +1084,10 @@ def _set_lane_cost(args: dict) -> list[TextContent]:
         "ask_all / ask_cascade / ask_best route on it from the next call." + caveat))]
 
 
-async def _ask_all(lanes: list[LaneSpec], args: dict) -> list[TextContent]:
-    out = await _ask_all_body(lanes, args)
-    return [_emit(_echo_header("council (ask_all)", "", _str(args, "task")) + out,
-                  label="ask_all")]
-
-
 async def _run_workflow_preset(args: dict, lanes: list[LaneSpec]) -> list[TextContent]:
-    """Dispatch a `workflow` preset over the durable orchestrate substrate. Lane resolution +
-    _run_lane are injected so orchestrate stays testable. Each preset returns a string report;
+    """Dispatch a `workflow` preset: the orchestrate presets run over the durable batch substrate,
+    the workflows.py ones (premortem/test_plan/challenge) are plain fan-outs. Lane resolution +
+    _run_lane are injected so both stay testable. Each preset returns a string report;
     async=true wraps it in a background job."""
     preset = _str(args, "preset")
     default_lanes = _ask_all_targets(lanes, _ask_all_include_paid(args))
@@ -1180,69 +1098,55 @@ async def _run_workflow_preset(args: dict, lanes: list[LaneSpec]) -> list[TextCo
     common = dict(run_lane=_run_lane, resolve_lane=_resolve, default_lanes=default_lanes,
                   telemetry=telemetry, run_id=_str(args, "resume_id"))
     judge = _str(args, "judge_lane") or None
-    if preset == "refine_plan":
-        def make():
-            return orchestrate.refine_plan(**common, plan_file=_str(args, "plan_file"),
-                                           plan=_str(args, "plan"), lanes=args.get("lanes"),
-                                           angles=args.get("angles"), judge_lane=judge)
-    elif preset == "council_review":
-        def make():
-            return orchestrate.council_review(
-                **common, question=_str(args, "question") or _str(args, "task"),
-                lanes=args.get("lanes"), judge_lane=judge)
-    elif preset == "map_review":
-        def make():
-            return orchestrate.map_review(**common, files=args.get("files") or [],
-                                          lane=_str(args, "lane") or None, judge_lane=judge)
-    elif preset == "research_verify":
-        def make():
-            return orchestrate.research_verify(**common, questions=args.get("questions") or [],
-                                               lanes=args.get("lanes"))
-    elif preset == "verify_repair":
-        try:
-            max_rounds = int(args.get("max_rounds") or 3)
-        except (TypeError, ValueError):
-            max_rounds = 3
-
-        def make():
-            # verify_repair is a sequential dependent loop (not a fan-out), so it does NOT use the
-            # batch journal — pass only what it needs, not the durable **common.
-            return orchestrate.verify_repair(
-                run_lane=_run_lane, resolve_lane=_resolve, default_lanes=default_lanes,
-                task=_str(args, "task"), builder_lane=_str(args, "builder_lane"),
-                verifier_lane=_str(args, "verifier_lane"), max_rounds=max_rounds,
-                cwd=_str(args, "cwd"), cross_family=bool(args.get("cross_family")))
-    elif preset == "fanout_compare":
-        def make():
-            return orchestrate.fanout_compare(**common, task=_str(args, "task"),
-                                              lanes=args.get("lanes"), judge_lane=judge,
-                                              cwd=_str(args, "cwd"))
-    elif preset == "jury":
-        def make():
-            return orchestrate.jury(
-                **common, task=_str(args, "task"), author_lane=_str(args, "author_lane"),
-                verifier_lanes=args.get("verifier_lanes"),
-                verifiers=int(args.get("verifiers") or 0),
-                threshold=int(args.get("threshold") or 0), cwd=_str(args, "cwd"))
-    elif preset == "converge":
-        try:
-            c_rounds = min(int(args.get("max_rounds") or 5), orchestrate.VERIFY_MAX_ROUNDS)
-        except (TypeError, ValueError):
-            c_rounds = 5
-
-        def make():
-            return orchestrate.converge(
-                **common, task=_str(args, "task"), author_lane=_str(args, "author_lane"),
-                arbiter_lane=_str(args, "arbiter_lane"), peer_lanes=args.get("peer_lanes"),
-                peers=int(args.get("verifiers") or 0), max_rounds=c_rounds, cwd=_str(args, "cwd"))
-    else:
+    ln = _lane_by_key(_str(args, "lane"), lanes)
+    targets = [ln] if ln else default_lanes            # explicit lane wins (challenge)
+    try:
+        rounds = int(args.get("max_rounds") or 0)
+    except (TypeError, ValueError):
+        rounds = 0
+    table = {
+        "refine_plan": lambda: orchestrate.refine_plan(
+            **common, plan_file=_str(args, "plan_file"), plan=_str(args, "plan"),
+            lanes=args.get("lanes"), angles=args.get("angles"), judge_lane=judge),
+        "council_review": lambda: orchestrate.council_review(
+            **common, question=_str(args, "question") or _str(args, "task"),
+            lanes=args.get("lanes"), judge_lane=judge),
+        "map_review": lambda: orchestrate.map_review(
+            **common, files=args.get("files") or [], lane=_str(args, "lane") or None,
+            judge_lane=judge),
+        "research_verify": lambda: orchestrate.research_verify(
+            **common, questions=args.get("questions") or [], lanes=args.get("lanes")),
+        # verify_repair is a sequential dependent loop (not a fan-out), so it does NOT use the
+        # batch journal — pass only what it needs, not the durable **common.
+        "verify_repair": lambda: orchestrate.verify_repair(
+            run_lane=_run_lane, resolve_lane=_resolve, default_lanes=default_lanes,
+            task=_str(args, "task"), builder_lane=_str(args, "builder_lane"),
+            verifier_lane=_str(args, "verifier_lane"), max_rounds=rounds or 3,
+            cwd=_str(args, "cwd"), cross_family=bool(args.get("cross_family"))),
+        "fanout_compare": lambda: orchestrate.fanout_compare(
+            **common, task=_str(args, "task"), lanes=args.get("lanes"), judge_lane=judge,
+            cwd=_str(args, "cwd")),
+        "jury": lambda: orchestrate.jury(
+            **common, task=_str(args, "task"), author_lane=_str(args, "author_lane"),
+            verifier_lanes=args.get("verifier_lanes"), verifiers=int(args.get("verifiers") or 0),
+            threshold=int(args.get("threshold") or 0), cwd=_str(args, "cwd")),
+        "converge": lambda: orchestrate.converge(
+            **common, task=_str(args, "task"), author_lane=_str(args, "author_lane"),
+            arbiter_lane=_str(args, "arbiter_lane"), peer_lanes=args.get("peer_lanes"),
+            peers=int(args.get("verifiers") or 0),
+            max_rounds=min(rounds or 5, orchestrate.VERIFY_MAX_ROUNDS), cwd=_str(args, "cwd")),
+        "premortem": lambda: workflows.premortem(default_lanes, args, _run_lane),
+        "test_plan": lambda: workflows.test_plan(default_lanes, args, _run_lane),
+        "challenge": lambda: workflows.challenge(targets, args, _run_lane),
+    }
+    make = table.get(preset)
+    if make is None:
         return [TextContent(type="text", text=f"[error] unknown preset: {preset or '(none)'}")]
-
     if bool(args.get("async")):
         job_id = jobs.start_job(f"workflow:{preset}", make, preview=preset)
         return [TextContent(type="text", text=(
-            f"Workflow `{preset}` started: `{job_id}`. Poll `job_status {job_id}`, fetch "
-            f"`job_result {job_id}`."))]
+            f"Workflow `{preset}` started: `{job_id}`. Fetch with "
+            f"`job(action=result, job_id=\"{job_id}\")`."))]
     return [_emit(await make(), label=f"workflow:{preset}")]
 
 
@@ -1253,15 +1157,6 @@ async def _ask_all_body(lanes: list[LaneSpec], args: dict) -> str:
         lanes, args, run_lane=_run_lane, progress=_emit_progress, host_sample=_host_sample,
         include_paid_fn=_ask_all_include_paid, targets_fn=_ask_all_targets,
         timeout_fn=_ask_all_timeout)
-
-
-async def _review_diff(lanes: list[LaneSpec], args: dict) -> list[TextContent]:
-    # Same cost policy as ask_all: free/non-limited reviewers unless the caller widens, and
-    # never a cooled lane. Then hand off to the (decoupled, testable) workflow engine.
-    include_paid = _ask_all_include_paid(args)
-    targets = _ask_all_targets(lanes, include_paid)
-    report = await workflows.review_diff(targets, args, _run_lane)
-    return [_emit(report, label="review_diff")]
 
 
 # doctor lives in reports.py; these wrappers inject the host-detection (_is_host) and lane-runner

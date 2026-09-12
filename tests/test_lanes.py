@@ -202,7 +202,7 @@ def test_gpt_lane_surfaces_the_models_its_plan_allows(tmp_path, monkeypatch):
     monkeypatch.setattr(lane, "models_file", str(p))
     desc = schemas._ask_schema(lane)["properties"]["model"]["description"]
     assert "gpt-x, gpt-y" in desc                     # named where the choice is actually made
-    assert f"list_{lane.key}_models" in [t.name for t in schemas._tools_for([lane])]
+    assert "list_gpt_models" not in [t.name for t in schemas._tools_for([lane])]
 
 
 def test_parse_model_ids_handles_the_three_real_output_shapes():
@@ -236,7 +236,7 @@ def test_schema_caps_the_model_list_and_points_at_the_list_tool(monkeypatch):
     monkeypatch.setattr(schemas, "known_models", lambda ln, now=0.0: (many, False))
     desc = schemas._ask_schema(lane)["properties"]["model"]["description"]
     assert "m0, m1" in desc and "m9" not in desc              # capped, not dumped
-    assert "+22 more" in desc and "list_cursor_models" in desc
+    assert "+22 more" in desc and 'list_models(lane="cursor")' in desc
 
 
 def test_ollama_default_model_skips_header(monkeypatch):

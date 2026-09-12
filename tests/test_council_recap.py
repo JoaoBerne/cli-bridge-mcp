@@ -15,31 +15,6 @@ def test_agreement_score_aligned_vs_divergent():
     assert low < 0.5                                              # very different -> low agreement
 
 
-# ── M.2 confidence-escalate cascade ───────────────────────────────────────────────────────
-
-def test_escalate_chain_skips_low_confidence():
-    a = LaneSpec("a", "A", "echo", lambda *x: [])
-    b = LaneSpec("b", "B", "echo", lambda *x: [])
-
-    async def rl(lane, sub, *, tool="ask"):
-        if lane.key == "a":
-            return RunResult(True, "meh\n[ESCALATE]", "ok")      # low confidence
-        return RunResult(True, "confident answer", "ok")
-
-    chosen, attempts = asyncio.run(council._run_chain_escalate([a, b], {"task": "x"}, run_lane=rl))
-    assert chosen.key == "b" and len(attempts) == 2              # escalated past a
-
-
-def test_escalate_accepts_last_even_if_unsure():
-    a = LaneSpec("a", "A", "echo", lambda *x: [])
-    b = LaneSpec("b", "B", "echo", lambda *x: [])
-
-    async def rl(lane, sub, *, tool="ask"):
-        return RunResult(True, "unsure\n[ESCALATE]", "ok")       # both escalate
-
-    chosen, _ = asyncio.run(council._run_chain_escalate([a, b], {"task": "x"}, run_lane=rl))
-    assert chosen.key == "b"                                     # last accepted (nowhere to escalate)
-
 # ── one_phrase ──────────────────────────────────────────────────────────────────────────
 
 def test_one_phrase_takes_first_meaningful_line():
@@ -100,12 +75,11 @@ def test_ask_all_output_starts_with_recap(monkeypatch):
             return RunResult(True, "answer from A\nextra detail", "ok", latency_ms=11)
         return RunResult(False, "rate limited", "quota", latency_ms=22)
     monkeypatch.setattr(server, "_run_lane", fake_run_lane)
+    monkeypatch.setattr(server, "_active_lanes", lambda: ([a, b], ""))
 
-    out = asyncio.run(server._ask_all([a, b], {"task": "hi"}))
+    out = asyncio.run(server.call_tool("ask_all", {"task": "hi"}))
     text = out[0].text
-    # The echoed question comes first (CLI_BRIDGE_ECHO_TASK, on by default), then the recap.
-    assert text.startswith('▶ council (ask_all) — asked: "hi"\n\n')
-    assert text.split("\n\n", 1)[1].startswith("## Council — 1/2 answered")
+    assert text.startswith("## Council — 1/2 answered")
     assert "- ✅ **LaneA** _11ms_ — answer from A" in text   # gist = first line
     assert "- ❌ **LaneB** _22ms_ — quota" in text           # failed lane: latency + reason
     # full blocks still follow the recap

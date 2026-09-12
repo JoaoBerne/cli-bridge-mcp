@@ -1,7 +1,7 @@
 """Tool-schema assembly for the MCP surface.
 
 `_tools_for()` builds the full `Tool` list (one `ask_<lane>` per installed lane plus the council/
-workflow/diagnostic tools); `_filter_tools()` applies the LEAN core / ENABLED / DISABLED knobs.
+workflow/diagnostic tools); `_filter_tools()` applies the one CLI_BRIDGE_TOOLS knob.
 Pulled out of server.py (which only wires these into `@list_tools`) to keep the dispatch module
 thin. Pure: depends on config/router/findings/orchestrate/preamble + the lane registry, never on
 server.py.
@@ -21,16 +21,45 @@ from .mcp_compat import from_wire
 # swamping the schema — lanes with hundreds of models point at their list tool for the rest.
 _MODELS_IN_SCHEMA = 8
 
+# Parameters many tools share — declared once so every schema says the same thing. A site whose
+# meaning differs (a shorter cap, a preset-specific task) overrides the description in place.
+_P: dict[str, dict] = {
+    "task": {"type": "string", "description": "The prompt / task."},
+    "cwd": {"type": "string",
+            "description": "Directory the CLI runs in (empty = host workspace root, else server "
+                           "launch dir)."},
+    "timeout_s": {"type": "integer",
+                  "description": f"Seconds before kill (default {DEFAULT_TIMEOUT_S}, max "
+                                 f"{MAX_TIMEOUT_S})."},
+    "include_paid": {"type": "boolean",
+                     "description": "Also use limited/paid lanes. Default false except "
+                                    "CLI_BRIDGE_PROFILE=max (refused under saver)."},
+    "lane": {"type": "string", "description": "Lane key (e.g. gemini, gpt, opencode)."},
+    "dry_run": {"type": "boolean",
+                "description": "Preview (lanes/order/cost/files that would be sent) WITHOUT "
+                               "spawning anything."},
+    "output_format": {"type": "string", "enum": ["markdown", "json"],
+                      "description": "markdown (default) or json."},
+    "base": {"type": "string",
+             "description": "git ref/range to diff against (default HEAD): 'main', 'HEAD~3', "
+                            "'main...HEAD'."},
+    "diff": {"type": "string", "description": "Use this diff text instead of running git."},
+    "async": {"type": "boolean",
+              "description": "Run as a background job; returns a job_id (manage with `job`)."},
+    "summary_only": {"type": "boolean",
+                     "description": "Return only the recap/verdict, not each lane's full answer "
+                                    "— fewer tokens. Default false."},
+    "resume_id": {"type": "string",
+                  "description": "A run_id from a previous run — replays the finished tasks from "
+                                 "the journal, runs the rest."},
+}
+
 
 def _ask_schema(lane: LaneSpec) -> dict:
     props: dict = {
-        "task": {"type": "string", "description": "The prompt/question for the delegate."},
-        "cwd": {"type": "string",
-                "description": "Directory the CLI runs in (so it sees those files). "
-                               "Empty = the host's workspace root, else the server's launch dir."},
-        "timeout_s": {"type": "integer",
-                      "description": f"Seconds before kill (default {DEFAULT_TIMEOUT_S}, "
-                                     f"max {MAX_TIMEOUT_S})."},
+        "task": _P["task"],
+        "cwd": _P["cwd"],
+        "timeout_s": _P["timeout_s"],
         "conversation": {"type": "string",
                          "description": "Round-table thread (multi-turn memory). Omit = auto-thread: "
                          "the ask still gets a fresh id you can reuse later to continue (no replay "
@@ -50,8 +79,8 @@ def _ask_schema(lane: LaneSpec) -> dict:
         props["model"] = {"type": "string",
                           "description": "Model override. Empty = the lane's default."
                           + (f" Available to YOU: {shown}"
-                             + (f" (+{more} more — call list_{lane.key}_models)." if more > 0
-                                else ".") if avail else "")
+                             + (f" (+{more} more — call list_models(lane=\"{lane.key}\"))."
+                                if more > 0 else ".") if avail else "")
                           + (" Paid 'opencode-go/*' burns credits; empty = free."
                              if lane.key == "opencode" else "")}
     if "effort" in lane.caps:
@@ -101,13 +130,6 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             annotations=_ann(readOnlyHint=not can_write, openWorldHint=True,
                              destructiveHint=can_write),
         ))
-        if lane.models_args is not None or lane.models_file:
-            tools.append(from_wire(Tool,
-                name=f"list_{lane.key}_models",
-                description=f"List models reachable through {lane.display}.",
-                inputSchema={"type": "object", "properties": {}},
-                annotations=_ann(readOnlyHint=True, destructiveHint=False),
-            ))
     if lanes:
         tools.append(from_wire(Tool,
             name="ask_all",
@@ -116,12 +138,10 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "task": {"type": "string", "description": "Prompt sent to every lane."},
-                    "include_paid": {"type": "boolean",
-                                     "description": "Also query limited/paid lanes. Default false, "
-                                                    "except CLI_BRIDGE_PROFILE=max."},
-                    "cwd": {"type": "string", "description": "Directory the CLIs run in."},
-                    "timeout_s": {"type": "integer",
+                    "task": _P["task"],
+                    "include_paid": _P["include_paid"],
+                    "cwd": _P["cwd"],
+                    "timeout_s": {**_P["timeout_s"],
                                   "description": f"Per-lane timeout (max {ASK_ALL_MAX_TIMEOUT_S} — "
                                                  "the fan-out must finish before the host's own "
                                                  "tool deadline; call one lane directly for a "
@@ -129,73 +149,39 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                     "synthesize": {"type": "boolean",
                                    "description": "After collecting answers, have one free lane "
                                    "summarize where the models AGREE and DISAGREE. Default false."},
-                    "summary_only": {"type": "boolean",
-                                     "description": "Return only the recap (+synthesis), not each "
-                                     "lane's full answer — fewer tokens. Default false."},
-                    "output_format": {"type": "string", "enum": ["markdown", "json"],
-                                      "description": "markdown (default) or json (structured)."},
-                    "dry_run": {"type": "boolean",
-                                "description": "Preview which lanes + estimated cost WITHOUT "
-                                               "spawning anything. Default false."},
+                    "summary_only": _P["summary_only"],
+                    "output_format": _P["output_format"],
+                    "dry_run": _P["dry_run"],
+                    "async": _P["async"],
                 },
                 "required": ["task"],
             },
             annotations=_ann(readOnlyHint=True, openWorldHint=True, destructiveHint=False),
         ))
         tools.append(from_wire(Tool,
-            name="ask_all_async",
-            description=("Like ask_all but NON-BLOCKING: starts the fan-out as a background job "
-                         "and returns a job_id immediately (in <1s), so a slow council run can't "
-                         "hit the MCP host's tool-call deadline. Poll job_status, fetch "
-                         "job_result. Same options as ask_all."),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "task": {"type": "string", "description": "Prompt sent to every lane."},
-                    "include_paid": {"type": "boolean",
-                                     "description": "Also query limited/paid lanes. Default false."},
-                    "cwd": {"type": "string", "description": "Directory the CLIs run in."},
-                    "timeout_s": {"type": "integer",
-                                  "description": f"Per-lane timeout (max {ASK_ALL_MAX_TIMEOUT_S})."},
-                    "synthesize": {"type": "boolean",
-                                   "description": "Add an agree/disagree summary. Default false."},
-                },
-                "required": ["task"],
-            },
-            annotations=_ann(readOnlyHint=True, openWorldHint=True, destructiveHint=False),
-        ))
-        tools.append(from_wire(Tool,
-            name="job_status",
-            description="Status of an async job: running | succeeded | failed | cancelled | "
-                        "interrupted. Pass the job_id returned by ask_all_async.",
+            name="job",
+            description=("Manage background jobs (ask_all / workflow / batch_run / ask_build with "
+                         "async=true). status: running | succeeded | failed | cancelled | "
+                         "interrupted (+ live build progress). result: the finished output "
+                         "(spills to a file if huge; a 'still running' note if not done). cancel: "
+                         "kill the delegates' process groups. list: recent jobs. tail: a running "
+                         "build's progress log from `offset` (0 first, then the offset returned). "
+                         "steer: queue an `instruction` for a build's NEXT turn and/or "
+                         "interrupt=true to cut the current turn (files written so far are kept)."),
             inputSchema={"type": "object", "properties": {
-                "job_id": {"type": "string", "description": "The job id (e.g. job_ab12…)."}},
-                "required": ["job_id"]},
-            annotations=_ann(readOnlyHint=True, destructiveHint=False),
-        ))
-        tools.append(from_wire(Tool,
-            name="job_result",
-            description="Fetch a finished async job's output (same body as ask_all; spills to a "
-                        "file + preview if huge). Returns a 'still running' note if not done.",
-            inputSchema={"type": "object", "properties": {
-                "job_id": {"type": "string", "description": "The job id."}},
-                "required": ["job_id"]},
-            annotations=_ann(readOnlyHint=True, destructiveHint=False),
-        ))
-        tools.append(from_wire(Tool,
-            name="job_cancel",
-            description="Cancel a running async job — kills the delegate CLIs' process groups.",
-            inputSchema={"type": "object", "properties": {
-                "job_id": {"type": "string", "description": "The job id to cancel."}},
-                "required": ["job_id"]},
+                "action": {"type": "string",
+                           "enum": ["status", "result", "cancel", "list", "tail", "steer"],
+                           "description": "What to do."},
+                "job_id": {"type": "string",
+                           "description": "The job id (e.g. job_ab12…) — every action but list."},
+                "offset": {"type": "integer", "description": "tail: byte offset to read from."},
+                "instruction": {"type": "string",
+                                "description": "steer: what to change/do next (optional if only "
+                                               "interrupting)."},
+                "interrupt": {"type": "boolean",
+                              "description": "steer: cut the current turn now (default false)."},
+            }, "required": ["action"]},
             annotations=_ann(readOnlyHint=False, destructiveHint=False),
-        ))
-        tools.append(from_wire(Tool,
-            name="jobs_list",
-            description="List recent async jobs (this session first, then persisted history) "
-                        "with their status.",
-            inputSchema={"type": "object", "properties": {}},
-            annotations=_ann(readOnlyHint=True, destructiveHint=False),
         ))
         tools.append(from_wire(Tool,
             name="batch_run",
@@ -203,25 +189,19 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                          "call instead of N — saves your context and quota. Each result is "
                          "journalled, so resume_id replays the tasks that already finished and "
                          "runs only the rest (survives a restart). YOU compose the logic; this "
-                         "just executes it durably. async=true returns a job_id (poll job_status, "
-                         "fetch job_result)."),
+                         "just executes it durably. async=true returns a job_id (manage with "
+                         "`job`)."),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "tasks": {"type": "array", "description": "Independent tasks to run.",
                               "items": {"type": "object", "properties": {
-                                  "task": {"type": "string"},
-                                  "lane": {"type": "string", "description": "Lane key (default: a "
-                                           "free lane)."},
+                                  "task": _P["task"],
+                                  "lane": _P["lane"],
                                   "model": {"type": "string"},
                                   "effort": {"type": "string"},
-                                  "cwd": {"type": "string", "description": "Dir the lane runs in "
-                                          "(point it at a file to review instead of pasting it)."},
-                                  "timeout_s": {"type": "integer",
-                                                "description": f"Per-task timeout (default "
-                                                f"{DEFAULT_TIMEOUT_S}, max {MAX_TIMEOUT_S}) — raise "
-                                                "for heavy tasks like reading a file + deep review; "
-                                                "use async=true for long batches."}},
+                                  "cwd": _P["cwd"],
+                                  "timeout_s": _P["timeout_s"]},
                                   "required": ["task"]}},
                     "max_concurrency": {"type": "integer",
                                         "description": "Cap simultaneous spawns (default: profile)."},
@@ -231,13 +211,9 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                     "max_credits": {"type": "number",
                                     "description": "Invocation budget: skip tasks once estimated "
                                     "credits would exceed this (free lanes never blocked)."},
-                    "dry_run": {"type": "boolean",
-                                "description": "Return the cost envelope (calls + est token/credit "
-                                "range) WITHOUT spawning anything."},
-                    "resume_id": {"type": "string",
-                                  "description": "A run_id from a previous batch — replays finished "
-                                  "tasks from cache, runs the rest."},
-                    "async": {"type": "boolean", "description": "Run as a background job."},
+                    "dry_run": _P["dry_run"],
+                    "resume_id": _P["resume_id"],
+                    "async": _P["async"],
                 },
                 "required": ["tasks"],
             },
@@ -257,14 +233,20 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                          "an independent ARBITER commits a BLIND verdict, anonymized cross-family "
                          "peers review, the arbiter adjudicates every issue WITH A REASON, then "
                          "revise-or-converge; converges only if the peers (not the arbiter alone) "
-                         "approve and no blocker remains. All resumable (resume_id) and async-able."),
+                         "approve and no blocker remains. premortem: each lane imagines the plan "
+                         "FAILED and lists failure modes + mitigations, merged into a ranked risk "
+                         "list — run BEFORE building. test_plan: behaviours/edge cases + concrete "
+                         "test cases from a git diff (default: working tree) or a description. "
+                         "challenge: anti-sycophancy — ONE outside lane critically reassesses a "
+                         "claim (pressure-test your own conclusion). All resumable (resume_id) "
+                         "and async-able."),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "preset": {"type": "string",
                                "enum": ["refine_plan", "council_review", "map_review",
                                         "research_verify", "verify_repair", "fanout_compare",
-                                        "jury", "converge"],
+                                        "jury", "converge", "premortem", "test_plan", "challenge"],
                                "description": "Which workflow to run."},
                     "plan_file": {"type": "string",
                                   "description": "refine_plan: path to the plan (PREFERRED — read "
@@ -273,8 +255,13 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                     "angles": {"type": "array", "items": {"type": "string"},
                                "description": "refine_plan: override the critique angles."},
                     "question": {"type": "string", "description": "council_review: the question."},
-                    "task": {"type": "string",
-                             "description": "verify_repair / fanout_compare: the task to run."},
+                    "task": {**_P["task"],
+                             "description": "verify_repair / fanout_compare: the task to run. "
+                                            "premortem: the plan. challenge: the claim. test_plan: "
+                                            "describe the change (or omit to use the git diff)."},
+                    "base": _P["base"],
+                    "diff": _P["diff"],
+                    "timeout_s": _P["timeout_s"],
                     "files": {"type": "array", "items": {"type": "string"},
                               "description": "map_review: file paths to review."},
                     "questions": {"type": "array", "items": {"type": "string"},
@@ -286,7 +273,9 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                                              "['opencode:opencode/deepseek-v4-flash-free', "
                                              "'opencode:opencode/mimo-v2.5-free'] compares several "
                                              "models of ONE lane side by side."},
-                    "lane": {"type": "string", "description": "map_review: the single reviewer lane."},
+                    "lane": {"type": "string",
+                             "description": "map_review / challenge: the single lane (challenge "
+                                            "default: a free one)."},
                     "builder_lane": {"type": "string",
                                      "description": "verify_repair: lane that produces (default: "
                                      "first council lane)."},
@@ -318,36 +307,27 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                     "threshold": {"type": "integer",
                                   "description": "jury: PASS votes needed to APPROVE (default "
                                   "majority); short of it = REJECTED, fail-closed."},
-                    "cwd": {"type": "string",
-                            "description": "verify_repair / fanout_compare: dir the lanes run in."},
+                    "cwd": _P["cwd"],
                     "judge_lane": {"type": "string",
                                    "description": "Optional: one lane dedupes + ranks the pooled "
                                    "findings into a single list (else grouped for you to merge). "
                                    "fanout_compare: recommends one option."},
-                    "include_paid": {"type": "boolean",
-                                     "description": "Allow limited/paid lanes in the default set."},
-                    "resume_id": {"type": "string", "description": "Resume a previous run."},
-                    "async": {"type": "boolean", "description": "Run as a background job."},
+                    "include_paid": _P["include_paid"],
+                    "resume_id": _P["resume_id"],
+                    "async": _P["async"],
                 },
                 "required": ["preset"],
             },
             annotations=_ann(readOnlyHint=False, openWorldHint=True, destructiveHint=False),
         ))
         tools.append(from_wire(Tool,
-            name="conversations_list",
-            description="List recent round-table threads (id, lanes involved, turn count, last "
-                        "activity, preview). Use it to recover a conversation id and continue a "
-                        "thread after a context reset.",
-            inputSchema={"type": "object", "properties": {}},
-            annotations=_ann(readOnlyHint=True, destructiveHint=False),
-        ))
-        tools.append(from_wire(Tool,
-            name="conversation_show",
-            description="Show the full transcript of one round-table thread — every turn, "
-                        "attributed by lane. Pass the conversation id.",
+            name="conversations",
+            description="Round-table threads. No id: list recent threads (id, lanes, turns, last "
+                        "activity, preview) — recover a thread after /compact. With id: the full "
+                        "transcript, every turn attributed by lane.",
             inputSchema={"type": "object", "properties": {
-                "conversation": {"type": "string", "description": "The thread id."}},
-                "required": ["conversation"]},
+                "id": {"type": "string", "description": "The thread id (omit to list)."}},
+                "required": []},
             annotations=_ann(readOnlyHint=True, destructiveHint=False),
         ))
         tools.append(from_wire(Tool,
@@ -355,9 +335,8 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             description="List the models reachable through a lane so you can pick one. If that "
                         "CLI has no list command, shows its default model + how to choose. Pass "
                         "`lane` (e.g. opencode, mistral, gpt).",
-            inputSchema={"type": "object", "properties": {
-                "lane": {"type": "string", "description": "Lane key to inspect."}},
-                "required": ["lane"]},
+            inputSchema={"type": "object", "properties": {"lane": _P["lane"]},
+                         "required": ["lane"]},
             annotations=_ann(readOnlyHint=True, destructiveHint=False),
         ))
     tools.append(from_wire(Tool,
@@ -378,40 +357,10 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
         annotations=_ann(readOnlyHint=True, destructiveHint=False),
     ))
     tools.append(from_wire(Tool,
-        name="usage_report",
-        description="Local usage stats (this machine only): total runs, per-lane counts/success/"
-                    "avg latency, ESTIMATED tokens (chars/4) and credits (if CLI_BRIDGE_<LANE>_"
-                    "CREDITS_PER_1K is set), and recent calls. All token/credit figures are "
-                    "estimates, never exact.",
-        inputSchema={"type": "object", "properties": {
-            "since": {"type": "string",
-                      "description": "Limit to a recent window, e.g. '24h', '7d', '90m' (default: all)."},
-            "output_format": {"type": "string", "enum": ["text", "json"],
-                              "description": "text (default) or json."}}},
-        annotations=_ann(readOnlyHint=True, destructiveHint=False),
-    ))
-    tools.append(from_wire(Tool,
-        name="usage_budget",
-        description="Per-lane runs since UTC midnight vs an optional CLI_BRIDGE_<LANE>_DAILY_LIMIT "
-                    "(ENFORCED at spawn once reached), plus estimated tokens/credits spent today. "
-                    "Estimates only.",
-        inputSchema={"type": "object", "properties": {}},
-        annotations=_ann(readOnlyHint=True, destructiveHint=False),
-    ))
-    tools.append(from_wire(Tool,
-        name="lane_stats",
-        description="Per-lane health: total runs, failures, consecutive failures/timeouts, and "
-                    "any active cooldown (a lane in cooldown is skipped by ask_all until it clears).",
-        inputSchema={"type": "object", "properties": {}},
-        annotations=_ann(readOnlyHint=True, destructiveHint=False),
-    ))
-    tools.append(from_wire(Tool,
         name="reset_lane_state",
         description="Clear a lane's cooldown + failure counters (e.g. after you re-logged in or "
                     "your quota reset). Pass the lane key, e.g. 'gemini'.",
-        inputSchema={"type": "object", "properties": {
-            "lane": {"type": "string", "description": "Lane key to reset (e.g. gemini, gpt)."}},
-            "required": ["lane"]},
+        inputSchema={"type": "object", "properties": {"lane": _P["lane"]}, "required": ["lane"]},
         annotations=_ann(readOnlyHint=False, destructiveHint=False),
     ))
     if lanes:
@@ -420,38 +369,20 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             description="Ask ONE model but with automatic fallback: tries lanes cheapest→strongest, "
                         "skipping cooled ones, and moves to the next on quota/auth/timeout/failure. "
                         "Returns the first success (and a note of what was tried). Use this for plain "
-                        "cheapest-first; use `ask_best` to route by mode/your ratings, `route_plan` to "
-                        "preview the order without running. Free/non-limited by default; include_paid "
-                        "to widen.",
+                        "cheapest-first; use `ask_best` to route by mode/your ratings. "
+                        "Free/non-limited by default; include_paid to widen.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "task": {"type": "string", "description": "The prompt."},
-                    "include_paid": {"type": "boolean",
-                                     "description": "Allow limited/paid lanes in the chain. "
-                                                    "Default false (except CLI_BRIDGE_PROFILE=max)."},
-                    "cwd": {"type": "string", "description": "Directory the CLI runs in."},
-                    "timeout_s": {"type": "integer",
-                                  "description": f"Per-attempt timeout (max {MAX_TIMEOUT_S})."},
-                    "escalate": {"type": "boolean",
-                                 "description": "Confidence-escalate: a cheap lane that self-reports "
-                                 "low confidence ([ESCALATE]) hands off to a stronger one, not just "
-                                 "on failure. Self-report is noisy — opt-in. Default false."},
+                    "task": _P["task"],
+                    "include_paid": _P["include_paid"],
+                    "cwd": _P["cwd"],
+                    "timeout_s": _P["timeout_s"],
+                    "dry_run": _P["dry_run"],
                 },
                 "required": ["task"],
             },
             annotations=_ann(readOnlyHint=True, openWorldHint=True, destructiveHint=False),
-        ))
-        tools.append(from_wire(Tool,
-            name="route_plan",
-            description="Explain (without running anything) the order ask_cascade would try lanes "
-                        "in, given current cost profile and lane cooldowns. Pass a `mode` to "
-                        "preview ask_best's order instead.",
-            inputSchema={"type": "object", "properties": {
-                "include_paid": {"type": "boolean", "description": "Include limited/paid lanes."},
-                "mode": {"type": "string", "enum": list(router.MODES),
-                         "description": "Preview ask_best's ordering for this mode."}}},
-            annotations=_ann(readOnlyHint=True, destructiveHint=False),
         ))
         tools.append(from_wire(Tool,
             name="ask_best",
@@ -463,17 +394,15 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "task": {"type": "string", "description": "The prompt."},
+                    "task": _P["task"],
                     "mode": {"type": "string", "enum": list(router.MODES),
                              "description": "fast=low latency · cheap=free only (default) · "
                                             "deep/code=stronger lanes · review/security=capable "
                                             "lane. paid lanes only if include_paid/profile allows."},
-                    "include_paid": {"type": "boolean",
-                                     "description": "Allow limited/paid lanes. Default false "
-                                                    "(except CLI_BRIDGE_PROFILE=max)."},
-                    "cwd": {"type": "string", "description": "Directory the CLI runs in."},
-                    "timeout_s": {"type": "integer",
-                                  "description": f"Per-attempt timeout (max {MAX_TIMEOUT_S})."},
+                    "include_paid": _P["include_paid"],
+                    "cwd": _P["cwd"],
+                    "timeout_s": _P["timeout_s"],
+                    "dry_run": _P["dry_run"],
                 },
                 "required": ["task"],
             },
@@ -490,8 +419,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "lane": {"type": "string",
-                             "description": "Lane key that answered (e.g. gemini, gpt, mistral)."},
+                    "lane": _P["lane"],
                     "score": {"type": "integer",
                               "description": "Quality 1 (poor) .. 5 (excellent)."},
                     "mode": {"type": "string", "enum": list(router.MODES),
@@ -516,8 +444,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "lane": {"type": "string",
-                             "description": "Lane key (e.g. gemini, gpt, opencode)."},
+                    "lane": _P["lane"],
                     "cost": {"type": "string", "enum": ["free", "limited", "paid"],
                              "description": "What this lane costs the USER: free=use freely; "
                                             "limited=scarce quota (skip broad fan-out); "
@@ -543,51 +470,24 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
+                    "focus": {"type": "string", "enum": ["code", "security"],
+                              "description": "code (default): correctness/design review. security: "
+                                             "OWASP-style review — lanes split across injection / "
+                                             "auth & access control / secrets & crypto / data "
+                                             "exposure & SSRF, with the security role set."},
                     "cwd": {"type": "string",
                             "description": "Repo dir to run `git diff` in (default: host launch dir)."},
-                    "base": {"type": "string",
-                             "description": "git ref/range to diff against. Default HEAD "
-                                            "(uncommitted changes). E.g. 'main', 'HEAD~3', 'main...HEAD'."},
-                    "diff": {"type": "string",
-                             "description": "Review this diff text directly instead of running git."},
-                    "include_paid": {"type": "boolean",
-                                     "description": "Allow limited/paid lanes as reviewers. "
-                                                    "Default false (except CLI_BRIDGE_PROFILE=max)."},
-                    "output_format": {"type": "string", "enum": ["markdown", "json"],
-                                      "description": "markdown (default, PR-friendly) or json "
-                                                     "(structured findings)."},
+                    "base": _P["base"],
+                    "diff": _P["diff"],
+                    "include_paid": _P["include_paid"],
+                    "output_format": _P["output_format"],
                     "severity_filter": {"type": "string", "enum": list(findings.SEVERITIES),
                                         "description": "Only show findings at or above this "
                                         "severity (blocker>high>medium>low>info). Default: all."},
-                    "timeout_s": {"type": "integer",
-                                  "description": f"Per-reviewer timeout (max {MAX_TIMEOUT_S}, "
-                                                 f"default {config.REVIEW_DEFAULT_TIMEOUT_S})."},
-                },
-                "required": [],
-            },
-            annotations=_ann(readOnlyHint=True, openWorldHint=True, destructiveHint=False),
-        ))
-        tools.append(from_wire(Tool,
-            name="security_review",
-            description=("OWASP-aware SECURITY review of a git diff: lanes review in parallel "
-                         "across security categories (injection / auth & access control / "
-                         "secrets & crypto / data exposure & SSRF), then merge into a severity-"
-                         "ranked report. Deeper than review_diff's single security lens. "
-                         "Free/non-limited lanes unless include_paid."),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "cwd": {"type": "string", "description": "Repo dir to run `git diff` in."},
-                    "base": {"type": "string", "description": "git ref/range. Default HEAD."},
-                    "diff": {"type": "string", "description": "Review this diff text directly."},
-                    "include_paid": {"type": "boolean", "description": "Allow limited/paid lanes."},
-                    "output_format": {"type": "string", "enum": ["markdown", "json"],
-                                      "description": "markdown (default) or json."},
-                    "severity_filter": {"type": "string", "enum": list(findings.SEVERITIES),
-                                        "description": "Only show findings at or above this "
-                                        "severity (blocker>high>medium>low>info). Default: all."},
-                    "timeout_s": {"type": "integer",
-                                  "description": f"Per-reviewer timeout (max {MAX_TIMEOUT_S})."},
+                    "timeout_s": {**_P["timeout_s"],
+                                  "description": f"Per-reviewer timeout (default "
+                                                 f"{config.REVIEW_DEFAULT_TIMEOUT_S}, max "
+                                                 f"{MAX_TIMEOUT_S})."},
                 },
                 "required": [],
             },
@@ -612,12 +512,12 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                              "stops races, and any file written OUTSIDE the zone is detected and "
                              "the build rejected — so the host can build other parts of the SAME "
                              "repo in parallel. async=true makes direct builds steerable mid-run "
-                             "(job_tail / build_steer / DoD gate). Greenfield dirs are created "
+                             "(job action=tail/steer, DoD gate). Greenfield dirs are created "
                              "and git-initialised."),
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "task": {"type": "string", "description": "What the agent should build."},
+                        "task": _P["task"],
                         "lane": {"type": "string", "enum": [ln.key for ln in build_lanes],
                                  "description": "The build-capable lane that does the work "
                                  "(empty = the first free build-capable lane, router order)."},
@@ -649,8 +549,9 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                                           "uncommitted tracked changes (default false)."},
                         "async": {"type": "boolean",
                                   "description": "direct: run as a STEERABLE background job — "
-                                  "returns a job_id; follow with job_tail, steer with build_steer "
-                                  "(and interrupt), fetch with job_result. Enables multi-turn + DoD."},
+                                  "returns a job_id; follow with job(action=tail), steer with "
+                                  "job(action=steer) (and interrupt), fetch with "
+                                  "job(action=result). Enables multi-turn + DoD."},
                         "dry_run": {"type": "boolean",
                                     "description": "direct: render the composed brief and stop — "
                                     "nothing is launched (review the spec before you send it)."},
@@ -675,100 +576,35 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                         "cwd": {"type": "string",
                                 "description": "isolated: a dir inside the repo to isolate (default: "
                                                "host launch dir)."},
-                        "timeout_s": {"type": "integer",
-                                      "description": f"Timeout (max {MAX_TIMEOUT_S})."},
+                        "timeout_s": _P["timeout_s"],
                     },
                     "required": ["task"],
                 },
                 annotations=_ann(readOnlyHint=False, openWorldHint=True,
                                  destructiveHint=True),   # direct mode writes the real repo
             ))
-            tools.append(from_wire(Tool,
-                name="ask_build_isolated",
-                description=("[legacy alias of ask_build mode=isolated] Run a build-capable lane in "
-                             "WRITE mode but SAFELY: it edits a "
-                             "throwaway git worktree checked out at HEAD, and you get the "
-                             "resulting diff to review — your real repo is never modified "
-                             "(nothing is auto-applied). The recommended way to use write mode."),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "task": {"type": "string", "description": "What the agent should build/edit."},
-                        "lane": {"type": "string", "enum": [ln.key for ln in build_lanes],
-                                 "description": "The build-capable lane that EDITS the worktree "
-                                 "(the editor). Pick a cheaper lane here when using architect_lane."},
-                        "architect_lane": {"type": "string", "enum": [ln.key for ln in lanes],
-                                           "description": "Optional: a (usually stronger) lane that "
-                                           "first writes a precise PLAN, which the editor lane then "
-                                           "implements (Aider-style architect/editor split — strong "
-                                           "model plans, cheaper model applies). Needs no write mode."},
-                        "model": {"type": "string", "description": "Model override (empty = default)."},
-                        "effort": {"type": "string",
-                                   "enum": ["", "minimal", "low", "medium", "high", "max"],
-                                   "description": "Reasoning depth."},
-                        "cwd": {"type": "string",
-                                "description": "A dir inside the git repo to isolate (default: "
-                                               "host launch dir)."},
-                        "timeout_s": {"type": "integer",
-                                      "description": f"Timeout (max {MAX_TIMEOUT_S})."},
-                    },
-                    "required": ["task", "lane"],
-                },
-                annotations=_ann(readOnlyHint=False, openWorldHint=True,
-                                 destructiveHint=False),   # edits are isolated + discarded
-            ))
-            tools.append(from_wire(Tool,
-                name="job_tail",
-                description=("Stream a running build's progress log (turn markers, agent output, "
-                             "DoD results, steering applied). Pass the job_id from ask_build "
-                             "async=true, plus the byte offset returned last time (0 to start). "
-                             "Returns the new offset + the new text — poll it to follow live and "
-                             "write step summaries for the user."),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "job_id": {"type": "string", "description": "The build job id."},
-                        "offset": {"type": "integer",
-                                   "description": "Byte offset to read from (0 first; then pass the "
-                                   "offset returned previously)."},
-                    },
-                    "required": ["job_id"],
-                },
-                annotations=_ann(readOnlyHint=True, openWorldHint=False, destructiveHint=False),
-            ))
-            tools.append(from_wire(Tool,
-                name="build_steer",
-                description=("Steer a running build like a human would. Queue an instruction for "
-                             "the NEXT turn (e.g. 'use Tailwind, not inline CSS'), and/or "
-                             "interrupt=true to cut the CURRENT turn short (the delegate's process "
-                             "is killed; files written so far are KEPT). The build then continues, "
-                             "applying your steering. Pass the job_id from ask_build async=true."),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "job_id": {"type": "string", "description": "The build job id."},
-                        "instruction": {"type": "string",
-                                        "description": "What to change/do next (optional if only "
-                                        "interrupting)."},
-                        "interrupt": {"type": "boolean",
-                                      "description": "Cut the current turn now (default false). "
-                                      "Files already written are kept."},
-                    },
-                    "required": ["job_id"],
-                },
-                annotations=_ann(readOnlyHint=False, openWorldHint=True, destructiveHint=False),
-            ))
         tools.append(from_wire(Tool,
             name="debate",
             description=("Multi-model debate: each lane answers the question, then sees the "
                          "others and REVISES over a bounded number of rounds, then a judge "
                          "writes the final conclusion (consensus + remaining disagreement). "
-                         "Good for hard/contested questions. Free/non-limited lanes unless "
-                         "include_paid; bounded to a few debaters to cap cost."),
+                         "Good for hard/contested questions. vote=borda instead SELECTS the "
+                         "peer-ranked best blind answer (no rounds). Free/non-limited lanes "
+                         "unless include_paid; bounded to a few debaters to cap cost."),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "task": {"type": "string", "description": "The question to debate."},
+                    "task": _P["task"],
+                    "vote": {"type": "string", "enum": ["judge", "borda"],
+                             "description": "judge (default): revision rounds then an independent "
+                                            "judge concludes. borda: NO rounds — blind answers, each "
+                                            "lane ranks the ANONYMIZED set, Borda count SELECTS the "
+                                            "peer-ranked #1 (selection beats synthesis). rounds/"
+                                            "adversarial/steelman/fact_check ignored under borda."},
+                    "synthesize": {"type": "boolean",
+                                   "description": "borda only: a chairman BLENDS the answers "
+                                                  "instead of returning the winner verbatim "
+                                                  "(weaker; default false)."},
                     "rounds": {"type": "integer",
                                "description": "Revision rounds after the opening answers "
                                               "(default 1, max 3)."},
@@ -790,10 +626,7 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                                    "verdict's verifiable claims (commands, model tags, versions) "
                                    "and flags what it cannot confirm. Default ON when a free "
                                    "lane exists; false to skip."},
-                    "summary_only": {"type": "boolean",
-                                     "description": "Return verdict + disagreements + fact-check "
-                                     "only; drop the full per-debater positions (~60-80% fewer "
-                                     "tokens)."},
+                    "summary_only": _P["summary_only"],
                     "allow_self_judge": {"type": "boolean",
                                          "description": "Let the judge also debate (default: "
                                          "with 3+ lanes one lane is held out to judge "
@@ -802,179 +635,42 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                                  "description": "If the verdict is unanimous, one lane argues "
                                  "the strongest case AGAINST it and the judge re-concludes "
                                  "(anti-echo-chamber bonus round). Default false."},
-                    "dry_run": {"type": "boolean",
-                                "description": "Preflight: return a data manifest — which vendors "
-                                "would be queried and exactly which files/chars would be sent — "
-                                "WITHOUT spawning anything. Default false."},
-                    "include_paid": {"type": "boolean", "description": "Allow limited/paid lanes."},
-                    "cwd": {"type": "string", "description": "Directory the CLIs run in."},
-                    "timeout_s": {"type": "integer",
-                                  "description": f"Per-turn timeout (max {MAX_TIMEOUT_S})."},
+                    "dry_run": _P["dry_run"],
+                    "include_paid": _P["include_paid"],
+                    "cwd": _P["cwd"],
+                    "timeout_s": _P["timeout_s"],
                 },
                 "required": ["task"],
             },
             annotations=_ann(readOnlyHint=True, openWorldHint=True, destructiveHint=False),
         ))
         tools.append(from_wire(Tool,
-            name="consensus",
-            description=("Council CONSENSUS: every lane answers blind, then each RANKS the "
-                         "ANONYMIZED answers (no model can favour its own), the votes are "
-                         "aggregated deterministically (Borda count), and the peer-ranked #1 "
-                         "answer is returned (SELECTION — research shows it beats blending). "
-                         "Use it for 'what's the right answer?' when you want a peer-vetted "
-                         "result. Vs `ask_all` (shows every answer) / `fanout_compare` (options side "
-                         "by side) / `debate` (multi-round argue). Free/non-limited unless include_paid."),
+            name="git_text",
+            description=("Read-only git → text via one lane. kind=commit: Conventional Commit "
+                         "message from the STAGED diff (falls back to the working tree). kind=pr: "
+                         "title + Summary/Changes/Testing from branch diff + log vs base (default "
+                         "origin/main, then main). Never commits."),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "task": {"type": "string", "description": "The question to resolve."},
-                    "context_files": {"type": "array", "items": {"type": "string"},
-                                      "description": "Up to 5 key file paths read into every "
-                                      "panelist prompt (grounding). Relative paths resolve "
-                                      "against cwd."},
-                    "allow_ungrounded": {"type": "boolean",
-                                         "description": "If the brief names local files you didn't "
-                                         "pass as context_files, the tool stops and asks for them "
-                                         "(files_required_to_continue). Set true to proceed without "
-                                         "reading the code. Default false."},
-                    "synthesize": {"type": "boolean",
-                                   "description": "Have a chairman BLEND the answers instead of "
-                                   "returning the peer-ranked best one verbatim. Default false: "
-                                   "synthesis empirically loses to selection (it averages away "
-                                   "the variance that makes a council useful)."},
-                    "summary_only": {"type": "boolean",
-                                     "description": "Return the final answer + vote table only; "
-                                     "drop the full per-model answers."},
-                    "dry_run": {"type": "boolean",
-                                "description": "Preflight data manifest (vendors + files/chars "
-                                "that would be sent) without spawning anything. Default false."},
-                    "include_paid": {"type": "boolean", "description": "Allow limited/paid lanes."},
-                    "cwd": {"type": "string", "description": "Directory the CLIs run in."},
-                    "timeout_s": {"type": "integer",
-                                  "description": f"Per-call timeout (max {MAX_TIMEOUT_S})."},
-                },
-                "required": ["task"],
-            },
-            annotations=_ann(readOnlyHint=True, openWorldHint=True, destructiveHint=False),
-        ))
-        tools.append(from_wire(Tool,
-            name="challenge",
-            description=("Anti-sycophancy: hand a CLAIM to one OUTSIDE lane with a critical-"
-                         "reassessment prompt and get its skeptical review — does it actually "
-                         "hold up? Pressure-test your OWN conclusion before acting (an "
-                         "independent skeptic, not a yes-man). Vs `debate` (multi-round, many "
-                         "lanes) / `consensus` (pick best of N): challenge = ONE skeptic on one "
-                         "claim. Optional `lane` to choose who."),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "task": {"type": "string", "description": "The claim/conclusion to challenge."},
-                    "lane": {"type": "string",
-                             "description": "Which lane plays skeptic (default: a free one)."},
-                    "timeout_s": {"type": "integer",
-                                  "description": f"Timeout (max {MAX_TIMEOUT_S})."},
-                },
-                "required": ["task"],
-            },
-            annotations=_ann(readOnlyHint=True, openWorldHint=True, destructiveHint=False),
-        ))
-        tools.append(from_wire(Tool,
-            name="premortem",
-            description=("Multi-model PREMORTEM: each lane imagines the change/plan failed and "
-                         "lists likely failure modes, root causes, early signs and mitigations; "
-                         "one lane merges into a prioritized risk list. Run it BEFORE building."),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "task": {"type": "string", "description": "The change or plan to stress-test."},
-                    "include_paid": {"type": "boolean", "description": "Allow limited/paid lanes."},
-                    "timeout_s": {"type": "integer",
-                                  "description": f"Per-lane timeout (max {MAX_TIMEOUT_S})."},
-                },
-                "required": ["task"],
-            },
-            annotations=_ann(readOnlyHint=True, openWorldHint=True, destructiveHint=False),
-        ))
-        tools.append(from_wire(Tool,
-            name="test_plan",
-            description=("Multi-model TEST PLAN from a git diff (default: working-tree changes) or "
-                         "a description: the behaviors/edge cases to test and the minimal set of "
-                         "concrete test cases to add, merged + prioritized."),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "task": {"type": "string",
-                             "description": "Describe the change (or omit to use the git diff)."},
-                    "diff": {"type": "string", "description": "Plan tests for this diff text."},
-                    "base": {"type": "string", "description": "git ref/range. Default HEAD."},
-                    "cwd": {"type": "string", "description": "Repo dir for `git diff`."},
-                    "include_paid": {"type": "boolean", "description": "Allow limited/paid lanes."},
-                    "timeout_s": {"type": "integer",
-                                  "description": f"Per-lane timeout (max {MAX_TIMEOUT_S})."},
-                },
-                "required": [],
-            },
-            annotations=_ann(readOnlyHint=True, openWorldHint=True, destructiveHint=False),
-        ))
-        tools.append(from_wire(Tool,
-            name="commit_msg",
-            description=("Generate a Conventional Commit message from your STAGED diff (falls "
-                         "back to the working tree if nothing is staged). Read-only — returns "
-                         "text, never commits. Optional `lane`, `cwd`."),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "cwd": {"type": "string", "description": "Repo dir (default: launch dir)."},
-                    "lane": {"type": "string", "description": "Which lane (default: a free one)."},
-                    "timeout_s": {"type": "integer",
-                                  "description": f"Timeout (max {MAX_TIMEOUT_S})."},
-                },
-                "required": [],
-            },
-            annotations=_ann(readOnlyHint=True, openWorldHint=True, destructiveHint=False),
-        ))
-        tools.append(from_wire(Tool,
-            name="pr_describe",
-            description=("Generate a PR title + description (Summary / Changes / Testing) from the "
-                         "branch's diff and commit log vs a base (default origin/main, then main). "
-                         "Read-only. Optional `base`, `lane`, `cwd`."),
-            inputSchema={
-                "type": "object",
-                "properties": {
+                    "kind": {"type": "string", "enum": ["commit", "pr"],
+                             "description": "commit message or PR description."},
                     "base": {"type": "string",
-                             "description": "Base ref to diff against (default origin/main)."},
-                    "cwd": {"type": "string", "description": "Repo dir (default: launch dir)."},
-                    "lane": {"type": "string", "description": "Which lane (default: a free one)."},
-                    "timeout_s": {"type": "integer",
-                                  "description": f"Timeout (max {MAX_TIMEOUT_S})."},
+                             "description": "pr only: base ref to diff against (default origin/main)."},
+                    "cwd": _P["cwd"],
+                    "lane": {**_P["lane"], "description": "Which lane (default: a free one)."},
+                    "timeout_s": _P["timeout_s"],
                 },
-                "required": [],
+                "required": ["kind"],
             },
             annotations=_ann(readOnlyHint=True, openWorldHint=True, destructiveHint=False),
         ))
     return tools
 
 
-def _self_ask_tool(lane: LaneSpec) -> Tool:
-    """ask_<host> in CLI_BRIDGE_HIDE_HOST mode — requires an explicit `model` so it's only ever
-    used to reach a SIBLING model (asking your own running model the same thing is pointless)."""
-    schema = _ask_schema(lane)
-    schema["required"] = ["task", "model"]
-    can_write = "agent" in lane.caps
-    return from_wire(Tool,
-        name=f"ask_{lane.key}",
-        description=(f"Consult a DIFFERENT model of your own family via {lane.display}. "
-                     "Requires an explicit `model` (e.g. a sibling like claude-opus-4-6); empty "
-                     f"model is rejected. {lane.note}"),
-        inputSchema=schema,
-        annotations=_ann(readOnlyHint=not can_write, openWorldHint=True,
-                         destructiveHint=can_write),
-    )
-
-
 def _host_ask_tool(lane: LaneSpec) -> Tool:
-    """ask_<host> as a NORMAL direct tool (default): the caller's own lane is visible and callable
-    like any other (model optional). It still stays out of ask_all/ask_cascade fan-out."""
+    """ask_<host>: the caller's own lane is visible and callable like any other (model optional).
+    It still stays out of ask_all/ask_cascade fan-out."""
     can_write = "agent" in lane.caps
     return from_wire(Tool,
         name=f"ask_{lane.key}",
@@ -986,44 +682,20 @@ def _host_ask_tool(lane: LaneSpec) -> Tool:
     )
 
 
-# doctor/setup are how a host learns what's installed and how to configure cost — never hide them.
-ESSENTIAL_TOOLS = {"doctor", "setup"}
-
-# CLI_BRIDGE_LEAN core surface (validated by a 2-tier model council): the daily-driver tools.
-# Per-lane `ask_<lane>` are kept too (handled by prefix below). Everything else hides behind the
-# opt-in. NOT including ask_all_async / ask_build_isolated(alias) — the prefix excludes those.
-_LEAN_CORE = {"ask_all", "ask_best", "ask_cascade", "review_diff", "security_review", "ask_build",
-              "workflow", "jobs_list", "job_tail", "commit_msg", "pr_describe", "doctor"}
-_NON_LANE_ASKS = {"ask_all", "ask_all_async", "ask_best", "ask_cascade", "ask_build",
-                  "ask_build_isolated"}
+# The default surface — what a host sees with CLI_BRIDGE_TOOLS unset (plus every ask_<lane>).
+# The rest (batch_run, reset_lane_state) is opt-in: CLI_BRIDGE_TOOLS=all, or named in a list.
+DEFAULT_TOOLS = frozenset({"ask_all", "ask_cascade", "ask_best", "ask_build", "review_diff", "debate",
+                           "workflow", "git_text", "job", "conversations", "list_models",
+                           "rate_lane", "set_lane_cost", "doctor", "setup"})
 
 
-def _lean_keep(name: str) -> bool:
-    """A per-lane ask (ask_gpt/ask_gemini/…) or a curated core tool."""
-    return (name in _LEAN_CORE or name in ESSENTIAL_TOOLS
-            or (name.startswith("ask_") and name not in _NON_LANE_ASKS))
-
-
-def _filter_tools(tools: list[Tool]) -> list[Tool]:
-    """Apply CLI_BRIDGE_ENABLED_TOOLS (allowlist) / _DISABLED_TOOLS (denylist) so a host pays
-    context only for the tools it wants. Stole the pattern from pal-mcp-server, whose #1 issue is
-    ~30-40k idle tokens from an unfilterable surface. Essentials are always kept."""
-    enabled = config.enabled_tools()
-    disabled = config.disabled_tools()
-    # LEAN: curated core surface, unless the host set an explicit allow/deny list (that wins).
-    if config.lean() and not enabled and not disabled:
-        return [t for t in tools if _lean_keep(t.name.lower())]
-    if not enabled and not disabled:
+def _filter_tools(tools: list[Tool], always: set[str]) -> list[Tool]:
+    """Apply the one CLI_BRIDGE_TOOLS knob (config.tools) so a host pays schema context only for
+    the tools it wants. `always` = the per-lane ask_<lane> names, kept in every mode; doctor/setup
+    are never hidden either. List-time only — call_tool still executes any registered name."""
+    want = config.tools()
+    if "all" in want:
         return tools
-    out = []
-    for t in tools:
-        name = t.name.lower()
-        if name in ESSENTIAL_TOOLS:
-            out.append(t)
-        elif enabled and name not in enabled:
-            continue
-        elif name in disabled:
-            continue
-        else:
-            out.append(t)
-    return out
+    keep = set(DEFAULT_TOOLS) if not want or "default" in want else set()
+    keep |= want | {"doctor", "setup"} | always
+    return [t for t in tools if t.name in keep]

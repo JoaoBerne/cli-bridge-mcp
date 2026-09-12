@@ -1,7 +1,7 @@
 """Unit tests for server-side helpers that don't need a live MCP session."""
 import asyncio
 
-from cli_bridge import server
+from cli_bridge import council, server
 from cli_bridge.lanes import LaneSpec
 from cli_bridge.mcp_compat import attr  # mcp 2.0 renamed model fields to snake_case
 from cli_bridge.runner import RunResult
@@ -12,7 +12,7 @@ def test_ollama_surfaces_ask_and_list_tools_read_only():
     ollama = next(ln for ln in BUILTIN_LANES if ln.key == "ollama")
     names = {t.name for t in server._tools_for([ollama])}
     assert "ask_ollama" in names                       # the consult tool
-    assert "list_ollama_models" in names               # surfaced because models_args is set
+    assert "list_ollama_models" not in names           # folded into list_models(lane=)
     ask = next(t for t in server._tools_for([ollama]) if t.name == "ask_ollama")
     assert attr(ask.annotations, "readOnlyHint") is True   # no agent cap → never advertises write
 
@@ -109,7 +109,8 @@ def test_cascade_trace_shows_attempts_and_chosen(monkeypatch):
         return RunResult(True, "the answer", "ok", latency_ms=34)
     monkeypatch.setattr(server, "_run_lane", fake_run_lane)
 
-    out = asyncio.run(server._ask_cascade([a, b], {"task": "hi"}))
+    out = asyncio.run(council.ask_cascade([a, b], {"task": "hi"},
+                                          run_lane=server._run_lane, emit=server._emit))
     text = out[0].text
     assert "the answer" in text
     assert "Trace — cascade" in text
@@ -167,10 +168,22 @@ def test_cascade_trace_on_total_failure(monkeypatch):
         return RunResult(False, "boom", "failed", latency_ms=5)
     monkeypatch.setattr(server, "_run_lane", fake_run_lane)
 
-    out = asyncio.run(server._ask_cascade([a], {"task": "hi"}))
+    out = asyncio.run(council.ask_cascade([a], {"task": "hi"},
+                                          run_lane=server._run_lane, emit=server._emit))
     text = out[0].text
     assert text.startswith("[error] all lanes failed")
     assert "Trace — cascade" in text and "❌ a [free] 5ms — failed" in text
+
+
+def test_cascade_dry_run_explains_order_without_spawning(monkeypatch):
+    a = LaneSpec("a", "LaneA", "echo", lambda *x: [])
+    monkeypatch.setattr(server.telemetry, "cooldown_remaining", lambda key: 0)
+
+    async def boom(lane, args, *, tool="ask", terse=True):
+        raise AssertionError("dry_run must not spawn")
+    out = asyncio.run(council.ask_cascade([a], {"task": "hi", "dry_run": True},
+                                          run_lane=boom, emit=server._emit))
+    assert out[0].text.startswith("Cascade order:")
 
 
 def _claude_lane():
@@ -194,7 +207,6 @@ def test_host_lane_shown_by_default_model_optional(monkeypatch):
     claude = _claude_lane()
     monkeypatch.setattr(server, "installed_lanes", lambda lst: [claude])
     monkeypatch.setenv("CLI_BRIDGE_HOST", "claude-code")
-    monkeypatch.delenv("CLI_BRIDGE_HIDE_HOST", raising=False)
     tools = asyncio.run(server.list_tools())
     ask_claude = next((t for t in tools if t.name == "ask_claude"), None)
     assert ask_claude is not None
@@ -205,7 +217,6 @@ def test_host_lane_callable_without_model_by_default(monkeypatch):
     claude = _claude_lane()
     monkeypatch.setattr(server, "installed_lanes", lambda lst: [claude])
     monkeypatch.setenv("CLI_BRIDGE_HOST", "claude-code")
-    monkeypatch.delenv("CLI_BRIDGE_HIDE_HOST", raising=False)
 
     async def fake_run_lane(lane, args, *, tool="ask", terse=True):
         return RunResult(True, "own lane says hi", "ok", latency_ms=5)
@@ -213,26 +224,6 @@ def test_host_lane_callable_without_model_by_default(monkeypatch):
 
     out = asyncio.run(server.call_tool("ask_claude", {"task": "hi"}))
     assert "own lane says hi" in out[0].text
-
-
-def test_self_ask_tool_listed_and_requires_model_when_hidden(monkeypatch):
-    claude = _claude_lane()
-    monkeypatch.setattr(server, "installed_lanes", lambda lst: [claude])
-    monkeypatch.setenv("CLI_BRIDGE_HOST", "claude-code")
-    monkeypatch.setenv("CLI_BRIDGE_HIDE_HOST", "1")            # legacy: sibling-only consult
-    tools = asyncio.run(server.list_tools())
-    ask_claude = next((t for t in tools if t.name == "ask_claude"), None)
-    assert ask_claude is not None
-    assert "model" in attr(ask_claude, "inputSchema")["required"]
-
-
-def test_self_ask_rejects_missing_model_when_hidden(monkeypatch):
-    claude = _claude_lane()
-    monkeypatch.setattr(server, "installed_lanes", lambda lst: [claude])
-    monkeypatch.setenv("CLI_BRIDGE_HOST", "claude-code")
-    monkeypatch.setenv("CLI_BRIDGE_HIDE_HOST", "1")
-    out = asyncio.run(server.call_tool("ask_claude", {"task": "hi"}))
-    assert "explicit `model`" in out[0].text
 
 
 def test_self_ask_runs_with_explicit_model(monkeypatch):
@@ -254,7 +245,7 @@ def test_self_ask_runs_with_explicit_model(monkeypatch):
 
 def test_list_prompts_exposes_workflows():
     names = {p.name for p in asyncio.run(server.list_prompts())}
-    assert {"review_diff", "security_review", "debate", "cost_setup", "apilookup"} <= names
+    assert names == {"apilookup"}
 
 
 def test_apilookup_prompt_forces_current_docs():
@@ -262,22 +253,6 @@ def test_apilookup_prompt_forces_current_docs():
         "apilookup", {"query": "fastapi background tasks"})).messages[0].content.text
     assert "today's date" in text and "training cutoff" in text
     assert "ask_gemini" in text and "fastapi background tasks" in text
-
-
-def test_get_prompt_review_diff_with_base():
-    res = asyncio.run(server.get_prompt("review_diff", {"base": "main"}))
-    text = res.messages[0].content.text
-    assert "review_diff" in text and "main" in text
-
-
-def test_get_prompt_debate_uses_question():
-    res = asyncio.run(server.get_prompt("debate", {"question": "tabs or spaces?"}))
-    assert "tabs or spaces?" in res.messages[0].content.text
-
-
-def test_get_prompt_debate_without_question_falls_back():
-    res = asyncio.run(server.get_prompt("debate", {}))
-    assert "debate" in res.messages[0].content.text.lower()
 
 
 def test_get_prompt_unknown_raises():
@@ -294,7 +269,7 @@ def test_is_host_matches_via_slug():
     assert not server._is_host(lane, "")
 
 
-# ── modular tool loading (stolen from pal-mcp-server DISABLED_TOOLS, fixes A.3 bloat) ──
+# ── CLI_BRIDGE_TOOLS: the one knob for the exposed surface ──
 
 def _tool_names(monkeypatch):
     # a stable lane set so the listing is deterministic regardless of what's installed
@@ -302,46 +277,45 @@ def _tool_names(monkeypatch):
     panel = [LaneSpec("gemini", "Gemini", "echo", lambda *a: []),
              LaneSpec("gpt", "GPT", "echo", lambda *a: [])]
     monkeypatch.setattr(server, "_active_lanes", lambda: (panel, "claude-code"))
+    monkeypatch.setattr(server, "_host_lane", lambda host: None)
     monkeypatch.setattr(lanes_mod, "all_lanes", lambda: panel)
     return {t.name for t in asyncio.run(server.list_tools())}
 
 
-def test_no_filter_lists_everything(monkeypatch):
+def test_default_surface_is_lean(monkeypatch):
+    monkeypatch.delenv("CLI_BRIDGE_TOOLS", raising=False)
     names = _tool_names(monkeypatch)
-    assert {"ask_gemini", "ask_all", "debate", "doctor", "setup"} <= names
+    # (the panel has no build-capable lane, so ask_build isn't registered — not asserted here)
+    assert {"ask_all", "review_diff", "job", "git_text", "doctor", "setup",
+            "ask_gemini", "ask_gpt"} <= names
+    assert "batch_run" not in names and "reset_lane_state" not in names
 
 
-def test_disabled_tools_hides_named_tools(monkeypatch):
-    monkeypatch.setenv("CLI_BRIDGE_DISABLED_TOOLS", "debate, premortem")
+def test_tools_all_lists_everything(monkeypatch):
+    monkeypatch.setenv("CLI_BRIDGE_TOOLS", "all")
     names = _tool_names(monkeypatch)
-    assert "debate" not in names and "premortem" not in names
-    assert "ask_all" in names                      # untouched
+    assert {"batch_run", "reset_lane_state", "debate"} <= names
 
 
-def test_disabled_tools_cannot_hide_essentials(monkeypatch):
-    monkeypatch.setenv("CLI_BRIDGE_DISABLED_TOOLS", "doctor,setup")
+def test_tools_list_is_exact_plus_essentials_and_lanes(monkeypatch):
+    monkeypatch.setenv("CLI_BRIDGE_TOOLS", "review_diff")
     names = _tool_names(monkeypatch)
-    assert "doctor" in names and "setup" in names   # essentials always kept
+    assert names == {"review_diff", "doctor", "setup", "ask_gemini", "ask_gpt"}
 
 
-def test_enabled_tools_is_a_lean_allowlist(monkeypatch):
-    monkeypatch.setenv("CLI_BRIDGE_ENABLED_TOOLS", "ask_best,ask_all")
+def test_tools_default_keyword_extends(monkeypatch):
+    monkeypatch.setenv("CLI_BRIDGE_TOOLS", "default, batch_run")
     names = _tool_names(monkeypatch)
-    assert "ask_best" in names and "ask_all" in names
-    assert "doctor" in names                        # essential still present
-    assert "debate" not in names and "consensus" not in names   # everything else hidden
+    assert "batch_run" in names and "debate" in names
 
 
-def test_lean_mode_exposes_only_core_surface(monkeypatch):
+def test_legacy_lean_and_lists_are_ignored(monkeypatch):
+    monkeypatch.delenv("CLI_BRIDGE_TOOLS", raising=False)
     monkeypatch.setenv("CLI_BRIDGE_LEAN", "1")
+    monkeypatch.setenv("CLI_BRIDGE_ENABLED_TOOLS", "debate")
+    monkeypatch.setenv("CLI_BRIDGE_DISABLED_TOOLS", "ask_all")
     names = _tool_names(monkeypatch)
-    # core tools that exist for any panel (the test panel has no build-capable lane, so
-    # ask_build/job_tail aren't registered regardless of LEAN — don't assert those here)
-    assert {"ask_best", "ask_all", "ask_cascade", "review_diff", "security_review", "workflow",
-            "doctor", "commit_msg", "pr_describe"} <= names
-    assert "ask_gpt" in names and "ask_gemini" in names   # per-lane asks kept
-    assert "debate" not in names and "premortem" not in names and "route_plan" not in names
-    assert "usage_report" not in names and "ask_all_async" not in names   # niche hidden
+    assert "ask_all" in names and "debate" in names and "batch_run" not in names   # = default
 
 
 def test_re_entry_guard_blocks_a_deep_delegate(monkeypatch):

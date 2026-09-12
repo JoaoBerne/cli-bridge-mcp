@@ -39,7 +39,7 @@ def test_instructions_cover_the_new_capabilities():
     # the host must be told it can hold a round-table and delegate work safely
     instr = server.INSTRUCTIONS.lower()
     assert "round-table" in instr or "conversation" in instr
-    assert "ask_build_isolated" in server.INSTRUCTIONS
+    assert "ask_build" in server.INSTRUCTIONS
     assert "when not to" in instr          # the "don't convene for one-liners" guardrail
 
 

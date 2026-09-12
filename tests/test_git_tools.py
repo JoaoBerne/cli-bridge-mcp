@@ -68,6 +68,6 @@ def test_commit_msg_dispatch(monkeypatch, tmp_path):
     async def fr(lane, args, *, tool="ask", terse=True):
         return RunResult(True, "chore: bump deps", "ok")
     monkeypatch.setattr(server, "_run_lane", fr)
-    out = asyncio.run(server.call_tool("commit_msg", {}))[0].text
+    out = asyncio.run(server.call_tool("git_text", {"kind": "commit"}))[0].text
     assert "chore: bump deps" in out
     telemetry._reset_for_tests()

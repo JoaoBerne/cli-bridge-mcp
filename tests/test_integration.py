@@ -77,31 +77,8 @@ def _list_tools_as_host(host_client_name: str, lanes_file: str, extra_env: dict 
 
 
 @pytest.mark.skipif(not os.path.exists(PY), reason="venv python missing")
-def test_alpha_host_hides_alpha_lane_when_opted_in():
-    lf = _custom_lanes_file()
-    try:
-        tools = _list_tools_as_host("alpha-host", lf, {"CLI_BRIDGE_HIDE_HOST": "1"})
-        assert "ask_beta" in tools          # other lane exposed
-        assert "ask_alpha" not in tools     # own lane hidden (opt-in)
-        assert "doctor" in tools
-    finally:
-        os.remove(lf)
-
-
-@pytest.mark.skipif(not os.path.exists(PY), reason="venv python missing")
-def test_beta_host_hides_beta_lane_when_opted_in():
-    lf = _custom_lanes_file()
-    try:
-        tools = _list_tools_as_host("beta-host", lf, {"CLI_BRIDGE_HIDE_HOST": "1"})
-        assert "ask_alpha" in tools
-        assert "ask_beta" not in tools
-    finally:
-        os.remove(lf)
-
-
-@pytest.mark.skipif(not os.path.exists(PY), reason="venv python missing")
 def test_host_lane_shown_by_default():
-    # Default (no CLI_BRIDGE_HIDE_HOST): the host's OWN lane is visible as a normal tool.
+    # The host's OWN lane is visible as a normal tool.
     lf = _custom_lanes_file()
     try:
         tools = _list_tools_as_host("alpha-host", lf)

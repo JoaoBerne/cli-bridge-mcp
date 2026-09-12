@@ -88,19 +88,6 @@ def _setup_recommendation(lanes: list[LaneSpec]) -> str:
     return "\n".join(lines)
 
 
-def _echo_header(lane_key: str, model: str, task: str) -> str:
-    """'▶ gemini · gemini-2.5-pro — asked: "…"' line prepended to delegation results, so the
-    user re-reading the conversation in their CLI sees who was asked what next to the answer
-    (no scrolling back to the tool-call args). CLI_BRIDGE_ECHO_TASK=off disables."""
-    if not config.echo_task() or not task:
-        return ""
-    preview = " ".join(task.split())
-    if len(preview) > 140:
-        preview = preview[:140] + "…"
-    who = f"{lane_key} · {model}" if model else lane_key
-    return f'▶ {who} — asked: "{preview}"\n\n'
-
-
 async def doctor_deep(host: str, lanes: list[LaneSpec], *, is_host, run_lane) -> str:
     """doctor + a tiny live probe of each free, exposed lane to check auth/quota for real."""
     base = doctor(host, is_host=is_host)
@@ -284,8 +271,7 @@ def _render_lane_stats() -> str:
 
 def doctor(host: str, *, is_host) -> str:
     lines = ["# cli-bridge - health check", ""]
-    host_note = ("its own lane is hidden (CLI_BRIDGE_HIDE_HOST)" if config.hide_host()
-                 else "its own lane is shown (direct calls only, never in fan-out)")
+    host_note = "its own lane is shown (direct calls only, never in fan-out)"
     lines.append(f"Host (caller): **{host or 'unknown'}** - {host_note}.")
     if config.profile_is_set():
         prof = config.profile()
@@ -314,9 +300,7 @@ def doctor(host: str, *, is_host) -> str:
         mark = "installed" if installed else "NOT on PATH"
         if not lane.enabled:
             mark += " (disabled by env)"
-        hidden = ((" - hidden (this is the host)" if config.hide_host()
-                   else " - this is the host (shown; never in fan-out)")
-                  if is_host(lane, host) else "")
+        hidden = " - this is the host (shown; never in fan-out)" if is_host(lane, host) else ""
         cost_env_key = f"CLI_BRIDGE_{lane.key.upper()}_COST"
         if not lane.cost_is_configured:
             src = "default — yours may differ"
