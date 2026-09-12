@@ -17,7 +17,7 @@ Tiers steer *routing* (which lanes join `ask_all`, cascade order). The profile s
 
 ## What is actually enforced, and where
 
-Every spawn passes through one chokepoint (`budget.check_spawn`):
+Every spawn passes through one chokepoint (the two gates at the top of `server._run_lane`):
 
 | Mechanism | Env var | Gates | Enforcement |
 |---|---|---|---|

@@ -4,850 +4,409 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project aims for
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## 0.3.0 — unreleased
+
+"Too much stuff, nobody can follow it." The MCP surface shrinks from ~37 tool names to 15 fixed
+tools + `ask_<lane>`, and the ring of things bolted on around the core is gone. Nothing you
+could do before is lost: every removed tool folds into a parameter of one that stays.
+**Hosts cache tool names — restart your MCP host after upgrading.**
+
+### BREAKING — tools
+
+| Removed | Use instead |
+|---|---|
+| `ask_all_async` | `ask_all(async=true)` |
+| `ask_build_isolated` | `ask_build` (`mode=isolated` is the default) |
+| `route_plan` | `ask_cascade(dry_run=true)` / `ask_best(mode=…, dry_run=true)` |
+| `job_status` / `job_result` / `job_cancel` / `jobs_list` / `job_tail` / `build_steer` | `job(action=status\|result\|cancel\|list\|tail\|steer, job_id=…)` |
+| `consensus` | `debate(vote=borda)` (`synthesize=true` for the chairman blend) |
+| `challenge` / `premortem` / `test_plan` | `workflow(preset=challenge\|premortem\|test_plan)` |
+| `commit_msg` / `pr_describe` | `git_text(kind=commit\|pr)` |
+| `conversations_list` / `conversation_show` | `conversations()` / `conversations(id=…)` |
+| `security_review` | `review_diff(focus=security)` |
+| `list_<lane>_models` | `list_models(lane=…)` |
+| `usage_report` / `lane_stats` | MCP resources `cli-bridge://usage-summary`, `cli-bridge://lane-stats` (and `cli-bridge usage` / `cli-bridge stats`) |
+| `usage_budget` | gone — `doctor` shows per-lane runs today against `DAILY_LIMIT` |
+| `batch_run` / `reset_lane_state` | still registered, hidden by default: `CLI_BRIDGE_TOOLS=all` or `CLI_BRIDGE_TOOLS=default,batch_run` |
+
+Also dropped: the MCP prompts `review_diff` / `security_review` / `debate` / `cost_setup` /
+`premortem` / `test_plan` (`apilookup` stays), the resource `cli-bridge://workflow-schemas/review-diff`,
+and `ask_cascade(escalate=)` (confidence-escalate). Telemetry `tool=` labels in sqlite are unchanged.
+
+### BREAKING — presets, env, CLI, files
+
+- **Workflow presets removed**: `jury`, `verify_repair`, `council_review`. `converge` covers the
+  first two (`verifiers=N max_rounds=1` for a vote, `max_rounds=N` for a repair loop);
+  `fanout_compare` takes `council_review`'s arguments. Enum now: `refine_plan`, `map_review`,
+  `research_verify`, `fanout_compare`, `converge`, `premortem`, `test_plan`, `challenge`.
+- **Env vars no longer read** (harmless if still set): `CLI_BRIDGE_LEAN`, `CLI_BRIDGE_ENABLED_TOOLS`,
+  `CLI_BRIDGE_DISABLED_TOOLS` (all → the one `CLI_BRIDGE_TOOLS` knob), `CLI_BRIDGE_HIDE_HOST`
+  (the host's own `ask_<lane>` is always a normal tool, never in fan-out), `CLI_BRIDGE_ECHO_TASK`
+  (the "▶ lane — asked:" header is gone), `CLI_BRIDGE_NATIVE_SESSIONS`, `CLI_BRIDGE_CONVO_LOG_DIR`.
+- **CLI subcommands removed**: `init` (use `claude mcp add cli-bridge -- uvx cli-bridge-mcp` or
+  the JSON snippet in the README), `setup --write` (the env template is in the README),
+  `bench`, `eval` (moved, below), `usage-budget`/`budget`.
+- **Lane removed**: the built-in `openrouter` API lane and `examples/byo-api-lane.json`. The
+  `cli-bridge-openai` bridge stays (the `applepcc` lane and local HTTP runtimes spawn it).
+- **Files removed**: `docs/i18n/` (6 translations), `site/` + `.github/workflows/pages.yml`,
+  `docs/BENCHMARKS.md`, `docs/demo/`, `assets/demo-borrow.gif`, `plugin/skills/` (the five
+  `/cli-bridge:*` slash commands; the plugin still wires the MCP server), `smithery.yaml`,
+  `examples/github-action-pr-review.yml`, `examples/native-session.lane.json`,
+  `tests/test_live_e2e.py`. `examples/llamacpp|lmstudio|mlx.lane.json` → one
+  `examples/local-runtime.lane.json` (+ a runtime table in `examples/local-first-host.md`).
+- **Eval harness moved out of the package**: `src/cli_bridge/eval.py` → `benchmarks/eval.py`
+  (`PYTHONPATH=src python benchmarks/eval.py`, the former `cli-bridge eval`), scorer tests →
+  `benchmarks/tests/`, corpus → `benchmarks/fixtures/evalset/`. Not in `pytest` testpaths, not
+  in the sdist.
+- **Modules removed**: `budget.py` (the two spend gates are inlined at the top of
+  `server._run_lane`), `detect.py` (`is_installed` / `installed_lanes` moved into `lanes.py`),
+  `consensus_loop.py` (folded into `orchestrate.converge` as locals).
+- **Internals removed**: native-session continuity (`--session-id`/`--resume` splice,
+  `convo_sessions` table, `LaneSpec.native_session`), the conversation `.md` log mirror, jury
+  tables and `seat_report`, `verify_repair`, `files_required` / `allow_ungrounded`, the
+  `fact_check` / `steelman` passes, `brief_lint`, the convergence label and `residual_risk`
+  section, the flag-drift probe (`probe_flags`, `lanes.missing_flags`), the cross-process zone
+  lock (now an in-process `asyncio.Lock` per repo+zone — two servers on one repo no longer
+  serialise), the `role` / `task_hash` columns of `runs`.
 
 ### Fixed
-- **A retry could corrupt what it was retrying.** `_spawn_with_retry` re-runs the *same argv*,
-  which is only a retry when running it twice means the same as running it once. It did not: a
-  freshly minted `--session-id` collided on the second attempt (`Session ID … is already in use`)
-  and that collision **masked the transient error that caused the retry**; a `--resume` re-delivered
-  the same delta into a session that had already ingested it; a `build` delegate replayed its
-  instructions against a tree it had already edited. One guard at the single spawn point, keyed on
-  the session *handle* rather than on `_native_argv` — opencode's capture-first turn carries only
-  log flags and stays safely retryable.
-- **The native-session high-water mark could claim turns the lane never received.** It was committed
-  as "this session holds everything below *n*" without checking the prompt delivered everything
-  below *n*. Three ways it lied: the delta was trimmed to fit the char budget, another lane appended
-  a turn while the spawn was awaiting, or the append itself failed. The lie was permanent — later
-  deltas filter on `turn_number > last_turn`, so those turns were never sent to that lane again, and
-  a later rolling summary was skipped too. The handle is now kept only when it is provably complete;
-  otherwise it is dropped and the next turn re-mints with a full replay. Replay was, and remains,
-  the source of truth: no stored turn is ever discarded.
-- **Mock mode recorded a session that was never created.** `CLI_BRIDGE_MOCK` returns without
-  spawning, yet still minted and committed a handle. Turning mock off mid-thread then resumed a
-  ghost session — with an empty replay prefix, so no context from either store.
-- **One ordinary failure un-benched a cooled lane.** `lane_state` writes `cooldown_until`
-  unconditionally, so a single `kind="failed"` run blanked an active quota/auth cooldown. Since a
-  direct `ask_<lane>` never checks cooldowns, that was enough to re-arm a dead lane for every later
-  fan-out. The bench now carries forward; success still clears it. `consecutive_failures` also
-  counts every consecutive failure instead of only the cooling kinds, so `doctor` stops reporting a
-  stale figure.
-- **The native-session argv splice assumed the prompt was the last argument.** Custom lanes can
-  declare a `native_session`, and a template may end in a flag's *value* — the extras then landed
-  between a flag and what it takes. Spliced by the prompt's position now; byte-identical for every
-  built-in lane.
-- **`mcp>=1.2.0` is now capped at `<2` — 0.1.4 is broken on a fresh install.** `mcp 2.0.0` removed
-  the low-level decorators this server is built on (`@server.list_tools`, `call_tool`,
-  `list_prompts`, `get_prompt`, `list_resources`, `read_resource`; `mcp.server.fastmcp` deleted
-  outright). With no upper bound, `pipx install cli-bridge-mcp` resolved `mcp` to 2.x and every
-  call died with `'Server' object has no attribute 'list_tools'`. The pin is load-bearing, not
-  caution. Verified: 1.29.0, the last 1.x, is fully green (709 passed). Migrating to the 2.x API
-  is tracked separately — the cap is the fix that unbreaks installs today.
-- **drift-check now names the right culprit, and can still see upstream breakage.** It opened
-  *"a CLI lane may be broken"* for a failure that was entirely the SDK, sending a reader through
-  lane builders for nothing. The job now checks `import cli_bridge.server` separately from the
-  test run and titles the issue from whichever step died. Deduplication moved from "any open
-  drift issue" to "an open issue with this title", so a real lane break is no longer swallowed by
-  an unrelated one still being open. And because the new dependency cap would otherwise leave the
-  nightly testing only the SDK we already know works, it also probes the newest `mcp` in a
-  throwaway venv — informational, never fails the job.
+- **A streamed run that times out keeps what already streamed** instead of throwing it away.
+- **`rate_lane` notes are surfaced as "Past lessons"** in `ask_best` output (they were stored
+  but never read back).
+- Native-session fixes (retry collision on a fresh `--session-id`, a high-water mark that
+  claimed undelivered turns, a ghost session under `CLI_BRIDGE_MOCK`, a splice that assumed the
+  prompt was last) landed and were then superseded by the removal of native sessions above.
+- **One ordinary failure no longer un-benches a cooled lane**: `lane_state` carried a
+  `cooldown_until` blank on any `kind="failed"` run; the bench now carries forward, success
+  still clears it. `consecutive_failures` counts every consecutive failure.
+- **`cli-bridge-openai` sends `stream: false` explicitly** (Apple's `fm serve` streams SSE
+  unless told otherwise, and the bridge parses one JSON object).
+- **drift-check names the right culprit**: `import cli_bridge.server` is checked separately from
+  the test run; dedup is by issue title; the newest `mcp` is probed in a throwaway venv
+  (informational).
 
 ### Added
-- **Runs on `mcp` 2.x as well as 1.x** — the dependency opens back up to `mcp>=1.2.0,<3`. 2.0.0
-  removed all six low-level decorators this server was built on, moved the request context from
-  the server onto the handler, and renamed every model attribute to snake_case (camelCase
-  survives only as the wire alias, so `tool.inputSchema` and `params.clientInfo` raise). All of
-  that now lives in **one new module, `mcp_compat.py`** — `server.py`'s six handlers keep their
-  original name, signature and body, so nothing downstream moved. The adapters also re-implement
-  by hand what the 1.x `@call_tool()` decorator did for free: validating arguments against the
-  tool's `inputSchema`, and turning a raised exception into an `isError` result rather than a
-  JSON-RPC protocol error. The wire payload is identical on both majors. **CI runs the whole
-  suite on both** — an untested compat layer is one that has already broken. The `<3` cap stays:
-  an install resolving to an unsupported major is a server that dies on the first tool call, not
-  one that fails loudly at import.
-- **`CLI_BRIDGE_DEFAULT_CWD`** — pin the directory delegates run in when the caller names no
-  `cwd`. For hosts that declare no MCP roots, or declare the wrong one.
-- **Apple Foundation Models — two lanes.** `ask_apple` spawns Apple's `fm` CLI for **on-device**
-  inference: $0, offline, private, and genuinely **unmetered** (`fm quota-usage` states the quota
-  applies to PCC only). Read-only by construction — `fm respond` has no write mode at all, so unlike
-  every agentic lane there is no `build` branch to gate. It also gets its own jury family, so it
-  decorrelates from every other vendor.
-- **`ask_applepcc` — Private Cloud Compute over HTTP (opt-in, hidden until `APPLE_FM_SERVE_URL`).**
-  PCC refuses inference in any process cli-bridge spawns — *"PCC inference is not available in this
-  context"*, sandboxed **or not** — while the identical command works in the user's own terminal:
-  the gate is **session attribution**, not permissions. So you run `fm serve --port 1976` yourself
-  and this lane is just an HTTP client to it through the bundled `cli-bridge-openai` bridge. Variant
-  recipe in `examples/apple-fm-serve.lane.json`.
-- **Vision generalized off Gemini — five lanes now take `images=[…]`.** It used to be hardcoded to
-  `lane.key == "gemini"`. A lane now declares the shape as data (`LaneSpec.image_arg`): a leading
-  `-` means an argv flag (`apple --image`, `gpt -i`, `opencode -f`), anything else is a path prefix
-  folded into the prompt (`gemini @`, `ollama` bare). All five verified live against a known image.
+- **Runs on `mcp` 2.x as well as 1.x** — dependency `mcp>=1.2.0,<3`. 2.0.0 removed the six
+  low-level decorators, moved the request context onto the handler and renamed model attributes
+  to snake_case; all of that lives in **`mcp_compat.py`**, which also re-implements input
+  validation and `isError`-on-raise. CI runs the suite on both majors.
+- **`CLI_BRIDGE_DEFAULT_CWD`** — pin the directory delegates run in when the caller names no `cwd`.
+- **Apple Foundation Models**: `ask_apple` spawns `fm` for on-device inference ($0, offline,
+  unmetered, read-only by construction); `ask_applepcc` (hidden until `APPLE_FM_SERVE_URL`) is
+  an HTTP client to a `fm serve` you start yourself — PCC gates on session attribution, so it
+  refuses any process cli-bridge spawns. Recipe: `examples/apple-fm-serve.lane.json`.
+- **Vision on five lanes**: `images=[…]` is lane data (`LaneSpec.image_arg`) — an argv flag
+  (`apple --image`, `gpt -i`, `opencode -f`) or a prompt prefix (`gemini @`, `ollama` bare).
 
 ### Changed
-- **A delegate with no `cwd` now runs in the host's workspace, not wherever the server happened
-  to be launched.** Hosts start a user-scoped MCP server from `$HOME`, so the cwd we inherited
-  was an accident — and it decided real things. `claude --continue` and the `/resume` picker are
-  scoped to the current directory, so a delegated session was filed under `$HOME` and **invisible
-  from the repo it was about**; and an `agent="build"` delegate called without a `cwd` edited
-  files there. `_run_lane` now asks the host once for its MCP roots and uses the first existing
-  one. Precedence: the caller's `cwd` > `CLI_BRIDGE_DEFAULT_CWD` > first usable MCP root > the
-  inherited cwd (unchanged fallback, so a host that declares no roots behaves exactly as before).
-  Note this **narrows** where an unscoped `build` delegate can write. Roots are deprecated as of
-  protocol revision 2026-07-28 (SEP-2577) but still served; when a successor lands,
-  `server._workspace_root` is the only thing that changes.
-- **`cli-bridge-openai`: `--key-env` is now optional.** Omit it for a deliberately keyless local
-  server (`fm serve`, llama.cpp, vLLM, LM Studio) and no `Authorization` header is sent. Naming an
-  env var that is *empty* still fails with `missing-auth` — that's a misconfigured cloud lane, not
-  an open server.
+- **A delegate with no `cwd` runs in the host's workspace** (first MCP root), not wherever the
+  server was launched. Precedence: caller's `cwd` > `CLI_BRIDGE_DEFAULT_CWD` > first usable MCP
+  root > inherited cwd. This narrows where an unscoped `build` delegate can write.
+- **`cli-bridge-openai --key-env` is optional** — omit it for a keyless local server; naming an
+  empty env var still fails with `missing-auth`.
+- A shared `_P` parameter dict in `schemas.py` replaces ~90 per-tool re-declarations (shapes
+  byte-identical).
 
-### Fixed
-- **`cli-bridge-openai` now sends `stream: false` explicitly.** The OpenAI spec defaults it to
-  false, but Apple's `fm serve` streams SSE unless told otherwise — and the bridge parses a single
-  JSON object, so the response crashed with a `JSONDecodeError`.
+Tests: 735 → 682 passed (53 covered only deleted behaviour), ruff and mypy clean.
 
 ## [0.1.4] - 2026-06-13
 
 ### Added
-- **Read-only mutation guard (`CLI_BRIDGE_VERIFY_PLAN_READONLY`, opt-in).** When on, a delegate that
-  ran read-only (`agent=plan`, the default) in a git repo is checked: cli-bridge snapshots the
-  workspace before/after and, if the "read-only" delegate wrote files anyway, prepends a
-  `⚠️ WORKSPACE MUTATION DETECTED` warning to the answer and sets `RunResult.mutated`. It **never
-  auto-reverts** — it surfaces the taint so the host can decide. Off by default; runs one extra
-  `git status` only when enabled.
-- **Opt-in API lanes (`availability_env`) + a bundled stdlib HTTP bridge.** You can now connect any
-  OpenAI-compatible API endpoint by exporting one key — and nothing changes for anyone who doesn't.
-  A lane that declares `availability_env` stays **hidden until that env var is set**, so the ban-safe
-  default surface (official CLIs, no keys) is unchanged. Ships a built-in **`ask_openrouter`** lane
-  (400+ models, `cost=paid` so it's out of the free fan-out) and **`cli-bridge-openai`**, a tiny
-  `urllib`-only bridge (no new dependency) that reads the key from the named env var — never argv, so
-  it can't leak via `ps` — POSTs to `/chat/completions`, and returns just the assistant text.
-  `--list-models` lists the endpoint's models. Custom lanes accept `availability_env` too; see
-  `examples/openai-compatible.lane.json` for the BYO pattern (Together, Groq, DeepSeek, local vLLM, …).
-- **`workflow preset=converge` — governance converge-loop (flagship).** An author lane drafts a
-  plan; an independent **arbiter** commits a **blind verdict** *before* seeing any peer; **anonymized
-  cross-family** peers review; the arbiter **adjudicates every issue with a mandatory reason**; then
-  revise-or-converge, bounded by `max_rounds` (default 5, capped at 6). Three governance guarantees
-  are enforced *in code* by a pure state machine (`consensus_loop.py`), not by trusting the host:
-  **blind-verdict-first**, **no-silent-dismissal** (dismiss/defer require a reason; an un-ruled issue
-  fails closed to an accepted blocker), and **no-self-approval** (the peers must carry it — ≥1
-  responding peer, all APPROVE, none REJECT, zero accepted blockers, and the arbiter's own blind
-  verdict APPROVE). Confidence is read off the settling round. Fully tested with no network (pure
-  machine + fake-lane driver).
-- **Optional issue-category taxonomy on findings.** `review_diff` / `security_review` reviewers now
-  tag each finding with a category from a closed set `{security, correctness, scope, ambiguity,
-  performance, ops}` — orthogonal to severity. The markdown report gains a per-type breakdown line
-  and an inline tag; the JSON result carries `category`. Backward-compatible: an unrecognised or
-  absent category stays null (we classify, we never invent). Reused by the converge-loop above.
-- **Official MCP registry manifest.** `server.json` updated to the current `2025-12-11` schema
-  (`registryType`/`identifier`/`runtimeHint` field names) and an invisible `mcp-name` ownership
-  marker added to the README, so the server can be published to registry.modelcontextprotocol.io
-  with `mcp-publisher`. The registry validates the marker against the *published* PyPI README, so
-  this lands with the next PyPI release.
-- **Auto-threaded asks — every direct `ask_<lane>` is resumable.** An ask with no `conversation`
-  now records its one exchange under a fresh thread id and returns it, so you can continue it later
-  (on any lane) without having had to pass `conversation='new'` up front. It runs exactly like a
-  plain ask (no replay, no native session on that first turn — cache/behaviour unchanged); only a
-  real, successful exchange is stored. `CLI_BRIDGE_CONVO_AUTOTHREAD=off` restores pure-stateless
-  asks (nothing stored, no id returned).
-- **`docs/HOSTS.md`** — per-host MCP config locations (Claude Code, Cursor, VS Code, Cline,
-  Windsurf, Continue.dev, Zed, Visual Studio 2026, Neovim, Xcode) and a drop-in rules snippet to
-  make an agentic host consult the council on its own, with a cost-safety note. Docs only.
+- **Read-only mutation guard (`CLI_BRIDGE_VERIFY_PLAN_READONLY`, opt-in).** A `plan` delegate
+  that writes files in a git repo gets a `⚠️ WORKSPACE MUTATION DETECTED` warning and
+  `RunResult.mutated`. Never auto-reverts.
+- **Opt-in API lanes (`availability_env`) + `cli-bridge-openai`.** A lane declaring
+  `availability_env` stays hidden until that env var is set. The bridge is `urllib`-only, reads
+  the key from the named env var (never argv), POSTs to `/chat/completions`; `--list-models`.
+  BYO pattern in `examples/openai-compatible.lane.json`. (Also shipped a built-in `ask_openrouter`
+  lane, removed in 0.3.0.)
+- **`workflow preset=converge`** — author drafts; an independent arbiter commits a blind verdict
+  before seeing peers; anonymized cross-family peers review; the arbiter adjudicates every issue
+  with a reason; revise-or-converge bounded by `max_rounds` (default 5, cap 6). Converges only if
+  ≥1 peer responds, all approve, none reject, zero accepted blockers, and the blind verdict was
+  APPROVE.
+- **Issue-category taxonomy on findings**: `{security, correctness, scope, ambiguity,
+  performance, ops}`, orthogonal to severity; null when unrecognised.
+- **MCP registry manifest**: `server.json` on the `2025-12-11` schema + the `mcp-name` marker in
+  the README.
+- **Auto-threaded asks**: an `ask_<lane>` with no `conversation` records its exchange under a
+  fresh thread id and returns it. `CLI_BRIDGE_CONVO_AUTOTHREAD=off` restores stateless asks.
+- **`docs/HOSTS.md`** — per-host MCP config locations + a rules snippet for proactive use.
 
 ### Changed
-- **`server.py` split into focused modules (internal; no behavior change).** The 2,589-line
-  dispatch module was carved down to ~1,110 by moving the tool-schema assembly to `schemas.py`,
-  the markdown reports + `doctor` diagnostics to `reports.py`, the MCP prompt builders to
-  `prompts.py`, and the resource payloads to `resources.py` — each a pure module that never imports
-  `server`. The hot path (`_run_lane`), the `call_tool` dispatch tree and the request-context glue
-  stay in `server.py`; the moved symbols are re-exported so the MCP surface and the test-pinned
-  `server.*` names are byte-identical. `doctor`/`doctor_deep` take their host-detection + lane-runner
-  couplings injected (the same pattern as `council.py`). 648 tests, ruff and mypy unchanged.
-- **Landing page redesign (`site/`).** Refined-terminal pass aligned with the repo's mono /
-  gold-navy / `//`-header aesthetic: pain-first hero ("your assistant is only as good as the one
-  model you opened"), a sticky top bar, a "four levers" section (borrow / spread / offload /
-  verify), a compact moat table vs. octopus and PAL/zen-mcp, and accessibility polish
-  (`prefers-reduced-motion`, AA contrast, favicon). Self-contained static file, no build step.
-  Docs only.
-- **README hero is pain-first.** Opens with the user's problem ("your assistant is only as good as
-  the one model you opened") before the mechanism, and names the concrete payoffs (bigger context,
-  vision, cross-vendor second opinion, reviewable-diff build). Adds a GitHub-stars badge. Docs only.
-- **Server `instructions` — "when to consult" wording.** "A second opinion before shipping" →
-  "a second opinion before shipping something risky or hard to reverse", removing the internal
-  contradiction with the adjacent "don't convene a council for one-liners". Keeps the flagship
-  pre-ship review trigger; no behavioral posture change.
-- **License: MIT → Apache 2.0.** Same permissive terms and zero adoption cost, plus an explicit
-  patent grant and patent-retaliation clause (a contributor's patents can't later be used to sue
-  users of the project). Adds a `NOTICE` file. No code or behavior change.
+- **`server.py` split** (2,589 → ~1,110 lines): schemas → `schemas.py`, reports/doctor →
+  `reports.py`, prompts → `prompts.py`, resources → `resources.py`; symbols re-exported, surface
+  byte-identical.
+- Landing page and README hero reworked (pain-first); server `instructions` wording ("a second
+  opinion before shipping something risky or hard to reverse").
+- **License: MIT → Apache 2.0** (+ `NOTICE`).
 
 ## [0.1.3] - 2026-06-12
 
 ### Added
-- **Custom lanes can declare `native_session` in JSON** (`CLI_BRIDGE_LANES_FILE`): adding
-  session continuity to your own CLI is config, not code — see
-  `examples/native-session.lane.json` (mint/capture, same contract as the built-ins;
-  malformed blocks are dropped and the lane falls back to replay).
-- **Native session continuity on round-table turns** (user-driven design): lanes that can hold
-  their own session now resume it natively instead of replaying the whole transcript — the
-  prompt carries only the DELTA other lanes added since. Two mechanisms, both live-verified:
-  **claude** mints its own handle (`--session-id <uuid>` then `--resume`), **opencode**'s
-  session is captured from its officially-flagged `--print-logs` output (stderr) then resumed
-  with `-s`. The sqlite transcript stays the cross-lane source of truth (every turn is still
-  recorded; threads still hop lanes freely); a broken native resume drops the handle and the
-  next turn falls back to full replay. Native turns are never served from the response cache.
-  `CLI_BRIDGE_NATIVE_SESSIONS=off` forces pure replay. vibe/agy/codex print no machine-readable
-  handle in non-interactive mode today — they join automatically the day they do (lane data,
-  no code).
-- **Rolling summary on round-table threads**: when a thread outgrows the replay budget
-  (`CLI_BRIDGE_CONVO_MAX_CHARS`), the oldest turns are no longer silently dropped off the
-  window — the lane that just answered (it had the full history in front of it; no third
-  model to route) condenses them into one `summary` turn that keeps sorting first, so a long
-  thread stays usable by ANY lane. Best-effort: a failed summarizer leaves the thread
-  untouched. `CLI_BRIDGE_CONVO_SUMMARY=off` restores the old slide-out behaviour.
-- **`ask_build` `apply=true` (isolated mode)**: opt-in, lands the worktree diff in YOUR repo as
-  unstaged changes — `git apply --check` first, so a conflict with your tree applies NOTHING
-  (all-or-nothing; the diff stays in the report either way). Default unchanged: review-only.
-  Also on the human CLI as `cli-bridge build --apply`.
-- **`ask_build` `lane` is now optional**: empty = the first free build-capable lane in router
-  order — one less decision when any free builder will do; an explicit lane still wins.
+- Custom lanes can declare `native_session` in JSON (removed in 0.3.0).
+- **Native session continuity** on round-table turns for claude (`--session-id`/`--resume`)
+  and opencode (`--print-logs` capture, `-s` resume), prompt carries only the delta; replay
+  stays the source of truth. `CLI_BRIDGE_NATIVE_SESSIONS=off`. (Removed in 0.3.0.)
+- **Rolling summary on round-table threads**: past `CLI_BRIDGE_CONVO_MAX_CHARS`, the answering
+  lane condenses the oldest turns into one `summary` turn. `CLI_BRIDGE_CONVO_SUMMARY=off`.
+- **`ask_build apply=true`** (isolated): lands the diff as unstaged changes, `git apply --check`
+  first (all-or-nothing). Also `cli-bridge build --apply`.
+- **`ask_build lane` optional**: empty = first free build-capable lane in router order.
 
 ### Fixed
-- **Full-review pass (multi-model, hand-triaged)** over everything above:
-  a huge newest turn no longer folds the ENTIRE thread (the latest exchange always survives
-  compaction verbatim); the buildloop fingerprint stats only porcelain-listed paths instead
-  of walking the zone (no more node_modules/.venv scans — and content edits of tracked-dirty
-  files are now caught too); interrupted multi-statement telemetry writes roll back instead
-  of leaking half a transaction into the next commit; a `zone` containing `..`/absolute
-  escapes of `target_dir` is rejected before any filesystem work; vibe read-only asks use the
-  `default` agent (answers in-chat; vibe's `plan` agent writes plan files instead of
-  answering — and `-p` enforces read-only regardless, verified live).
-- **ANSI escape cleanup in the runner**: delegate CLIs (notably ollama) wrote cursor-move /
-  erase / color sequences (`ESC[6D`, `ESC[K`, `ESC[?25l`…) into captured output, polluting
-  council reports. Both the buffered and streaming paths now strip CSI (incl. private-mode
-  params), OSC and charset sequences before redaction. Found by a live full-surface test.
-- **`challenge` falls back across lanes**: when no `lane` is named, a quota-empty skeptic no
-  longer kills the call — the next free lane is tried, and the answer notes the fallback.
-  An explicitly named lane still fails plainly (you chose it; no silent substitution).
-- **Steerable builds: false "changed 0 files" warning**: per-turn change detection compared
-  `git status --porcelain` snapshots only, which cannot see a CONTENT edit of an
-  already-untracked file (`??` before and after). A zone fingerprint (mtime+size) now backs
-  the check, so a turn that edits files it created earlier is no longer flagged as a plan-leak.
-- **`fanout_compare` doc example was wrong**: `lane:model` entries need the FULL model id the
-  CLI expects (`opencode:opencode/mimo-v2.5-free`, not `opencode:mimo-v2.5-free`) — the tool
-  description, schema and docstrings now show working ids.
+- Full multi-model review pass: the latest exchange always survives compaction; buildloop
+  fingerprint only stats porcelain-listed paths; interrupted telemetry writes roll back; a
+  `zone` escaping `target_dir` is rejected; vibe read-only asks use the `default` agent.
+- **ANSI escape cleanup** in both runner paths (CSI, OSC, charset sequences).
+- **`challenge` falls back across lanes** when no `lane` is named.
+- Steerable builds: content edits of already-untracked files no longer trigger a false
+  "changed 0 files" warning (zone fingerprint mtime+size).
+- `fanout_compare` `lane:model` examples use the full model id (`opencode:opencode/mimo-v2.5-free`).
 
 ### Changed
-- **`ask_build` description rewritten for host AIs**: it now leads with WHEN to delegate
-  (well-scoped fixes, mechanical work on a cheaper lane, parallel implementation to compare)
-  instead of only the safety mechanics — observed in live testing that hosts under-used it.
+- `ask_build` description leads with WHEN to delegate.
 
 ## [0.1.2] - 2026-06-11
 
 ### Added
-- **Roles v2 — extensible + dynamic** (council-reviewed design, adjusted on its verdict):
-  curated built-ins grow to 7 (adds `architect`, `oracle` — tests from the spec, blind to
-  the implementation —, `simplifier`), each catching a distinct failure mode, with an
-  anti-bloat test capping the set at 8; **`CLI_BRIDGE_ROLES_FILE`** (JSON
-  `{"name": "persona"}`, file wins on a clash) extends or re-words them without forking —
-  `doctor` reports the file's load status so a malformed file never fails silently;
-  **inline personas**: `role=` also accepts a one-sentence persona written for the exact
-  task (dynamic role assignment, arXiv 2601.17152) — an unknown single word stays a no-op.
-  Runs now record their `role` in telemetry (recorded, not acted on: at local volumes a
-  (lane, role) bucket lacks the statistical power for routing decisions — honest data, no
-  recommender).
-- **Desktop-app hosts (Claude Desktop, Hermes Desktop, …)**: CLI detection and lane binary
-  resolution now fall back to the common install dirs (`~/.local/bin`, `~/.npm-global/bin`,
-  `/opt/homebrew/bin`, `/usr/local/bin`, …) when plain PATH lookup fails — GUI MCP clients
-  launch servers with a minimal login PATH, which previously made every CLI look
-  "NOT on PATH" from inside the app. README gains a Desktop-apps install section.
-- **Question echo on delegation results** (`CLI_BRIDGE_ECHO_TASK`, on by default): every
-  `ask_<lane>` / `ask_all` answer now starts with `▶ <lane> · <model> — asked: "<question>"`,
-  so re-reading the conversation in any CLI shows who was asked what right next to each
-  answer — no scrolling back to the tool-call arguments.
-- **Claude Code plugin** (in-repo marketplace): `claude plugin marketplace add
-  JoaoBerne/cli-bridge-mcp` + `claude plugin install cli-bridge@cli-bridge-mcp` wires the
-  MCP server (via `uvx cli-bridge-mcp`) and ships five skills — `/cli-bridge:council`,
-  `/cli-bridge:review`, `/cli-bridge:security`, `/cli-bridge:build`, `/cli-bridge:setup`.
-  Manifest validity is CI-tested (`tests/test_plugin_manifest.py`).
+- **Roles v2**: built-ins grow to 7 (`architect`, `oracle`, `simplifier` added; cap 8);
+  `CLI_BRIDGE_ROLES_FILE` (JSON `{"name": "persona"}`) extends them; `role=` also accepts an
+  inline persona. `doctor` reports the file's load status.
+- **Desktop-app hosts**: CLI detection falls back to the common install dirs (`~/.local/bin`,
+  `~/.npm-global/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, …).
+- **Question echo** (`CLI_BRIDGE_ECHO_TASK`) on delegation results (removed in 0.3.0).
+- **Claude Code plugin** (in-repo marketplace) wiring the MCP server + five skills (skills
+  removed in 0.3.0).
 
-### Changed (budget coherence: one enforced spend guard)
-- **`CLI_BRIDGE_<LANE>_DAILY_LIMIT` is now ENFORCED at spawn** (it was reported by
-  `usage_budget` but never applied). The run limit is the universal cap: exact (runs are
-  counted, not estimated), zero credit math, works for every lane including free quotas.
-- **The daily credit cap now gates any credit-spending lane**, not just `paid` ones: a
-  `limited` lane with a `CREDITS_PER_1K` rate spends credits, so the cap sees it.
-- Both gates live in one chokepoint (`budget.check_spawn`) every delegate spawn passes
-  through; they fail open if local telemetry is unavailable (a broken sqlite never takes
-  the council down).
-- `doctor` now annotates each lane's cost tier with its real source (`default` / `set by
-  you: config file` / `set by you: host env — wins over the config file`), shows enforced
-  daily limits with today's count, and flags a user-set `cost=free` that predates a
-  vendor sunset.
-- `usage_budget` flags "LIMIT REACHED (further spawns blocked today)" at the limit
-  (previously only past it, and nothing was blocked anyway).
-
-### Added
-- **`docs/BUDGET.md`** — the whole cost model on one page: the three layers
-  (tiers / profile / caps), exactly what is enforced where, the estimation pipeline and
-  its honesty caveats, profile semantics incl. saver's fan-out-vs-direct rule,
-  config precedence (host env > config file > default), units cheat-sheet, recipes.
+### Changed (budget coherence)
+- **`CLI_BRIDGE_<LANE>_DAILY_LIMIT` is ENFORCED at spawn** (it was only reported before).
+- **The daily credit cap gates any credit-spending lane**, not just `paid` (a `limited` lane
+  with `CREDITS_PER_1K` spends credits).
+- Both gates fail open if local telemetry is unavailable.
+- `doctor` annotates each tier's source (`default` / `set by you: config file` / `set by you:
+  host env`), shows enforced daily limits with today's count, flags a user-set `cost=free`
+  that predates a vendor sunset.
+- **`docs/BUDGET.md`** — the whole cost model on one page.
 
 ## [0.1.1] - 2026-06-11
 
-### Changed (cost-truth: verified-audit fixes)
-- **`saver` profile is enforced**: `include_paid=true` is refused under saver (one shared rule,
-  `config.include_paid_resolved`, used by `ask_all`/`ask_cascade`/`ask_best`). Previously saver
-  was behaviorally identical to balanced while the setup copy promised "never spends".
-- **mistral cost default `free` → `limited`** — its free-tier quotas are unverified and Mistral
-  sells paid plans; consistent with the conservative gpt/claude defaults. Free-tier users
-  override with `set_lane_cost` / `CLI_BRIDGE_MISTRAL_COST=free`.
-- **Vendor sunsets are date-gated** (`LaneSpec.sunset`): once past, a `free` default degrades to
-  `limited`, bin resolution prefers the successor binary, and `doctor` shows a countdown.
-  Applied to gemini (free personal tier ends **2026-06-18**, successor `agy`).
-- `doctor` warns when `CLI_BRIDGE_DAILY_CREDIT_CAP` is set but unenforceable (a paid lane
-  without `CREDITS_PER_1K` always estimates 0 spend); onboarding copy stops overselling the cap.
-- `set_lane_cost` warns when a host-config env var will shadow the persisted value at restart;
-  config-file round-trip fixed for hyphenated lane keys (`-` → `_` in env names).
-- First-run nudge keys on `cost_config_is_set()` (profile OR per-lane costs) — no more false
-  "run `setup`" hint for users configured lane-by-lane.
-- `ask_all`'s schema stops advertising a 900 s per-lane timeout while clamping to 60 s.
-- Ollama lane shipped French user-facing strings in the English package — translated.
+### Changed (cost truth)
+- **`saver` is enforced**: `include_paid=true` is refused (`config.include_paid_resolved`, shared
+  by `ask_all`/`ask_cascade`/`ask_best`).
+- **mistral default `free` → `limited`**; override with `set_lane_cost` / `CLI_BRIDGE_MISTRAL_COST=free`.
+- **Vendor sunsets are date-gated** (`LaneSpec.sunset`): a `free` default degrades to `limited`,
+  bin resolution prefers the successor. Applied to gemini (free tier ends **2026-06-18**,
+  successor `agy`).
+- `doctor` warns when `CLI_BRIDGE_DAILY_CREDIT_CAP` is unenforceable (paid lane without
+  `CREDITS_PER_1K`); `set_lane_cost` warns when a host env var will shadow the persisted value;
+  hyphenated lane keys round-trip (`-` → `_`).
+- First-run nudge keys on `cost_config_is_set()` (profile OR per-lane costs).
+- `ask_all` schema stops advertising 900 s while clamping to 60 s.
 
 ### Added
-- **`cli-bridge set-cost <lane> <free|limited|paid> --note '…'`** — persists a cost fact from
-  the terminal (the path the setup text recommends finally exists outside MCP).
-- **`lane:model` entries in `workflow preset=fanout_compare`** — compare several models of ONE
-  lane side by side (e.g. `['opencode:deepseek-v4-flash-free', 'opencode:mimo-v2.5-free']`),
-  no per-model custom lanes needed.
+- **`cli-bridge set-cost <lane> <free|limited|paid> --note '…'`**.
+- **`lane:model` entries in `workflow preset=fanout_compare`** — several models of one lane side by side.
 
 ### Fixed (docs)
-- Vendor facts re-verified against official docs: Codex context ~400K → ~1M (GPT-5.5); Grok 2M
-  → 1M (CLI model 256k), live X/web = server-side tools, SuperGrok-Heavy gating outdated;
-  Gemini Nano Banana needs its own API key and no official Veo extension exists; Cerebras free
-  context 8k → 65k/64k; `doctor deep` → `doctor --deep`; README Built-in list was missing Mistral.
-- gpt-image-2 claim corrected (real text-to-image in Codex CLI, paid ChatGPT plans only) —
-  EN + all six translations.
-- Demo GIFs re-rendered at real-time speed with readable payoffs; the 30-tool reference moved
-  to `docs/TOOLS.md` (slimmer README); step-by-step Installation section; plain-English opener.
+- Vendor facts re-verified (Codex ~1M context, Grok 1M / CLI 256k, Gemini Nano Banana needs its
+  own key, Cerebras free context 65k/64k, `doctor --deep`); gpt-image-2 = real text-to-image in
+  Codex CLI on paid plans; the 30-tool reference moved to `docs/TOOLS.md`.
 
 ## [0.1.0] - 2026-06-08
 
 First public release on PyPI (`pip install cli-bridge-mcp`).
 
-### Added (local lane + council quality + quota resilience)
-- **`cli-bridge build <lane> "<task>"` (human CLI)** — terminal entry point for the flagship safe-build
-  path: the lane works in a **throwaway git worktree** and the command prints the **diff** — your repo
-  is never modified. `--architect <lane>` lets a stronger lane plan first. (Isolated-mode only; direct
-  in-repo writes stay MCP-side.)
-- **Ollama lane** — `ask_ollama` / `list_ollama_models` spawn the local `ollama` CLI
-  (`run --hidethinking <model> <task>`, `NO_COLOR=1`/`TERM=dumb`): $0, offline, private, read-only.
-  Empty model = the first from `ollama list`. Maximal jury de-correlation (with the honest caveat
-  that two local runtimes of the *same* open weights still correlate).
-- **Local-model recipes** — `examples/` custom-lane JSON for driving other CLIs against a local
-  Ollama/LM-Studio endpoint (useful when coding offline and needing extra horsepower).
-- **Peer-anonymized debate/council** — debaters and reviewers see neutral `Reviewer A/B` / `Debater 1/2`
-  labels instead of vendor names, so a model can't favour (or attack) a known rival; convergence
-  early-stop ladder unchanged.
-- **`seat_report` (earn-their-seat)** — `jury_outcomes` telemetry tracks each lane's
-  PASS/FAIL/ABSTAIN history so a lane that never adds signal can be benched on evidence, not vibes.
-- **Discrete calibration binning** — `cli-bridge eval` calibration (ECE/Brier/signed gap) now bins on
-  the *discrete* predicted-confidence values actually emitted, not 10 equal-width bins, with an N≥50
-  gate — honest numbers on small samples.
+### Added (local lane, council quality, quota resilience)
+- **`cli-bridge build <lane> "<task>"`** (human CLI): throwaway worktree → diff; `--architect <lane>`.
+- **Ollama lane** (`ask_ollama`): `run --hidethinking <model>`, $0, offline, read-only; empty
+  model = first from `ollama list`.
+- **Local-model recipes** in `examples/`.
+- **Peer-anonymized debate/council** (neutral `Reviewer A/B` / `Debater 1/2` labels).
+- `seat_report` / `jury_outcomes` telemetry (removed in 0.3.0).
+- **Quota-empty cooldown with capped backoff**: after `COOLDOWN_EMPTY_THRESHOLD` consecutive
+  empties, each further empty doubles the wait, capped at `COOLDOWN_EMPTY_MAX_S` (6 h); a
+  success resets to the 30-min base.
+- Eval calibration bins on the discrete emitted confidences, N≥50 gate.
 
-### Changed (quota resilience)
-- **Quota-empty cooldown with capped backoff** — a silent exit-0 empty (free-tier quota almost surely
-  spent) cools the lane after `COOLDOWN_EMPTY_THRESHOLD` consecutive empties; each further empty
-  **doubles** the wait, capped at `COOLDOWN_EMPTY_MAX_S` (6 h). Bounded both ways: never infinite, and
-  a single success resets the streak to the 30-min base. Stops fan-out hammering a daily-quota-dead
-  lane while still re-probing within a day.
-
-### Added (dynamic orchestration engine + cross-vendor jury)
-- **`workflow preset=jury`** — the cross-vendor verification edge: an author lane produces, then N
-  verifiers **from different vendor families** vote PASS/FAIL/ABSTAIN, aggregated k-of-N
-  (**fail-closed**: short of the threshold, or an absent/empty verdict, = REJECTED). Author≠reviewer
-  family is enforced (a model can't review its own family's correlated blind spots); a mono-family
-  pool **degrades** to same-family verifiers with a loud warning, never an undefined verdict.
-  `lanes.family_of` derives the vendor family from client_ids/key (override: `CLI_BRIDGE_FAMILY_OVERRIDES`).
-- **Typed result envelope + provenance** — `batch_run` results now carry model / kind / latency_ms /
-  exit_code so a downstream step can gate on them; `findings.extract_json(text) -> (value, error)`
-  is a public, never-raises structured-output contract for chaining on a real object, not prose.
-- **Per-invocation budget + cost envelope** — `batch_run` gains `max_calls` / `max_credits` (atomic
-  reservation; over-budget tasks skipped, not journalled, so a resume with a higher cap runs them)
-  and `dry_run` (cost envelope: calls + est token/credit range, nothing spawned).
-- **disagreement-as-uncertainty** — `ask_all` returns an `agreement` score (0–1, mean pairwise
-  difflib ratio; low = the council disagrees → less trustworthy). Heuristic, directional.
-- **confidence-escalate cascade** — `ask_cascade escalate=true` (opt-in): a cheap lane that
-  self-reports low confidence (`[ESCALATE]`) hands off to a stronger one, not just on failure.
-- **role personas** — `ask_<lane> role=reviewer|security|planner|devil` prepends a persona.
-- **vision (experimental)** — `ask_gemini images=[paths]` passes files to the Gemini CLI as @-file
-  refs (ban-safe, no vision key; verify with your CLI).
-- **verify_repair** gains `cross_family=true` (default false, back-compat) to pick a different-family
-  verifier.
+### Added (orchestration engine)
+- `workflow preset=jury` — cross-family k-of-N vote, fail-closed, `lanes.family_of` +
+  `CLI_BRIDGE_FAMILY_OVERRIDES` (preset removed in 0.3.0; `family_of` stays for `converge`).
+- **Typed result envelope + provenance** on `batch_run` (model / kind / latency_ms / exit_code);
+  `findings.extract_json(text) -> (value, error)`.
+- **Per-invocation budget**: `batch_run max_calls` / `max_credits` (over-budget tasks skipped,
+  not journalled) + `dry_run` cost envelope.
+- **`ask_all` `agreement` score** (0–1, mean pairwise difflib ratio).
+- `ask_cascade escalate=true` confidence-escalate (removed in 0.3.0).
+- **`role=` personas** on `ask_<lane>`; **`ask_gemini images=[…]`** (experimental).
+- `verify_repair cross_family=true` (preset removed in 0.3.0).
 
 ### Safety / fixes
-- **`BRIDGE_DEPTH` re-entry guard** — every spawn is stamped `CLI_BRIDGE_DEPTH`; a delegate at/over
-  `CLI_BRIDGE_MAX_DEPTH` (default 1) is refused, so a delegate configured to load cli-bridge can't
-  fork-bomb the council/quota.
-- **batch_run dropped per-task `timeout_s`** (the "[timeout] raise timeout_s" hint was a lie) —
-  now threaded through and exposed in the task schema.
+- **`CLI_BRIDGE_DEPTH` re-entry guard**: a delegate at/over `CLI_BRIDGE_MAX_DEPTH` (default 1) is refused.
+- `batch_run` per-task `timeout_s` is threaded through.
 
-### Changed (anti-bloat surface; validated by a model council)
-- **`CLI_BRIDGE_LEAN=1`** (opt-in) exposes only a curated core-12 tool surface (44 → ~12); default
-  unchanged. Moved `council_recap`/`one_phrase` into council.py (fixes the backwards import).
-  Renamed usage_report `format` → `output_format` (legacy still read). Added "use X not Y"
-  disambiguation lines to the overlapping tool clusters.
-- **Host's own lane now visible by default.** `ask_<host>` is exposed as a normal, directly-callable
-  tool (model optional) instead of being hidden; it is still kept out of `ask_all`/`ask_cascade`
-  fan-out (self-asking in a parallel council is redundant). The old behaviour — hidden, reachable
-  only as an explicit-model *sibling* consult — is now opt-in via `CLI_BRIDGE_HIDE_HOST=1`.
+### Changed (surface)
+- `CLI_BRIDGE_LEAN=1` curated core-12 surface (replaced by `CLI_BRIDGE_TOOLS` in 0.3.0).
+  `usage_report format` → `output_format`.
+- **Host's own lane visible by default** as a normal tool, still kept out of fan-out
+  (`CLI_BRIDGE_HIDE_HOST=1` to hide; removed in 0.3.0).
 
-### Added (cross-CLI orchestration unblocks)
-- **Artifact return** (`ask_build mode=direct`): non-text files the build writes in the zone
-  (images, PDFs, binaries) are reported as **artifacts by path** (type + size) instead of a useless
-  "Binary files differ" diff, and excluded from the text diff. This is the capability-borrowing
-  handoff — a delegate can have another CLI *generate* a file and hand the host a usable path.
-- **`workflow preset=verify_repair`** — cross-model build → review → repair loop: a builder lane
-  produces, a **different** model reviews (ending `VERDICT: APPROVED|ISSUES`), issues feed back to
-  the builder until approved or `max_rounds` (default 3, cap 6). Verdict parsing is fail-closed
-  (no explicit APPROVED ⇒ ISSUES); requires a distinct verifier lane. Cross-model = uncorrelated
-  failure modes catch what self-review can't.
-- **`workflow preset=fanout_compare`** — fan the same task to N lanes and render the answers side
-  by side (Option 1..N) to pick/merge; optional `judge_lane` recommends one.
+### Added (cross-CLI orchestration)
+- **Artifact return** (`ask_build mode=direct`): non-text files the build writes are reported
+  by path (type + size) instead of a "Binary files differ" diff.
+- `workflow preset=verify_repair` (removed in 0.3.0) and **`fanout_compare`** (same task to N
+  lanes side by side, optional `judge_lane`).
 
-### Changed (internal: council module, type gate, eval v3)
-- **Extracted `council.py`** — the `ask_all` / `ask_cascade` / `ask_best` / `synthesize` fan-out
-  logic moved out of `server.py` (now ~180 lines thinner) into a decoupled module, mirroring the
-  `workflows.py` injection pattern (host couplings `run_lane`/`emit`/`progress`/`host_sample` are
-  injected; the cost-policy helpers stay in `server.py`). Pure refactor — no behaviour change.
-- **mypy gate in CI** — fixed ~13 real type issues across the package; the SDK-stub `Tool(
-  annotations=…)` noise is contained by one typed helper `_ann()` (not a blanket error-disable, so
-  mypy still flags real arg-type bugs). New `typecheck` CI job, mypy pinned for a reproducible gate.
-- **eval v3** — the council-vs-single recall verdict now comes from a deterministic, seeded
-  **permutation test** over per-fixture recall (replaces the 1-sigma band-overlap heuristic). Corpus
-  hardened to **22 fixtures / 22 bugs**: added multi-bug diffs and decoys **inside** buggy fixtures
-  (the realistic precision test the old corpus lacked).
+### Changed (internal)
+- **`council.py` extracted** from `server.py` (injected `run_lane`/`emit`/`progress`/`host_sample`).
+- **mypy gate in CI** (typed `_ann()` helper for the SDK-stub noise).
+- **eval v3**: seeded permutation test over per-fixture recall; corpus 22 fixtures / 22 bugs
+  with decoys inside buggy fixtures.
 
-### Added (supervised delegation: real builds, live steering, durable workflows)
-- **`ask_build` — commission a real build.** `mode=isolated` (default) keeps the existing
-  throwaway-worktree diff (`ask_build_isolated` is now a legacy alias). `mode=direct` builds
-  straight into a target dir, guarded by git + a **zone contract**: the delegate may write only
-  inside `zone`; all undo is zone-scoped (`git checkout`/`clean -- <zone>`, never a global
-  `reset --hard`); a per-zone atomic lock allows disjoint zones to build in parallel but blocks
-  two builds on the same zone; after each turn a global `git status -uall` vs a pre-build snapshot
-  catches any write OUTSIDE the zone (escape via `../`, absolute path, symlink) and reverts the
-  build. Greenfield dirs are created and `git init`-ed. So the host can build one part while a
-  delegate builds another in the SAME repo, safely.
-- **Steerable multi-turn builds** (`async=true`): `job_tail(job_id, offset)` streams the build's
-  progress log (byte-offset, line-bounded); `build_steer(job_id, instruction, interrupt)` queues a
-  correction for the next turn or cuts the current turn (files kept); an optional executable
-  Definition of Done (`dod_cmd`, an argv list — never a shell string) is run after each turn
-  (pass = done, fail = one more turn with the error fed back), bounded by `max_fail_retries` (3)
-  and `max_turns` (12). A turn that changes 0 files in the zone is warned (plan-leak signal).
-  `job_status` folds in live build progress; `dry_run` previews the brief.
-- **`batch_run` — durable journaled fan-out.** Run many independent asks in one call instead of N;
-  each result is journalled (SQLite, WAL), so `resume_id` replays the finished tasks and runs only
-  the rest **across a server restart**. The host composes the logic; no JSON DSL.
-- **`workflow` presets** over that substrate: **`refine_plan`** (the council demolishes your plan
-  from distinct angles — pass `plan_file`, read by each lane, never recopied), `council_review`,
-  `map_review`, `research_verify`. All resumable + async-able.
-- **Opt-in streaming runner** (`arun(on_line=…, log_path=…)`): concurrent stdout/stderr readers
-  (no deadlock), a no-output stall guard, per-line redaction — the substrate for live observation.
-  The buffered path is unchanged when unused.
+### Added (supervised delegation)
+- **`ask_build`** — `mode=isolated` (default, worktree diff; `ask_build_isolated` became an
+  alias) and `mode=direct`: writes only inside `zone`, zone-scoped undo, per-zone lock, a
+  post-turn `git status -uall` vs snapshot catches any write outside the zone and reverts the
+  build; greenfield dirs are created and `git init`-ed.
+- **Steerable multi-turn builds** (`async=true`): progress log tail, steer/interrupt, executable
+  Definition of Done (`dod_cmd`, argv list) after each turn, bounded by `max_fail_retries` (3)
+  and `max_turns` (12); a 0-file turn warns.
+- **`batch_run`** — durable journaled fan-out (SQLite WAL, `resume_id` across a restart).
+- **`workflow` presets** `refine_plan` (`plan_file`), `council_review` (removed in 0.3.0),
+  `map_review`, `research_verify`.
+- **Opt-in streaming runner** (`arun(on_line=…, log_path=…)`) with a stall guard.
 
 ### Fixed
-- **Guard anti-bypass**: `guards.scan` now matches on an NFKC-normalized, zero-width-stripped view,
-  so injection hidden behind full-width homoglyphs or token-splitting zero-width chars still trips.
-  Detection only — the returned text is unchanged.
-- **Runtime paid-model warning** (`_run_lane`): a free lane resolving to a paid `opencode-go/*`
-  model (a per-call override the doctor mismatch can't see) now logs a credit-spend warning.
+- **Guard anti-bypass**: NFKC-normalized, zero-width-stripped matching.
+- **Runtime paid-model warning** when a free lane resolves to `opencode-go/*`.
+- `hidden-html-comment` guard only fires when the comment hides a directive or secret-talk.
+- Removed the dead synchronous spawn path (`runner.run()`); everything goes through `arun`.
+- CI matrix: Python 3.13 on Linux; macOS and Windows test 3.10 + 3.13.
+- `SECURITY.md` discloses environment inheritance by delegate CLIs.
 
-### Fixed (council audit — 6-dimension adversarial self-review)
-- **Guard: `hidden-html-comment` no longer fires on every HTML comment.** Diffs and markdown
-  legitimately contain benign comments (`<!-- TODO -->`), so flagging them all desensitized
-  `warn` mode and made `strict` withhold good answers. The signal now requires the comment to
-  hide a directive or secret-talk (ignore/disregard/instructions/api key/token/…). Tests cover
-  both directions.
-- **Removed the dead synchronous spawn path** (`runner.run()` + its `_kill_group` helper):
-  nothing in production called it — server and CLI both go through `arun`, the only path with
-  host-cancellation kill. Its result-mapping duplicated `_finish` and could drift. Runner tests
-  now exercise `arun` through a tiny sync wrapper.
-- **CI matrix widened**: Python 3.13 added on Linux; macOS and Windows now test both ends of the
-  supported range (3.10 + 3.13) instead of a single 3.12 job each.
-- **`SECURITY.md` discloses environment inheritance**: every delegate CLI inherits the host's
-  full environment (deliberate — official CLIs need their own auth/PATH), so secrets in that env
-  are visible to delegates exactly as when running the CLI by hand; documented with a scoped-env
-  mitigation.
-- mypy-flagged loop-variable reuse in `conversations_list` renamed (`r` → `row`).
-- `site/`: `og:image`/`twitter:image` now point at a PNG social card (`assets/social-card.png`)
-  — social platforms don't render SVG previews.
-
-### Added (i18n + landing)
-- **README in 6 more languages** (`docs/i18n/`): Français, 简体中文, Español, Português (BR),
-  日本語, Deutsch — full translations with a language switcher under the banner. English stays
-  canonical; translations may lag.
-- **GitHub Pages landing** (`site/index.html` + `pages.yml`, manual deploy): one page on the
-  README's charter — mark, animated banner, demo GIF, install, differentiators, honesty quote.
+### Added (docs, layout, i18n)
+- README in 6 languages (`docs/i18n/`) and a GitHub Pages landing (both removed in 0.3.0).
+- Root slimmed to the conventional files; `BENCHMARKS.md`/`ARCHITECTURE.md` under `docs/`;
+  `CONTRIBUTING.md`/`SECURITY.md`/`CODE_OF_CONDUCT.md` under `.github/`.
+- Animated SVG banner + mark (`assets/`).
+- **`CLI_BRIDGE_TRACE_FOOTER=off`** hides the `## Trace` footer in workflow reports.
 
 ### Removed (dead code)
-- `server.lanes_load_status()` and `workflows.assign_roles()` — orphan one-line aliases nothing
-  in `src/` called (tests now use the underlying `lanes.LANES_LOAD_STATUS` / `_assign`).
-- `LaneSpec.install_hint` was written for every lane but never read — `doctor` now prints it
-  for lanes that are NOT on PATH, which is what it was for.
+- `server.lanes_load_status()`, `workflows.assign_roles()`; `LaneSpec.install_hint` is now
+  printed by `doctor` for lanes not on PATH.
 
-### Added (terminal-friendly reports)
-- **`CLI_BRIDGE_TRACE_FOOTER=off`** hides the `## Trace` JSON footer in workflow reports
-  (review_diff / security_review / test_plan / premortem / debate). Default unchanged (shown);
-  distinct from `CLI_BRIDGE_TRACE_DIR`, which dumps raw traces. For humans reading reports in a
-  terminal — MCP hosts usually want the trace.
+### Changed (eval v2)
+- Corpus 12 → 20 fixtures (10 → 18 bugs); per-bug win/loss in the JSON output; severity rubric
+  in the reviewer JSON rules (blocker / high / medium / low).
 
-### Fixed (test isolation)
-- `test_ask_all_targets_skip_limited_and_paid` now pins `CLI_BRIDGE_STATE_DB` to a temp file —
-  it used to read the developer's real state DB, so a lane in live cooldown (e.g. repeated auth
-  failures that day) made it fail spuriously.
+### Added (resilience)
+- **`CLI_BRIDGE_<LANE>_MIN_INTERVAL_S`** (or `min_interval_s` in the config file): minimum spacing
+  between spawns of one lane (`runner.pace`); different lanes never wait. Default 0.
 
-### Changed (repo layout — public-ready root)
-- Root slimmed to the conventional files (README, CHANGELOG, LICENSE, AGENTS.md, pyproject,
-  server.json, smithery.yaml). `docs/BENCHMARKS.md`/`docs/ARCHITECTURE.md` moved under `docs/`;
-  `CONTRIBUTING.md`/`.github/SECURITY.md`/`CODE_OF_CONDUCT.md` moved under `.github/` (GitHub
-  picks them up there natively). Links updated.
+### Added (M12)
+- `files_required_to_continue` grounding gate on `debate`/`consensus` (removed in 0.3.0).
+- **Debate `VOTE: confidence=<0-1>; continue=<yes|no>` footer** — parsed into a tally; the
+  debate ends early when every debater votes to stop. **Convergence detection** via `difflib`
+  (≥92 % similarity between rounds stops early).
+- **`architect_lane`** on isolated builds: a stronger lane writes the plan, the editor lane
+  implements it; graceful fallback if the architect fails.
+- **`cli-bridge eval`** — council (`review_diff([N lanes])`) vs one strong model sampled K = N
+  times, equal call budget, deterministic scorer (keyword AND-of-OR + file/line, greedy 1:1, no
+  LLM judge), calibration gate in CI, `--live` / `CLI_BRIDGE_EVAL_LIVE=1` for real models,
+  throttled arms flagged **Unreliable**. First measured run (2026-06-05, repeats=3): no clean
+  winner — a strong single model caught marginally more bugs (recall 93 % vs 73 %, overlapping
+  bands) with ~40 false alarms (precision 0.19); the council ~14 false alarms (precision 0.33).
+  (Harness moved to `benchmarks/` in 0.3.0.)
+- **`apilookup` MCP prompt**: dated, current-year documentation lookup through a web-aware lane.
+- `CLI_BRIDGE_DISABLED_TOOLS` / `CLI_BRIDGE_ENABLED_TOOLS` (replaced by `CLI_BRIDGE_TOOLS` in 0.3.0).
 
-### Added (docs — animated README banner + mark)
-- **Self-contained animated SVG header** (`assets/banner-{dark,light}.svg`, `mark-{dark,light}.svg`):
-  JS-free SMIL, light/dark via `<picture>`, renders in GitHub's `<img>`. The banner is a concept
-  diagram — You → cli-bridge → council lanes in parallel → one merged review, with travelling
-  signals + a blinking terminal cursor; the mark is a compact terminal-brackets cachet. No new deps.
+### Changed (review quality, deliberation)
+- `review_diff` / `security_review` prompts gained an anti-overengineering, diff-only line.
+- **`consensus` SELECTS the peer-ranked best answer by default** (Borda); `synthesize=true` for
+  the chairman blend. (Now `debate(vote=borda)`.)
+- `dry_run` on `debate`/`consensus` returns a preflight data manifest (vendors, files, chars).
 
-### Changed (eval v2 — bigger corpus, per-bug JSON, severity rubric)
-- **Eval corpus 12 → 20 fixtures (10 → 18 reasoning bugs)**: a harder second bug per category
-  (range-bound off-by-one, chained `.get()` None deref, unsynchronized lazy singleton, DEBUG-flag
-  auth bypass, socket leak on an early return, dropped-negation inversion, `xs[i+1]` past the end,
-  `except: pass` swallowing failures). Calibration gate passes on all 20.
-- **Per-bug win/loss now in the JSON output** (`bugs` map: fixture, category, caught-by-council,
-  caught-by-single) — same single source as the markdown table, so they can never disagree.
-- **Severity rubric added to the reviewer JSON rules** (review_diff/security_review): blocker =
-  exploitable/certain loss on a main path; high = real incorrect behaviour; medium = edge-path or
-  risky pattern; low = clarity only. Both eval arms calibrated severity poorly (22–35% exact) —
-  the rubric targets that; the eval measures whether it works.
+### Security (M11)
+- **`set_lane_cost` REQUIRES a provenance note.**
+- **BYO-API keys never touch argv**: curl ≥ 8.3 `--variable %MY_KEY` + `--expand-header`;
+  `argv_secret_risk` validator warns in `doctor`.
 
-### Added (resilience — anti-burst spawn pacing)
-- **`CLI_BRIDGE_<LANE>_MIN_INTERVAL_S`** (or `min_interval_s` in the config file): opt-in minimum
-  spacing between spawns of one lane (`runner.pace`, per-lane lock). Field finding from the
-  quality eval: firing several calls at ONE lane back-to-back rate-limits a free tier into
-  returning empty (gemini: 315/343 calls dead in one run) — and the failure cooldown never trips
-  because successes interleave with the empties. Same-lane bursts become an evenly spaced queue;
-  DIFFERENT lanes never wait, so council fan-out stays parallel. Default 0 (off, no behaviour
-  change). `lane_stats` now hints at the pacer when a lane shows the burst-rate-limited pattern
-  (many `empty`/`quota` failures, pacing unset).
+### Added (debate/consensus hardening)
+- **Grounding contract** `context_files` (up to 5 files read into every debater prompt).
+- Fact-check pass, anti-unanimity steelman, provenance tags, brief linter (all removed in 0.3.0);
+  **independent judge** (with 3+ lanes one is held out; `allow_self_judge`); **`summary_only`**;
+  reports end with the pre-filled `rate_lane(...)` call.
+- **Community lanes** (`examples/community-lanes.json`): Aider, Goose, Plandex, Amp, Crush,
+  Amazon Q CLI, Droid — `limited` by default.
 
-### Added (grounding — files_required_to_continue, M12-3)
-- **`debate` and `consensus` now stop and ask for code instead of guessing.** When a brief NAMES
-  local source files (e.g. "is the check in `auth.py` safe?") that exist in `cwd` but weren't
-  passed as `context_files`, the tool returns a structured `files_required_to_continue` block
-  (`{"status": "files_required_to_continue", "files": [...]}`) listing exactly which files to pass,
-  rather than letting the council opine on the host's paraphrase. Conservative (fires only on real,
-  readable, un-provided file paths; per-file) and overridable with `allow_ungrounded=true`. Directly
-  closes the documented June-2026 failure mode (with only `cwd`, debaters read nothing → echo
-  chamber). New schema field `allow_ungrounded` on both tools.
-- **Scope note (forced-pacing):** this is forced-pacing adapted to cli-bridge's identity. We
-  deliberately did NOT adopt pal-mcp-server's full "host-must-investigate" step state machine
-  (`step_number`/`next_step_required`/`confidence`): that pattern pays off for single-model deep
-  analysis where the HOST does the investigating, whereas cli-bridge DELEGATES investigation to the
-  council. `files_required_to_continue` is the part of that idea that fits — "don't reason from a
-  paraphrase, ask for the real input."
+### Added (cost policy)
+- **`docs/COSTS.md`** — sourced, dated free tiers, per-token pricing, subscription mechanics.
+- **`set_lane_cost`** — one call sets a lane's tier + why-note, effective now, persisted.
+- **The $0 council** (`examples/free-apis.json`): Groq, Cerebras, GitHub Models, OpenRouter `:free`.
+- **Cost-facts freshness guard**: `doctor` warns when the snapshot is >90 days old.
+- Tiers labeled "(set by you)" vs "(default — yours may differ)"; `qwen` → `paid`, `grok` →
+  `limited`, gemini carries its free-tier sunset, opencode discloses the data-training tradeoff;
+  every lane ships a `cost_note`.
 
-### Added (debate — structured vote + convergence early-stop, M12-2)
-- **Debaters now end each turn with a machine-readable `VOTE: confidence=<0-1>; continue=<yes|no>`.**
-  The footer is parsed into a tally (continue vs stop, mean confidence) shown in the report and
-  trace, and — crucially — **bounds the loop by signal, not a fixed count**: when every debater
-  votes to stop, the debate ends early. The footer is stripped from the answers fed to the judge,
-  fact-checker, and final display so the confidence number can't bias the verdict.
-- **Convergence detection (pure stdlib, no embeddings/network).** Between rounds, lexical
-  similarity (`difflib`) of each debater's revised answer vs its previous one is measured; once
-  answers stabilise (≥92%) the debate stops early instead of burning the remaining round budget.
-  The round count is now a ceiling, not a quota. (Chose `difflib` over the planned Ollama
-  embeddings to keep the "stdlib + mcp only, tests need no network" invariant.)
+### Added (Grok, drift-proofing, reliability)
+- **Grok lane** (`ask_grok`), no hardcoded model.
+- Flag-drift detection in `doctor deep` via `probe_flags` (removed in 0.3.0; `doctor --deep`
+  still calls each lane).
+- **Usage-policy refusals fall through** (`kind="policy"`): a delegate that refuses on policy
+  grounds and exits 0 is a soft failure, skipped by cascade, never cached.
+- **opencode's free model is DISCOVERED, never pinned**: only `opencode/*-free` by pattern from
+  `opencode models`; never silently falls back to a paid model.
 
-### Added (build — architect/editor split, M12-2)
-- **`ask_build_isolated` gains an optional `architect_lane`** (Aider-style): a (usually stronger)
-  lane first writes a precise PLAN read-only, which the editor lane (`lane`, pick a cheaper one)
-  then implements in the throwaway worktree. Strong model plans, cheap model applies — a known
-  cost+quality lever. The plan is shown in the report; if the architect fails, the editor builds
-  solo with the original task (graceful fallback). No behaviour change when `architect_lane` is
-  omitted.
-
-### Added (quality eval — does a council beat one strong model? M12-1)
-- **`cli-bridge eval`** — a deterministic harness that answers the project's central, *falsifiable*
-  question: does a COUNCIL of distinct models beat ONE strong model + self-consistency at finding
-  reasoning bugs? Two arms with an **equal call budget** — council = `review_diff([N lanes])`,
-  single = the same lane sampled K = N times (`review_diff([lane × K])`, displays `#1..#K`) — so
-  the only variable is "distinct models" vs "repeated samples". Both arms reuse the existing
-  `review_diff` engine **unchanged**.
-- **`src/cli_bridge/eval.py`** — pure, deterministic scorer (keyword AND-of-OR + file/line match,
-  greedy 1:1, **no LLM judge**); precheck findings excluded (identical in both arms). Reports
-  recall / precision / false-alarms-on-clean-lines / severity accuracy as **mean ± sd** with a
-  1σ-overlap "no measurable difference" guard, plus a **per-bug win/loss table**.
-- **`tests/fixtures/evalset/`** — 12 fixtures: 10 reasoning-bug diffs across diverse categories
-  (off-by-one, null deref, TOCTOU, auth bypass, resource leak, logic inversion, index bounds,
-  missing return, identity compare, error path) the regex prechecks can't catch, plus 2 clean
-  "decoy" diffs that punish over-detection. Each ships an `ideal.json` (perfect-reviewer findings).
-- **Calibration gate (CI, offline, no network):** `tests/test_eval_scorer.py` requires the scorer
-  to credit every ideal finding at full recall with zero false alarms — guarantees a live result
-  measures the *models*, not the matcher. `cli-bridge eval` (no `--live`) runs this self-check;
-  real models only with `--live` / `CLI_BRIDGE_EVAL_LIVE=1` (free lanes unless `--include-paid`).
-- Honesty by construction: `--repeats` (3 default, 5 to publish), small-N "directional, not a
-  leaderboard" caveat, and a negative result (council ties/loses) is shipped, not hidden. See
-  `docs/BENCHMARKS.md` § Quality.
-- **Throttle guard:** the eval distinguishes an arm that *ran and found nothing* from one whose
-  review *failed outright* (a lane rate-limited to empty). The single arm fires K calls at ONE lane
-  per fixture, so on free tiers it gets throttled; a resulting 0% is flagged **Unreliable** in the
-  report (and `failed_fixtures` in JSON), not silently scored as "single models are useless."
-- First measured run (2026-06-05, repeats=3, headroom single lane) is recorded in `docs/BENCHMARKS.md`:
-  **no clean winner — a precision/recall trade-off.** A strong single model (deepseek-v4-pro ×3)
-  caught marginally more bugs (recall 93% vs 73%, overlapping bands) but **over-detected** (~40
-  false alarms, precision 0.19); the council's diverse-model merge was ~2× cleaner (~14 false
-  alarms, precision 0.33). The naïve "more models = more bugs" did not hold; "more *diverse* models
-  = less noise" did.
-
-### Added (current-docs guard)
-- **`apilookup` MCP prompt** (slash command): forces a dated, current-year documentation lookup
-  through a web-aware lane (`ask_gemini`/`ask_grok`) instead of answering a library/API question
-  from a stale training cutoff. Shipped as a prompt — zero tool-surface cost.
-
-### Added (context economy — modular tool loading)
-- **`CLI_BRIDGE_DISABLED_TOOLS` / `CLI_BRIDGE_ENABLED_TOOLS`**: hide tools from the listing
-  (denylist) or expose only a chosen set (allowlist = one-env "lean mode"). Every host pays each
-  tool's schema in context per request; the 2026 consensus is 5–15 tools with sharp degradation
-  past ~20, and an unfilterable surface is the #1 documented complaint about the leading
-  multi-model MCP server. `doctor`/`setup` are essential and can't be hidden.
-
-### Changed (review quality — scope discipline)
-- **Reviewers are now told not to overengineer or scope-creep.** `review_diff` / `security_review`
-  prompts gained an explicit anti-overengineering + diff-only discipline line (no hypothetical
-  abstractions, no unrelated rewrites/migrations) — directly counters the low-value-nit padding
-  seen when dogfooding the council on this repo.
-
-### Changed (deliberation science — selection beats synthesis)
-- **`consensus` now SELECTS the peer-ranked best answer by default; synthesis is opt-in.**
-  Research flipped against blending: judge-SELECTION of the single best answer wins where
-  MoA-style synthesis loses to baseline (arXiv 2603.20324, effect size g=3.86; Self-MoA arXiv
-  2502.00674). consensus already ranked with a deterministic Borda vote (selection-shaped) but
-  then a chairman REWROTE the winner (synthesis-shaped). The default now returns the #1 answer
-  verbatim + the vote table; pass `synthesize=true` for the chairman blend, labeled the weaker
-  mode. One fewer lane call by default. (`ask_all synthesize` was already opt-in.)
-
-### Added (data governance — preflight manifest M11-2)
-- **`dry_run` on `debate`/`consensus` returns a preflight data manifest** — exactly which vendors
-  would be queried and which files/chars (and est. tokens) would leave the machine — without
-  spawning anything. The cheapest data-governance control before a multi-vendor fan-out. Shared
-  file-reader feeds both the manifest and the debate context pack so they never disagree.
-
-### Security (council blockers M11-1, M11-4)
-- **`set_lane_cost` now REQUIRES a provenance note.** Every cost write must state its one-line
-  why ('user: on the Go plan', 'vendor: tier sunset') — a delegate's output can't quietly steer
-  the host into rewriting the cost policy, and doctor shows the note next to the tier.
-- **BYO-API keys never touch argv anymore.** The shipped curl-lane examples now use curl ≥ 8.3's
-  `--variable %MY_KEY` + `--expand-header "Authorization: Bearer {{MY_KEY}}"`, which imports the
-  key *inside* curl — `ps` only ever shows the variable's NAME. New `argv_secret_risk` validator:
-  a custom lane that still expands a `${ENV}` secret into a credential-bearing argv part gets a
-  ⚠️ warning in `doctor` with the safe pattern. (Unanimous blocker from the council's
-  self-critique; .github/SECURITY.md updated.)
-
-### Added (debate/consensus hardening — from a production field report)
-- **Grounding contract** (`context_files`, debate + consensus): the tool reads up to 5 key files
-  (per-file truncation, unreadable files noted, never fatal) into a CONTEXT PACK injected into
-  every debater/panelist prompt. Field-tested finding: with only `cwd`, no debater reads
-  anything and the council is an echo chamber of the brief.
-- **Fact-check pass** (debate, default ON when a free lane exists): after the judge, a free lane
-  extracts the verdict's verifiable claims (commands, model tags, versions, APIs) and reports
-  what it cannot confirm under "⚠️ Fact-check" — catches a judge-approved hallucinated command
-  before the host copy-pastes it.
-- **Independent judge** (debate): with 3+ lanes, one lane is held out of the debate to judge it;
-  with fewer, the self-judge is labeled "(also debated — sparse pool)" in the report.
-  `allow_self_judge: true` restores everyone-debates.
-- **Anti-unanimity steelman** (`steelman: true`): the judge now emits a structured
-  `UNANIMOUS: yes|no` marker; on unanimity one lane argues the strongest case AGAINST the
-  verdict and the judge re-concludes (bonus round traced in meta). Fast 4-0s get pushback.
-- **Provenance tags** (debate): debaters tag claims `[brief]` / `[context]` / `[own-knowledge]`
-  / `[verified]` — the echo chamber becomes visible in the output itself.
-- **Brief linter** (debate): a thin brief (too short / no enumerated options / no decision
-  criteria) gets a non-blocking "thin brief → thin consensus" warning in the report.
-- **`summary_only`** (debate + consensus): verdict + disagreements + fact-check only, full
-  per-model positions dropped (~60-80 % fewer host tokens).
-- **`rate_lane` hook**: debate and consensus reports end with the pre-filled `rate_lane(...)`
-  call, so the routing feedback loop feeds itself.
-- **Community lanes** (`examples/community-lanes.json`): ready-to-edit experimental lanes for
-  Aider, Goose, Plandex, Amp, Crush, Amazon Q CLI and Droid — `limited` by default (cost-safe)
-  and drift-checkable via `doctor deep`.
-
-### Added (honest, self-maintaining cost policy)
-- **`docs/COSTS.md`** — the sourced, dated truth behind every cost tier: free tiers with exact
-  limits (Groq/Cerebras/GitHub Models/OpenRouter), per-token API pricing with a "cost of a 3k/1k
-  review" anchor per model, and subscription mechanics (shared buckets, exhaustion behaviour:
-  hard-stop vs metered overage vs silent downgrade). Verified June 2026 against vendor pages;
-  anything unconfirmable is marked UNCONFIRMED instead of guessed.
-- **`set_lane_cost` tool — the cost policy maintains itself.** The counterpart of `rate_lane` for
-  money: when the user says what a lane costs THEM, or the host knows a vendor changed a tier,
-  one call sets the lane's tier (+ a why-note shown by doctor), effective immediately and
-  persisted to the JSON config file. No code update needed for the policy to track reality.
-- **The $0 council** (`examples/free-apis.json` + README section): ready-to-use BYO-API curl
-  lanes for the providers with a genuinely free, card-free, hard-stop tier (Groq, Cerebras,
-  GitHub Models, OpenRouter `:free`) — a real multi-model council for a user with zero
-  subscriptions, with real limits quoted per lane.
-- **Cost-facts freshness guard**: the verification date ships in the code; `doctor` warns when
-  the snapshot is stale (>90 days) instead of letting old facts pose as current.
-
-### Changed (honest, self-maintaining cost policy)
-- **Cost tiers are now labeled for what they are.** `doctor`/`setup`/`cli-bridge init`/the config
-  resource all distinguish "(set by you)" from "(default — yours may differ)" and state that
-  tiers are sourced typical-plan defaults, NEVER detected from the user's account. The setup
-  flow now opens with one symmetric question (flat subscriptions / metered API / mix) instead of
-  presenting hardcoded guesses as "what lanes cost YOU".
-- **Lane defaults corrected to sourced facts**: `qwen` → `paid` (free OAuth tier closed
-  2026-04-15; the Alibaba Coding Plan ToS prohibits non-interactive use, so the only
-  cli-bridge-compatible path is a metered key); `grok` → `limited` (SuperGrok/X Premium+
-  required) with the documented `-p` headless flag and the official curl installer; `gemini`
-  carries its free-tier sunset (2026-06-18 → Antigravity) in doctor; `opencode` discloses the
-  free-period data-training tradeoff. Every built-in lane now ships a one-line sourced
-  `cost_note` surfaced by doctor.
-
-### Added (Grok lane, drift-proofing)
-- **Grok lane** (`ask_grok`): built-in lane for xAI's `grok` CLI (experimental). No model is
-  hardcoded — empty `model` uses the CLI's own default; pass `model=<id>` to pick one.
-- **Flag-drift detection** (`doctor deep`): each installed lane is checked against its `--help` —
-  if a flag cli-bridge relies on (`--sandbox`, `-m`, `-p`, …) has been renamed/removed upstream,
-  doctor warns *before* the lane fails silently. Costs no quota (just `--help`). Custom JSON lanes
-  derive their checked flags from the template automatically. Lanes declare `probe_flags`.
-
-### Changed (reliability)
-- **Usage-policy refusals fall through instead of posing as answers.** When a delegate refuses
-  on policy grounds and still exits 0 (Claude Code prints "API Error: … unable to respond … "
-  "violate our Usage Policy … Request ID: req_…"), the runner now classifies it as a soft
-  failure `kind="policy"` — so `ask_cascade`/`ask_best` skip to a lane that actually answers, it
-  is never cached, and a council fan-out no longer shows a refusal as if it were a real answer.
-  Fingerprint requires two co-occurring phrases so a normal answer mentioning "usage policy" or
-  "API Error" can't misfire. (Surfaced by dogfooding the council on the project itself.)
-
-### Changed (drift-proofing)
-- **opencode's free model is DISCOVERED, never pinned — and cost-safe.** The empty-model default
-  resolves only to a `opencode/*-free` model (the $0 rate-limited tier), discovered live from
-  `opencode models` and chosen by PATTERN, deterministically sorted — never a specific hardcoded
-  id, so a retired free model is replaced automatically. It will NOT silently fall back to a paid
-  model: a bare `opencode/*` Zen model bills per-token (API cost) and `opencode-go/*` spends prepaid
-  credits, so if no `-free` model is listed it uses the free seed rather than a paid one. A pinned
-  id remains only as a last-resort seed if `opencode models` itself fails.
-
-### Added (round-table conversations, model discovery, challenge)
-- **Round-table conversations**: pass `conversation: "new"` to any `ask_<lane>` to start a
-  multi-turn, MULTI-LANE thread; reuse the returned id — even on a different lane — to continue.
-  The shared transcript is stored locally (sqlite), so a thread SURVIVES the host's context
-  reset (`/compact`) and a server restart. Recipient-aware replay (your own turns marked "You",
-  others named) with a sliding-window budget (`CLI_BRIDGE_CONVO_MAX_CHARS`, default 32000) that
-  keeps the newest turns and drops the oldest. New tools `conversations_list` /
-  `conversation_show`; `CLI_BRIDGE_CONVO_MAX_STORED` caps how many threads are retained.
-- **Per-lane model selection, including env-based**: a lane can now pick a model via an env var,
-  not only a flag — Mistral (`vibe`) honours `model=` through `VIBE_ACTIVE_MODEL`. New generic
-  `list_models` tool: lists a lane's models where the CLI exposes that, otherwise shows the
-  resolved default model and how to choose one.
-- **`consensus`**: the "LLM council" pattern, done better. Every lane answers blind, then each
-  RANKS the **anonymized** answers (so no model can favour its own), the votes are aggregated
-  **deterministically** (Borda count — not an LLM's vibe), and a chairman synthesizes the
-  winner. Cost-bounded and ban-safe. Returns the final answer + a peer-vote ranking table.
-- **`challenge`**: hand a claim to one outside lane with a critical-reassessment prompt and get
-  an independent skeptical review (with an integrity guardrail — it won't manufacture
-  disagreement). Pressure-test your own conclusion before acting.
-- **Onboarding & guidance**: `setup` now detects installed lanes, sorts them by what they cost
-  you (free / limited / paid) and recommends a concrete profile + daily cap to confirm. The MCP
-  `instructions` were rewritten as a host-agnostic playbook: when to consult / when not, the
-  round-table, safe delegation (`ask_build_isolated`), and spending with confidence.
-- **Live progress streaming**: slow fan-outs (`ask_all`, `consensus`, `debate`) now emit MCP
-  progress notifications ("3/5 lanes done"), so the host can show a live indicator instead of a
-  frozen spinner — done the MCP-native way (no tmux), and a no-op when the host sends no progress
-  token.
-- **Git-workflow tools**: `commit_msg` (a Conventional Commit message from the staged diff, or
-  the working tree if nothing is staged) and `pr_describe` (PR title + Summary/Changes/Testing
-  from the branch diff + commit log vs a base). Both read-only — they emit text, never commit.
-- **Debate stances + consensus agreement**: `debate` gains `adversarial: true`, which assigns
-  for/against/neutral stances to the opening answers (sharper disagreement, with an integrity
-  guardrail so a stance never forces a dishonest position). `consensus` now reports an agreement
-  metric (how many rankers placed the winner first).
-- **Review triage**: `review_diff` / `security_review` accept `severity_filter` — show only
-  findings at or above a threshold (blocker > high > medium > low > info).
-- **Outcome-tracked routing (`rate_lane`)**: the router LEARNS. Score a lane's answer 1–5 for a
-  task-type (mode) and `ask_best` then prefers the lanes that actually win that mode **on this
-  machine** — a local quality signal, stored in sqlite, that outlives the session (survives
-  `/compact` and restart). Proven-good lanes jump ahead of untried ones; proven-bad sink below;
-  zero feedback changes nothing (a two-rating floor before any lane steers). Every `ask_best`
-  answer prints the exact `rate_lane(...)` call, and `route_plan` shows each lane's running score.
-- **Free synthesis via the host (MCP sampling)**: when the host supports it, `ask_all`'s
-  synthesis uses the host's OWN model as the judge — no lane spawned, no API key, no quota —
-  and transparently falls back to a free lane otherwise. cli-bridge's zero-cost edge: reuse the
-  model you're already running.
+### Added (round-table, discovery, git tools, routing)
+- **Round-table conversations**: `conversation: "new"` on any `ask_<lane>`, reuse the id on any
+  lane; sqlite transcript survives `/compact` and restart; `CLI_BRIDGE_CONVO_MAX_CHARS` (32000),
+  `CLI_BRIDGE_CONVO_MAX_STORED`.
+- **Per-lane model selection incl. env-based** (Mistral via `VIBE_ACTIVE_MODEL`); **`list_models`**.
+- **`consensus`** (blind answers, anonymized Borda ranking, chairman) and **`challenge`**
+  (one outside lane critically reassesses a claim) — both folded into `debate`/`workflow` in 0.3.0.
+- **`setup`** detects installed lanes, sorts by cost, recommends a profile + daily cap.
+- **Live progress notifications** on slow fan-outs (MCP-native).
+- **`commit_msg`** / **`pr_describe`** (now `git_text`), read-only.
+- **`debate adversarial: true`** (for/against/neutral stances); **`severity_filter`** on reviews.
+- **`rate_lane`**: score a lane 1–5 per mode; `ask_best` prefers proven lanes on this machine
+  (two-rating floor); every `ask_best` answer prints the exact `rate_lane(...)` call.
+- **Free synthesis via MCP sampling**: `ask_all` synthesis uses the host's own model when
+  supported, else a free lane.
 
 ### Added
-- **Council recap**: every `ask_all` / review / debate / premortem / test_plan result opens with
-  a one-line-per-delegate digest — who answered, latency, a one-line gist — so no voice is hidden.
-- **Async jobs**: `ask_all_async`, `job_status`, `job_result`, `job_cancel`, `jobs_list` — start a
-  slow fan-out in the background and poll it, so it can't hit the host's tool-call deadline.
-- **Structured review**: reviewers emit JSON findings, merged deterministically by file/line/title
-  with agreement-based confidence (single/majority/consensus); `output_format: markdown|json`.
-  Deterministic prechecks (secrets, dangerous shell) seed the findings. `security_review` adds a
-  `residual_risk` section.
-- **Output guard**: `CLI_BRIDGE_GUARD=off|warn|strict` scans delegate output for prompt-injection
-  / tool-poisoning.
-- **Worktree-isolated write mode**: `ask_build_isolated` runs a build agent in a throwaway git
-  worktree and returns a diff; your real repo is never touched.
-- **`ask_best`** router with modes (fast/cheap/deep/code/review/security) + estimated token/credit
-  accounting (`usage_report`, `usage_budget`; per-lane `CREDITS_PER_1K`, `DAILY_LIMIT`).
-- **Human CLI** (`cli-bridge …`) and **MCP resources** (`cli-bridge://config`, `lane-stats`,
-  `usage-summary`, `workflow-schemas/review-diff`).
-- **`premortem`** and **`test_plan`** workflows (+ MCP prompts).
-- Terse preamble made leaner with a `CLI_BRIDGE_TERSE_MIN_CHARS` skip; eval fixtures + a
-  no-network evaluator; ruff lint + CI lint job.
+- **Council recap** line per delegate on every fan-out result.
+- **Async jobs** (`ask_all_async` + `job_*`, now `ask_all(async=true)` + `job`).
+- **Structured review**: JSON findings merged by file/line/title with agreement-based
+  confidence; `output_format: markdown|json`; deterministic prechecks (secrets, dangerous shell).
+- **Output guard** `CLI_BRIDGE_GUARD=off|warn|strict`.
+- **Worktree-isolated write mode** (`ask_build_isolated`, now `ask_build`).
+- **`ask_best`** router with modes + estimated token/credit accounting (`CREDITS_PER_1K`, `DAILY_LIMIT`).
+- **Human CLI** (`cli-bridge …`) and **MCP resources** (`cli-bridge://config`, `lane-stats`, `usage-summary`).
+- **`premortem`** / **`test_plan`** workflows.
+- `CLI_BRIDGE_TERSE_MIN_CHARS`; eval fixtures + no-network evaluator; ruff lint in CI.
 
 ### Added (reliability & onboarding)
-- **Transient retry** (`CLI_BRIDGE_RETRIES`, default 1): a delegate that fails transiently
-  (non-zero exit / spawn blip) is retried with backoff, so a flaky CLI "works the first time".
-  Quota/auth/not-found/timeout are never retried (sticky / would waste a call).
-- **Mock / dry-run** (`CLI_BRIDGE_MOCK=1`): lanes report installed and return a canned answer
-  without spawning anything — explore routing/fan-out/workflows with zero CLIs installed.
-- **`cli-bridge init`**: detect installed CLIs + print the MCP wiring snippet + cost hint.
-- **`cli-bridge bench`**: latency p50/p95/p99 + ok-rate + est tokens for a lane over N runs.
-- **Trace bundle** (`CLI_BRIDGE_TRACE_DIR`): per-delegation redacted JSON (argv, timing, output)
-  for reproducible debugging / ban-safe audit.
-
-### Added (from the council audit — round 2)
-- **JSON config file** (`~/.config/cli-bridge/config.json`): friendly alternative to env vars,
-  loaded at startup with env-wins precedence (progressive disclosure — defaults → file → env).
-- **Cost-safety & team controls**: `CLI_BRIDGE_DAILY_CREDIT_CAP` (hard stop on estimated paid
-  spend), `CLI_BRIDGE_ALLOW_LANES` (allowlist), `CLI_BRIDGE_DISABLE_BUILD` (force read-only).
-- **`ask_all`**: `output_format=json`, `summary_only` (recap+synthesis, fewer tokens), `dry_run`
-  (preview lanes + estimated cost without spawning).
-- **`doctor --deep`** now shows each free lane's CLI version (drift detection); `bench --all`
-  benchmarks every free lane into a table; `docs/BENCHMARKS.md` explains how to generate real numbers.
-- Overflow dir gains a file-count cap (`CLI_BRIDGE_OVERFLOW_MAX_FILES`). `release.yml` publishes
-  to PyPI via Trusted Publishing on a version tag.
-
-### Added (from the council audit)
-- **`CLI_BRIDGE_MAX_PARALLEL`** (default 6): caps simultaneous delegate spawns in `ask_all` so a
-  wide council (many custom lanes) can't OOM a small machine or burst quota.
-- README: "Works in IDE MCP hosts too" + an honest **Known limitations** list (ban-safe ToS
-  caveat, in-process jobs, heuristic guard, estimated tokens, BYO-API argv exposure, experimental
-  lanes). .github/SECURITY.md notes the BYO-API curl key-in-argv exposure + mitigation.
+- **Transient retry** (`CLI_BRIDGE_RETRIES`, default 1); quota/auth/not-found/timeout never retried.
+- **Mock mode** (`CLI_BRIDGE_MOCK=1`): canned answers, nothing spawned.
+- `cli-bridge init` / `cli-bridge bench` (removed in 0.3.0).
+- **Trace bundle** (`CLI_BRIDGE_TRACE_DIR`): per-delegation redacted JSON.
+- **JSON config file** (`~/.config/cli-bridge/config.json`), env wins.
+- `CLI_BRIDGE_DAILY_CREDIT_CAP`, `CLI_BRIDGE_ALLOW_LANES`, `CLI_BRIDGE_DISABLE_BUILD`.
+- `ask_all`: `output_format=json`, `summary_only`, `dry_run`.
+- `doctor --deep` shows each free lane's CLI version; `CLI_BRIDGE_OVERFLOW_MAX_FILES`;
+  `release.yml` publishes to PyPI via Trusted Publishing.
+- **`CLI_BRIDGE_MAX_PARALLEL`** (default 6) caps simultaneous spawns in `ask_all`.
+- README "Known limitations"; `.github/SECURITY.md`.
 
 ### Changed
-- **Empty answers fall through.** A delegate that exits 0 but prints NOTHING (seen with `agy` /
-  Antigravity in print mode) is now a soft failure (`kind="empty"`) instead of a "successful"
-  blank — so `ask_cascade` / `ask_best` skip it and return a lane that actually answers, and it's
-  never cached. Not retried, not a cooldown (it's per-call, not lane health).
-- Findings merge now also collapses **similarly-worded** findings at the same `file:line`
-  (token-overlap similarity), not just exact-title matches — so two models describing the same
-  bug differently merge into one entry with higher confidence. None-location findings stay
-  exact-only (no over-merging).
-- CI test matrix runs on **macOS and Windows** as well as Linux (portability is a stated
-  invariant; now it's actually exercised). POSIX-shell-only runner tests skip on Windows.
+- **Empty answers fall through** (`kind="empty"`): exit 0 with no output is a soft failure,
+  skipped by cascade, never cached, no cooldown.
+- Findings merge collapses similarly-worded findings at the same `file:line`.
+- CI runs on macOS and Windows as well as Linux.
 
 ### Initial prototype (pre-PyPI scaffold)
-- Initial MCP server: per-host self-hide, PATH detection, lane registry (claude/gpt/gemini/
-  mistral/opencode/qwen/copilot) + custom lanes via JSON + BYO-API via curl, `ask_<lane>`,
-  `ask_all` (+ synthesize), `ask_cascade`, `doctor`, cost profiles, telemetry + cooldown,
-  response cache, `review_diff`/`security_review`/`debate`, MCP prompts, sibling-model
-  self-consultation, opt-in write/build mode.
+- MCP server: per-host self-hide, PATH detection, lane registry (claude/gpt/gemini/mistral/
+  opencode/qwen/copilot) + custom lanes via JSON + BYO-API via curl, `ask_<lane>`, `ask_all`
+  (+ synthesize), `ask_cascade`, `doctor`, cost profiles, telemetry + cooldown, response cache,
+  `review_diff`/`security_review`/`debate`, MCP prompts, sibling-model self-consultation, opt-in
+  write/build mode.

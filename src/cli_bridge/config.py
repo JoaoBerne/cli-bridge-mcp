@@ -491,7 +491,7 @@ INSTRUCTIONS = (
     "returns a DIFF — your repo is never touched. Council tools advise; this one acts, safely. "
     "Long runs: async=true, then `job` (status/result/tail/steer/cancel).\n"
     "• `review_diff` (focus=security for OWASP) / `debate` (vote=borda picks the peer-ranked best) "
-    "/ `workflow` presets (premortem, test_plan, challenge, jury, converge…) / `git_text` "
+    "/ `workflow` presets (premortem, test_plan, challenge, converge, refine_plan…) / `git_text` "
     "(kind=commit|pr) for structured workflows. `doctor` to see what's installed.\n\n"
     "WHEN TO CONSULT: a hard or ambiguous problem, a second opinion before shipping something "
     "risky or hard to reverse, a domain a particular model is strong at, a debugging dead-end. "

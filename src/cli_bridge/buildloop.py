@@ -1,17 +1,17 @@
 """Steerable multi-turn direct builds.
 
 `ask_build(mode=direct, async=true)` starts a background build JOB that runs the delegate over
-several turns in the SAME target dir, so the host can watch it (`job_tail`) and steer it
-(`build_steer`) the way a human would, while doing other work in parallel.
+several turns in the SAME target dir, so the host can watch it (`job(action=tail)`) and steer it
+(`job(action=steer)`) the way a human would, while doing other work in parallel.
 
 Design (each point co-decided with the user, not assumed):
   • Continuity is the FILESYSTEM, not a transcript. The delegate writes into the real
     target_dir every turn, so turn N>1 just tells it "your previous work is on disk, continue".
     No transcript replay needed (that was an isolated-worktree concern).
-  • Steering between turns: `build_steer` queues instructions; the next turn folds them into a
+  • Steering between turns: `job(action=steer)` queues instructions; the next turn folds them into a
     DELIMITED block (`<<<HOST_STEERING>>> … <<<END>>>`) so the delegate treats them as commands,
     not as file content to write.
-  • Interrupt: `build_steer(interrupt=true)` cancels the CURRENT turn (kills the delegate's
+  • Interrupt: `job(action=steer, interrupt=true)` cancels the CURRENT turn (kills the delegate's
     process group via the runner). Files already written are KEPT (the user's explicit choice);
     the rest of the turn is lost. The loop then continues, applying any queued steering.
   • Definition of Done, tested for real: an OPTIONAL `dod_cmd` (a list[str] argv, NEVER a shell
@@ -357,7 +357,7 @@ async def _wait_for_steer(state: BuildState, grace_s: float) -> bool:
     """After a no-DoD turn with nothing queued, wait briefly for a late steer/interrupt so the
     user can react to what they just watched. Returns True if something arrived."""
     if grace_s > 0:
-        state.note = "idle — send build_steer to continue, or it finishes shortly"
+        state.note = "idle — send job(action=steer) to continue, or it finishes shortly"
         state.steer_evt.clear()
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(state.steer_evt.wait(), grace_s)

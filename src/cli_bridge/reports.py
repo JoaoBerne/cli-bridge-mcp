@@ -171,7 +171,8 @@ def _render_job_status(st: dict) -> str:
         lines.append(f"Fetch it with `job_result {st['id']}`.")
     elif st["status"] == jobs.RUNNING:
         if st.get("kind") == "build":
-            lines.append(f"Follow with `job_tail {st['id']}`, steer with `build_steer {st['id']}`.")
+            lines.append(f"Follow with `job(action=tail, job_id='{st['id']}')`, "
+                         f"steer with `job(action=steer, job_id='{st['id']}')`.")
         else:
             lines.append("Still running — poll again shortly.")
     return "\n".join(lines)
@@ -179,7 +180,7 @@ def _render_job_status(st: dict) -> str:
 
 def _render_jobs_list(rows: list[dict]) -> str:
     if not rows:
-        return "No async jobs yet. Start one with `ask_all_async`."
+        return "No async jobs yet. Start one with `ask_all(async=true)`."
     lines = ["# Async jobs", ""]
     for r in rows:
         prev = f" — {r['preview']}" if r.get("preview") else ""

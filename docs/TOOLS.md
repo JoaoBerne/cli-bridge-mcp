@@ -1,74 +1,72 @@
-# cli-bridge — full tool reference
+# cli-bridge — tool reference
 
-Every tool, grouped by what you're trying to do. Run `CLI_BRIDGE_LEAN=1` for a curated ~12-tool
-surface; hide/show any with `CLI_BRIDGE_DISABLED_TOOLS` / `CLI_BRIDGE_ENABLED_TOOLS`.
+The default surface is 15 fixed tools plus one `ask_<lane>` per installed CLI. `CLI_BRIDGE_TOOLS`
+changes it: `all` = everything registered (adds `batch_run`, `reset_lane_state`); a comma list =
+exactly those names (+ `doctor`, `setup` and every `ask_<lane>`, never hidden); the word `default`
+in a list expands to the default set (`CLI_BRIDGE_TOOLS=default,batch_run`). Hosts cache tool
+names — restart the host after changing it.
+
+Shared parameters on most tools: `task`, `cwd` (empty = host workspace root), `timeout_s`
+(default 120, max 900), `include_paid` (default false; refused under `CLI_BRIDGE_PROFILE=saver`),
+`dry_run` (preview lanes/order/cost without spawning), `async` (return a `job_id`, manage with `job`).
 
 ← Back to the [README](../README.md).
 
 ### Consult (read-only)
-| Tool | What it does | Reach for it when |
-|------|--------------|-------------------|
-| `ask_<lane>` | Ask one specific CLI — `ask_claude`, `ask_gpt` (Codex), `ask_gemini`, `ask_mistral`, `ask_opencode`, `ask_ollama`, `ask_apple` (Apple Foundation Models, on-device), and `ask_qwen`/`ask_grok`/`ask_copilot`/`ask_cursor` when installed, plus the opt-in `ask_openrouter` (`OPENROUTER_API_KEY`) and `ask_applepcc` (`APPLE_FM_SERVE_URL`) — each appears only once its env var is set. Supports `role="reviewer\|security\|planner\|devil"`, `conversation` (round-table memory — every ask auto-returns a reusable thread id, so any answer is resumable on any lane), and `images=[…]` on the five vision lanes (see below). | You want a particular model's strength, persona, or modality. |
-| `ask_all` | Same question to every *free* lane in parallel; returns each answer **plus a disagreement score**. `synthesize: true` adds an agree/disagree summary. | You want breadth fast and a signal of where models diverge (= uncertainty). |
-| `ask_cascade` | Tries lanes in a deterministic order, stops at the first good answer, skips cooled-down lanes; optional confidence-escalation. | You want resilience: a capped/failing lane is skipped automatically. |
-| `ask_best` | A router picks the most suitable lane by `mode` (`fast/cheap/deep/code/review/security`) + your `rate_lane` scores. | You don't want to choose a lane by hand. |
-| `ask_all_async` + `job_status`/`job_result`/`job_cancel`/`jobs_list` | Fire `ask_all` as a background job (id in <1s). | The fan-out is slow and you want to keep working. |
-| `consensus` | N lanes answer, then peers rank to **select** the best (selection beats synthesis). | A single defensible answer matters more than a blend. |
-| `challenge` | One lane plays skeptic against a conclusion you supply. | You want your own reasoning attacked before you commit. |
-| `conversations_list` / `conversation_show` | List / read persistent round-table threads (survive `/compact` and restarts). | You want to recover or read a multi-model thread. |
+| Tool | What it does | Parameters that matter |
+|------|--------------|------------------------|
+| `ask_<lane>` | Ask one CLI: `ask_claude`, `ask_gpt` (Codex), `ask_gemini`, `ask_mistral`, `ask_opencode`, `ask_ollama`, `ask_apple` (on-device `fm`), and `ask_qwen` / `ask_copilot` / `ask_cursor` / `ask_grok` when installed; `ask_applepcc` appears once `APPLE_FM_SERVE_URL` is set. Returns a thread id you can reuse on any lane. | `model`, `effort`, `agent=plan\|build` (build EDITS files), `role` (architect / devil / oracle / planner / reviewer / security / simplifier, or an inline persona), `conversation`, `images=[…]` (vision lanes, see below) |
+| `ask_all` | Same question to every free lane in parallel, answers side by side + a disagreement score. | `synthesize`, `summary_only`, `output_format=markdown\|json`, `dry_run`, `async` (per-lane timeout max 60 s) |
+| `ask_cascade` | One answer with fallback: cheapest→strongest, skips cooled-down lanes, moves on after quota/auth/timeout/failure. | `dry_run=true` explains the order without spawning |
+| `ask_best` | The router picks one lane by `mode` from cost, health, latency and your `rate_lane` scores, then runs it with fallback. | `mode=fast\|cheap\|deep\|code\|review\|security`, `dry_run` |
+| `conversations` | Round-table threads: no `id` = list recent threads; `id` = the full transcript. | `id` |
+| `list_models` | Models reachable through a lane (or its default + how to choose). | `lane` |
 
-**Vision (`images=[…]`).** Five lanes accept image paths; cli-bridge emits whichever shape that CLI
-wants, so you always just pass paths:
+**Vision (`images=[…]`).** Each lane declares how a path is passed, so you always pass paths:
 
-| Lane | How the path is passed | Cost |
+| Lane | Shape | Cost |
 |---|---|---|
-| `apple` | `--image <path>` | free, on-device, unmetered, offline |
-| `ollama` | bare path in the prompt (the CLI resolves it) | free, local — needs a multimodal model pulled |
+| `apple` | `--image <path>` | free, on-device, offline |
+| `ollama` | bare path in the prompt | free, local — needs a multimodal model pulled |
 | `opencode` | `-f <path>` | free on `*-free` models |
 | `gpt` | `-i <path>` | limited (plan quota) |
-| `gemini` | `@<path>` in the prompt | limited ⚠ unreliable under `agy`, which may route the file through a `read_file` tool that headless mode auto-denies |
+| `gemini` | `@<path>` in the prompt | limited; unreliable under `agy` |
 
-⚠ **Vision is a property of the model, not the lane.** On the same image, Apple's on-device model
-transcribed every line correctly while opencode's default free model replied *"model lacks vision"*.
-cli-bridge can't detect this — pick a lane whose model you know is multimodal.
+Whether the image is actually *read* depends on the model behind the lane, not the lane.
 
 ### Build (opt-in write)
-| Tool | What it does | Reach for it when |
-|------|--------------|-------------------|
-| `ask_build` | Delegates a real build. `mode=isolated` (default) edits a throwaway worktree → **diff** (`apply=true` lands it in your tree as unstaged changes, all-or-nothing via `git apply --check`); `lane` is optional (default: first free build-capable); `mode=direct` writes into a declared `zone` (per-zone lock + post-turn zone-violation check). `async=true` runs it as a steerable job. Non-text outputs come back **by path** (artifact-return). | You want work *done*, not just suggested — review-gated or hands-off. |
-| `ask_build_isolated` | Convenience alias for `ask_build` with `mode=isolated` — always returns a diff, never touches your tree. | You want the safe diff path by name, without setting `mode`. |
-| `job_tail` | Streams a running build's progress log (byte-offset). | You want to watch a delegate work. |
-| `build_steer` | Queues a steering instruction for the next turn, or `interrupt=true` cuts the current turn (files kept). | You need to course-correct mid-build without restarting. |
-
-Async builds run against an executable **Definition-of-Done** gate (`dod_cmd`) — the delegate's claim
-of success is *tested*, not trusted.
+| Tool | What it does | Parameters that matter |
+|------|--------------|------------------------|
+| `ask_build` | Delegates real implementation work. `mode=isolated` (default) edits a throwaway worktree and returns a **diff** (`apply=true` lands it as unstaged changes via `git apply --check`, all-or-nothing); `mode=direct` writes real files only inside `zone` under `target_dir` (per-zone lock, post-turn out-of-zone check, zone-scoped undo). Non-text outputs come back by path. | `lane` (empty = first free build-capable), `architect_lane` (isolated: a stronger lane plans first), `mode`, `zone`, `target_dir`, `apply`, `dry_run` (direct: render the brief only), `async` (direct: steerable job), `dod_cmd` (argv list run after each turn), `max_turns` (12), `max_fail_retries` (3) |
 
 ### Review & verify
-| Tool | What it does | Reach for it when |
-|------|--------------|-------------------|
-| `review_diff` | Structured review of a diff → findings (severity, **category** — security/correctness/scope/ambiguity/performance/ops — file, rationale), deterministically merged across lanes with single/majority/consensus confidence. | Before a change lands. |
-| `security_review` | OWASP-oriented, severity-ranked security pass + a `residual_risk` section. | The change touches auth, input handling, secrets. |
-| `debate` | Models critique each other over bounded rounds, ending with a `VOTE` footer + convergence early-stop; an independent judge concludes. | A genuinely contested decision. |
-| `premortem` / `test_plan` | Failure-mode analysis of a plan / a prioritized test plan from a diff or description. | Before writing code. |
-| `commit_msg` / `pr_describe` | A Conventional-Commit message from your staged diff / a PR title+body from the branch. Read-only — emits text. | You're about to commit or open a PR. |
-| `workflow(preset=…)` | Named pipelines: **`converge`** (governance loop — independent arbiter blind verdict → anonymized cross-vendor peers → reasoned adjudication → revise/converge; guards: blind-verdict-first, no-silent-dismissal, no-self-approval), `jury` (cross-family k-of-N vote, fail-closed), `verify_repair` (cross-model build→review→repair loop), `refine_plan`, `fanout_compare`, `council_review`, `map_review`, `research_verify`. | You want a vetted multi-step pattern in one call. |
+| Tool | What it does | Parameters that matter |
+|------|--------------|------------------------|
+| `review_diff` | Several lanes review a git diff with different focuses, one lane merges into a severity-ranked report (findings carry a category: security / correctness / scope / ambiguity / performance / ops). | `focus=code\|security` (security = OWASP roles: injection, auth, secrets & crypto, data exposure), `base`, `diff`, `output_format=markdown\|json`, `severity_filter` |
+| `debate` | Lanes answer, see each other, revise over bounded rounds, an independent judge concludes. | `vote=judge\|borda` (borda: no rounds, blind answers peer-ranked, winner returned verbatim; `synthesize=true` blends instead), `rounds` (1, max 3), `adversarial`, `context_files` (up to 5), `summary_only`, `allow_self_judge`, `dry_run` |
+| `workflow` | One of eight presets over the durable batch substrate, all resumable (`resume_id`) and async-able. | `preset=refine_plan` (`plan_file`, `angles`) · `map_review` (`files`, `lane`) · `research_verify` (`questions`) · `fanout_compare` (`lanes`, also `lane:model` entries, `judge_lane`) · `converge` (`author_lane`, `arbiter_lane`, `peer_lanes`, `verifiers`, `max_rounds`) · `premortem` (`task` = the plan) · `test_plan` (`task` or `base`/`diff`) · `challenge` (`task` = the claim, `lane`) |
+| `git_text` | Read-only git → text via one lane. Never commits. | `kind=commit` (Conventional Commit from the staged diff, else working tree) · `kind=pr` (title + Summary/Changes/Testing vs `base`, default `origin/main`), `lane` |
 
-### Orchestrate
-| Tool | What it does | Reach for it when |
-|------|--------------|-------------------|
-| `batch_run` | Durable, **journaled** fan-out over many tasks. `dry_run=true` returns a cost envelope (nothing spawned); `max_calls`/`max_credits` cap spend; `resume_id` replays finished tasks and runs only the rest across a restart. | Bulk work you want bounded and crash-safe. |
+`converge` is the governance loop: an author drafts, an independent arbiter commits a blind
+verdict, anonymized cross-family peers review, the arbiter adjudicates every issue with a reason,
+then revise-or-converge. It converges only when the peers approve and no blocker remains.
 
 ### Operate
-| Tool | What it does | Reach for it when |
-|------|--------------|-------------------|
-| `usage_report` / `usage_budget` | Estimated token/credit accounting (chars/4 — honestly labeled an estimate) + budgeting vs a daily cap. | You want to see the bill / set a cap. |
-| `rate_lane` / `route_plan` | Score a lane 1–5 for a mode so `ask_best` learns your stack / preview the order a cascade would try. | You want the router to improve over time. |
-| `lane_stats` / `reset_lane_state` | Per-lane health, cooldowns, and the "earn their seat" jury signal / clear a lane's counters. | A lane is misbehaving, or you want the seat report. |
-| `set_lane_cost` | Record what a lane costs *you* ("Codex is free on my plan") — persisted, no `setup` needed. | You tell it a pricing fact in passing. |
-| `doctor` / `setup` | Detect installed CLIs + resolved paths; `doctor` with `deep=true` (CLI: `doctor --deep`) validates each lane against its own `--help` on your machine. | First run, or when a lane breaks. |
-| `list_models` / `list_<lane>_models` | List a lane's models. Where the CLI has no `models` command but caches what the server said your account may use (`LaneSpec.models_file`), cli-bridge reads that instead — and names those ids in the `model` parameter's description, so the choice is informed *before* you make it rather than after. Best-effort: an absent or reshaped cache silently falls back. | You want to pick a specific model, or to find out your plan already includes a better one. |
+| Tool | What it does | Parameters that matter |
+|------|--------------|------------------------|
+| `job` | Manage background jobs (`ask_all` / `workflow` / `batch_run` / `ask_build` with `async=true`). | `action=status\|result\|cancel\|list\|tail\|steer`, `job_id` (all but list), `offset` (tail), `instruction` + `interrupt` (steer) |
+| `rate_lane` | Score a lane 1–5 for a `mode` so `ask_best` prefers what wins on this machine; the note is shown as a past lesson at pick time. | `lane`, `score`, `mode`, `note` |
+| `set_lane_cost` | Record what a lane costs *you*; effective now, persisted to the config file. | `lane`, `cost=free\|limited\|paid`, `note` (required) |
+| `doctor` | Installed CLIs, resolved paths, host, cost tiers and their source, per-lane runs today. | `deep=true` live-probes each free lane |
+| `setup` | The cost-profile choice (saver / balanced / max) to walk the user through. | — |
+| `batch_run` (hidden by default) | Durable journaled fan-out over many independent tasks. | `tasks`, `max_concurrency`, `max_calls`, `max_credits`, `dry_run`, `resume_id`, `async` |
+| `reset_lane_state` (hidden by default) | Clear a lane's cooldown and failure counters. | `lane` |
 
-There's also a **human CLI** (`cli-bridge doctor|ask|ask-all|ask-best|build|review-diff|eval|…`) — the
-same engine from your terminal or CI (`--json` everywhere). `cli-bridge build <lane> "<task>"`
-delegates a real build to a lane in a throwaway worktree and prints the **diff** — your repo is never
-touched.
+Usage and lane health are MCP resources, not tools: `cli-bridge://config`,
+`cli-bridge://lane-stats`, `cli-bridge://usage-summary`. One MCP prompt ships: `apilookup`.
+
+### Human CLI
+
+`cli-bridge doctor [--deep] | set-cost <lane> <tier> --note … | ask <lane> … | ask-all | ask-best --mode … |
+build <lane> "<task>" [--architect <lane>] [--apply] | review-diff | security-review | test-plan |
+premortem | stats | usage | jobs` — the same engine from a terminal; `--json` where it applies.

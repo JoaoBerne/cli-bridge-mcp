@@ -178,7 +178,7 @@ def cascade_trace(attempts: list[tuple[LaneSpec, runner.RunResult]],
 async def ask_all_body(lanes: list[LaneSpec], args: dict, *, run_lane, progress, host_sample,
                        include_paid_fn, targets_fn, timeout_fn) -> str:
     """The fan-out itself, returning the report as a plain string so it can run either inline
-    (ask_all) or inside a background job (ask_all_async)."""
+    (ask_all) or inside a background job (ask_all with async=true)."""
     # Explicit arg wins. Otherwise the cost profile decides: 'max' polls paid lanes too,
     # saver/balanced stay free-only by default (the caller can still pass include_paid).
     include_paid = include_paid_fn(args)
