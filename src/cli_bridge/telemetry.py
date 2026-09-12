@@ -613,10 +613,25 @@ def jobs_recent(limit: int = 20) -> list[dict]:
 
 
 def _pid_alive(pid: int) -> bool:
+    """Is process `pid` still running? Unknown counts as alive, so a live job is never flipped."""
     if pid <= 0:
         return False
-    if pid == os.getpid() or sys.platform == "win32":
-        return True   # ponytail: no liveness probe on Windows -> never flip a row there
+    if pid == os.getpid():
+        return True
+    if sys.platform == "win32":
+        # Never os.kill here: on Windows it TERMINATES the process. Ask the kernel instead.
+        import ctypes
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        handle = k32.OpenProcess(0x1000, False, pid)      # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return ctypes.get_last_error() == 5           # ERROR_ACCESS_DENIED: exists, not ours
+        try:
+            code = ctypes.c_ulong()
+            if not k32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return True
+            return code.value == 259                      # STILL_ACTIVE
+        finally:
+            k32.CloseHandle(handle)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
