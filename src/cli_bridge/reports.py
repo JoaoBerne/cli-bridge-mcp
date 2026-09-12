@@ -14,8 +14,7 @@ import time
 
 from . import config, jobs, preamble, runner, telemetry
 from . import lanes as lanes_mod
-from .detect import is_installed
-from .lanes import LaneSpec, all_lanes
+from .lanes import LaneSpec, all_lanes, is_installed
 
 
 def _rel_time(ts: float | None) -> str:
@@ -102,38 +101,9 @@ async def doctor_deep(host: str, lanes: list[LaneSpec], *, is_host, run_lane) ->
         ver = await _lane_version(ln)
         return f"- **{ln.key}**: {mark}{f' · v: {ver}' if ver else ''}"
     results = await asyncio.gather(*[_probe(ln) for ln in probes])
-    flags = await _flag_drift_section(lanes)
     return (base + "\n\n## Deep probe (live auth check + CLI version, free lanes)\n\n"
             + "\n".join(results)
-            + "\n\n_Versions help spot drift: if a CLI bumped and a lane breaks, file a `[drift]` issue._"
-            + flags)
-
-
-async def _lane_flag_drift(lane: LaneSpec) -> list[str]:
-    """Flags this lane EMITS that are now MISSING from its `--help` (likely renamed/removed
-    upstream → the invocation would break). Cheap: one `--help` spawn, no model call / quota.
-    [] when there's nothing to check or help can't be read (never a false alarm)."""
-    if not lane.help_args or not lane.probe_flags:
-        return []
-    res = await runner.arun([lane.bin, *lane.help_args], 15)
-    if not res.ok:
-        return []
-    return lanes_mod.missing_flags(res.output, lane.probe_flags)
-
-
-async def _flag_drift_section(lanes: list[LaneSpec]) -> str:
-    """Check EVERY installed lane's flags against its CLI help (incl. limited/paid — it costs no
-    quota, just `--help`). Surfaces a broken invocation BEFORE it fails silently at call time."""
-    drifts = await asyncio.gather(*[_lane_flag_drift(ln) for ln in lanes])
-    bad = [(ln, miss) for ln, miss in zip(lanes, drifts, strict=True) if miss]
-    if not bad:
-        return "\n\n## Flag check\n\n_All installed lanes' flags still present in their `--help`._"
-    rows = [f"- ⚠️ **{ln.key}**: `{', '.join(miss)}` missing from `{ln.bin} "
-            f"{' '.join(ln.help_args or [])}` — invocation may be broken (upstream flag change?)."
-            for ln, miss in bad]
-    return ("\n\n## ⚠️ Flag drift — lane invocation may be broken\n\n" + "\n".join(rows)
-            + "\n\n_The CLI changed the flags this lane relies on. Update the lane (or pin an old "
-            "CLI via `CLI_BRIDGE_<LANE>_BIN`), or file a `[drift]` issue._")
+            + "\n\n_Versions help spot drift: if a CLI bumped and a lane breaks, file a `[drift]` issue._")
 
 
 async def _lane_version(lane: LaneSpec) -> str:
@@ -185,23 +155,6 @@ def _render_usage(rep: dict) -> str:
     return "\n".join(lines)
 
 
-def _render_budget(rep: dict) -> str:
-    if not rep.get("enabled"):
-        return "Telemetry is off or unavailable. No budget to report."
-    if not rep["by_lane"]:
-        return "No runs today (since UTC midnight)."
-    lines = ["# Today's usage (since UTC midnight) — estimated", ""]
-    for r in rep["by_lane"]:
-        limit = (f"{r['runs_today']}/{r['daily_limit']}" if r["daily_limit"] is not None
-                 else f"{r['runs_today']} (no limit set)")
-        cred = f", ~{r['est_credits_today']} credits" if r.get("est_credits_today") is not None else ""
-        flag = "  ⚠️ LIMIT REACHED (further spawns blocked today)" if r["over_limit"] else ""
-        lines.append(f"- **{r['lane']}**: {limit} runs, ~{r['est_tokens_today']} tok{cred}{flag}")
-    lines.append("\n_CLI_BRIDGE_<LANE>_DAILY_LIMIT is enforced at spawn (any lane). "
-                 "_CREDITS_PER_1K makes CLI_BRIDGE_DAILY_CREDIT_CAP enforceable — docs/BUDGET.md._")
-    return "\n".join(lines)
-
-
 def _render_job_status(st: dict) -> str:
     lines = [f"Job `{st['id']}` — **{st['status']}** ({st.get('kind', 'ask_all')})"]
     if st.get("preview"):
@@ -239,25 +192,12 @@ def _render_lane_stats() -> str:
     if not stats:
         return "No lane stats yet (telemetry off, or no runs recorded)."
     by_key = {ln.key: ln for ln in all_lanes()}
-    seat = telemetry.seat_report()
     lines = ["# Lane health", ""]
     for s in stats:
         cd = f", cooldown {s['cooldown_remaining_s']}s" if s["cooldown_remaining_s"] else ""
         lines.append(
             f"- **{s['lane']}**: {s['total_runs']} runs, {s['total_failures']} failed, "
             f"{s['consecutive_failures']} consecutive fail, last={s['last_kind']}{cd}")
-        # "Earn their seat" (Lens B, advisory): how a lane votes as a jury verifier over time —
-        # shown beside the latency/error stats above (Lens A), never auto-applied to routing.
-        sr = seat.get(s["lane"])
-        if sr and sr["n_votes"]:
-            parts = []
-            if sr["accuracy_rate"] is not None:
-                parts.append(f"accuracy {sr['accuracy_rate']:.0%} (eval, vs ground truth)")
-            if sr["conformity_rate"] is not None:
-                parts.append(f"conformity {sr['conformity_rate']:.0%} "
-                             "(live — agreement with the verdict, NOT accuracy)")
-            if parts:
-                lines.append(f"  - ↳ jury seat: {sr['n_votes']} votes · " + "; ".join(parts))
         # Burst rate-limiting pattern (failures interleaved with successes never trip the
         # cooldown): point at the opt-in pacer instead of leaving the lane to die quietly.
         ln = by_key.get(s["lane"])

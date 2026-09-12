@@ -7,7 +7,7 @@ import sys
 
 import pytest
 
-from cli_bridge import detect, lanes
+from cli_bridge import lanes
 from cli_bridge.lanes import LaneSpec, which_path
 
 
@@ -45,5 +45,5 @@ def test_which_path_never_remaps_explicit_paths(fake_bin_dir):
 
 def test_lane_bin_and_detection_use_the_fallback(fake_bin_dir):
     lane = LaneSpec("fk", "Fake", "fakecli", lambda *a: [])
-    assert detect.is_installed(lane)
+    assert lanes.is_installed(lane)
     assert lane.bin.startswith(str(fake_bin_dir))   # absolute → spawnable without PATH

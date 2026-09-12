@@ -317,14 +317,6 @@ def convo_max_chars() -> int:
     return int_env("CLI_BRIDGE_CONVO_MAX_CHARS", 32000, 1000, 1_000_000)
 
 
-def native_sessions_enabled() -> bool:
-    """Native session continuity on conversation turns, for lanes that support it (claude mints
-    its own --session-id; opencode's --print-logs names the session for capture). Cuts replayed
-    tokens to the cross-lane delta. CLI_BRIDGE_NATIVE_SESSIONS=off to force pure replay."""
-    return os.environ.get("CLI_BRIDGE_NATIVE_SESSIONS", "").strip().lower() not in (
-        "off", "false", "0", "no")
-
-
 def convo_summary_enabled() -> bool:
     """Rolling summary: when a thread outgrows convo_max_chars(), the lane that just answered
     condenses the oldest turns into one summary turn instead of letting them fall off the
@@ -337,8 +329,8 @@ def convo_summary_enabled() -> bool:
 def convo_autothread_enabled() -> bool:
     """Auto-thread direct asks: an `ask_<lane>` call with no `conversation` still records its one
     exchange under a fresh thread id and returns it, so ANY ask is resumable later (the round-table
-    feature, without having to remember conversation='new' up front). No replay and no native
-    session on the first turn — it runs exactly like a plain ask, just persisted. Only a real,
+    feature, without having to remember conversation='new' up front). No replay on the first
+    turn — it runs exactly like a plain ask, just persisted. Only a real,
     successful exchange is recorded. CLI_BRIDGE_CONVO_AUTOTHREAD=off restores pure-stateless asks
     (nothing stored, no id returned)."""
     return os.environ.get("CLI_BRIDGE_CONVO_AUTOTHREAD", "").strip().lower() not in (
@@ -349,12 +341,6 @@ def convo_max_stored() -> int:
     """Keep at most this many conversations in the local DB (oldest pruned whole). Threads are
     session-scoped in spirit — no need to hoard old ones forever. Clamped 1..100000."""
     return int_env("CLI_BRIDGE_CONVO_MAX_STORED", 200, 1, 100_000)
-
-
-def convo_log_dir() -> str:
-    """If set, each conversation is also mirrored to a readable <id>.md transcript here (handy
-    to re-read a round-table after a /compact). Empty = off (sqlite is the source of truth)."""
-    return os.environ.get("CLI_BRIDGE_CONVO_LOG_DIR", "").strip()
 
 
 def default_cwd() -> str:

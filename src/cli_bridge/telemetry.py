@@ -118,13 +118,6 @@ CREATE TABLE IF NOT EXISTS conversation_turns (
   created_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_convo_turns ON conversation_turns(conversation_id, turn_number);
-CREATE TABLE IF NOT EXISTS convo_sessions (
-  conversation_id TEXT NOT NULL,
-  lane TEXT NOT NULL,
-  session_id TEXT NOT NULL,
-  last_turn INTEGER NOT NULL DEFAULT 0,
-  PRIMARY KEY (conversation_id, lane)
-);
 CREATE TABLE IF NOT EXISTS lane_ratings (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   lane TEXT NOT NULL,
@@ -134,17 +127,6 @@ CREATE TABLE IF NOT EXISTS lane_ratings (
   created_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_lane_ratings ON lane_ratings(lane, mode);
-CREATE TABLE IF NOT EXISTS jury_outcomes (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  run_id TEXT,
-  lane TEXT NOT NULL,
-  vote TEXT,
-  final_verdict TEXT,
-  agreed INTEGER,                       -- 1/0 vote agreed with the reference; NULL = abstain/undecided
-  source TEXT NOT NULL DEFAULT 'live',  -- 'live' (agreed = conformity w/ majority) | 'eval' (vs ground truth)
-  created_at REAL NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_jury_outcomes ON jury_outcomes(lane, source);
 """
 
 
@@ -403,63 +385,6 @@ def render_lessons(mode: str = "", limit: int = 3) -> str:
     return f"\n\n{head}\n{body}"
 
 
-def jury_put(run_id: str, rows, source: str = "live") -> None:
-    """Best-effort: record each verifier's jury vote vs the final verdict. `rows` = iterable of
-    (lane, vote, final_verdict, agreed) where agreed is 1/0/None. This is the raw signal behind
-    seat_report ("earn their seat"). NEVER raises into the caller (telemetry invariant)."""
-    conn = _connect()
-    if conn is None:
-        return
-    try:
-        payload = [(run_id or "", str(lane), str(vote), str(verdict),
-                    (None if agreed is None else int(agreed)), source, _now())
-                   for (lane, vote, verdict, agreed) in rows]
-    except (TypeError, ValueError):
-        return
-    if not payload:
-        return
-    try:
-        with _LOCK:
-            conn.executemany(
-                "INSERT INTO jury_outcomes (run_id, lane, vote, final_verdict, agreed, source, "
-                "created_at) VALUES (?,?,?,?,?,?,?)", payload)
-            conn.commit()
-    except sqlite3.Error:
-        return
-
-
-def seat_report() -> dict:
-    """Per-lane "earn their seat" signal from jury votes — TWO lenses, never conflated:
-    - conformity_rate (LIVE): how often the lane's vote matched the final MAJORITY verdict. This is
-      CONFORMITY, not correctness — a lane that dissents CORRECTLY scores low here by design, so it's
-      advisory only and must be labelled as such wherever shown.
-    - accuracy_rate (EVAL): on the eval corpus (ground truth), how often the vote matched the TRUE
-      verdict. THIS is the lens that rewards a correct dissenter.
-    {lane: {"n_votes", "conformity_rate"|None, "accuracy_rate"|None}}. Best-effort: {} on error."""
-    conn = _connect()
-    if conn is None:
-        return {}
-    try:
-        with _LOCK:
-            rows = conn.execute(
-                "SELECT lane, source, COUNT(*), "
-                "SUM(CASE WHEN agreed=1 THEN 1 ELSE 0 END), "
-                "SUM(CASE WHEN agreed IS NOT NULL THEN 1 ELSE 0 END) "
-                "FROM jury_outcomes GROUP BY lane, source").fetchall()
-    except sqlite3.Error:
-        return {}
-    out: dict = {}
-    for lane, source, n, agreed_sum, decided in rows:
-        d = out.setdefault(lane, {"n_votes": 0, "conformity_rate": None, "accuracy_rate": None})
-        d["n_votes"] += int(n or 0)
-        rate = round((agreed_sum or 0) / decided, 2) if decided else None
-        if source == "eval":
-            d["accuracy_rate"] = rate
-        else:
-            d["conformity_rate"] = rate
-    return out
-
-
 def _est_credits(lane: str, total_tokens: float) -> float | None:
     rate = config.lane_env_float(lane, "CREDITS_PER_1K")   # cost per 1k total tokens
     return round(rate * total_tokens / 1000, 4) if rate is not None else None
@@ -532,39 +457,22 @@ def lane_runs_today(lane: str) -> int:
 
 
 def est_credits_today() -> float:
-    """Total ESTIMATED paid credits spent since UTC midnight (for the hard budget cap)."""
-    rep = usage_budget()
-    if not rep.get("enabled"):
-        return 0.0
-    return round(sum(r["est_credits_today"] or 0 for r in rep["by_lane"]), 4)
-
-
-def usage_budget() -> dict:
-    """Per-lane runs since UTC midnight vs an optional CLI_BRIDGE_<LANE>_DAILY_LIMIT (enforced
-    at spawn by budget.check_spawn once reached), plus the estimated credits spent today. All
-    token/credit figures are estimates."""
+    """Total ESTIMATED paid credits spent since UTC midnight — read at spawn (server._run_lane)
+    for the hard credit cap. 0.0 when telemetry is off or the DB errors: the gate fails open.
+    Token/credit figures are estimates (chars/4)."""
     conn = _connect()
     if conn is None:
-        return {"enabled": False}
-    start = _utc_day_start()
+        return 0.0
     try:
         with _LOCK:
             rows = conn.execute(
-                "SELECT lane, COUNT(*), SUM(input_chars), SUM(output_chars) FROM runs "
-                "WHERE started_at >= ? AND lane IS NOT NULL GROUP BY lane", (start,)).fetchall()
+                "SELECT lane, COALESCE(SUM(input_chars), 0) + COALESCE(SUM(output_chars), 0) "
+                "FROM runs WHERE started_at >= ? AND lane IS NOT NULL GROUP BY lane",
+                (_utc_day_start(),)).fetchall()
     except sqlite3.Error:
-        return {"enabled": False}
-    cpt = config.CHARS_PER_TOKEN
-    lanes = []
-    for lane, n, inc, outc in rows:
-        limit = config.lane_env_int(lane, "DAILY_LIMIT")
-        tok = int(((inc or 0) + (outc or 0)) / cpt)
-        lanes.append({
-            "lane": lane, "runs_today": n, "daily_limit": limit,
-            "over_limit": bool(limit is not None and n >= limit),
-            "est_tokens_today": tok, "est_credits_today": _est_credits(lane, tok),
-        })
-    return {"enabled": True, "day_start_utc": start, "by_lane": lanes}
+        return 0.0
+    return round(sum(_est_credits(lane, int(chars / config.CHARS_PER_TOKEN)) or 0
+                     for lane, chars in rows), 4)
 
 
 def cache_get(key: str, ttl_s: int) -> tuple[bool, str, str] | None:
@@ -817,53 +725,6 @@ def lane_models_set(lane: str, ids: list[str]) -> None:
         pass
 
 
-def convo_session(conversation_id: str, lane: str) -> tuple[str, int]:
-    """The lane's native session handle for this thread + the last turn_number it has seen.
-    ("", 0) when none / on any error."""
-    conn = _connect()
-    if conn is None or not conversation_id:
-        return "", 0
-    try:
-        with _LOCK:
-            row = conn.execute(
-                "SELECT session_id, last_turn FROM convo_sessions "
-                "WHERE conversation_id=? AND lane=?", (conversation_id, lane)).fetchone()
-        return (row[0], int(row[1])) if row else ("", 0)
-    except sqlite3.Error:
-        return "", 0
-
-
-def convo_session_set(conversation_id: str, lane: str, session_id: str, last_turn: int) -> None:
-    """Record/refresh the lane's native handle for this thread. Best-effort."""
-    conn = _connect()
-    if conn is None or not (conversation_id and lane and session_id):
-        return
-    try:
-        with _LOCK:
-            conn.execute(
-                "INSERT INTO convo_sessions (conversation_id, lane, session_id, last_turn) "
-                "VALUES (?,?,?,?) ON CONFLICT(conversation_id, lane) DO UPDATE SET "
-                "session_id=excluded.session_id, last_turn=excluded.last_turn",
-                (conversation_id, lane, session_id, int(last_turn)))
-            conn.commit()
-    except sqlite3.Error:
-        pass
-
-
-def convo_session_drop(conversation_id: str, lane: str) -> None:
-    """Forget a broken native handle so the next turn falls back to transcript replay."""
-    conn = _connect()
-    if conn is None:
-        return
-    try:
-        with _LOCK:
-            conn.execute("DELETE FROM convo_sessions WHERE conversation_id=? AND lane=?",
-                         (conversation_id, lane))
-            conn.commit()
-    except sqlite3.Error:
-        pass
-
-
 def convo_compact(conversation_id: str, upto_n: int, summary: str, lane: str = "") -> bool:
     """Replace all turns up to and including `upto_n` with ONE summary turn (role='summary')
     carrying their condensed content. The summary takes turn_number=upto_n so it still sorts
@@ -899,9 +760,6 @@ def _prune_conversations(conn: sqlite3.Connection) -> None:
             "ORDER BY MAX(created_at) DESC").fetchall()
         for (cid,) in rows[keep:]:
             conn.execute("DELETE FROM conversation_turns WHERE conversation_id=?", (cid,))
-            # cascade: a pruned thread must not leave a native handle behind — a resumed
-            # vendor session would diverge from the (now empty) sqlite source of truth
-            conn.execute("DELETE FROM convo_sessions WHERE conversation_id=?", (cid,))
     except sqlite3.Error:
         pass
 

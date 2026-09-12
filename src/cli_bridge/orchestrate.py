@@ -7,9 +7,9 @@ The host composes the LOGIC (loops, conditions) in its own reasoning; cli-bridge
 durably. We deliberately did NOT add a JSON composition DSL — it would be weaker than the host
 orchestrating itself, for far more code (council + user signal: don't over-complex).
 
-On top sit four PRESETS — coroutines that fan out then post-process with a hardcoded step (a
-judge or a grouping), NOT a DSL: council_review, map_review, research_verify, and the flagship
-refine_plan ("let the council demolish my plan"). All are resumable and can run in background.
+On top sit PRESETS — coroutines that fan out then post-process with a hardcoded step (a
+judge or a grouping), NOT a DSL: map_review, research_verify, fanout_compare, converge, and
+the flagship refine_plan ("let the council demolish my plan"). All are resumable and can run in background.
 
 Token frugality (a standing rule): when a preset reviews an ARTIFACT (a plan, a file), it passes
 the file PATH via the lane's cwd so each lane reads it itself — never recopy the content inline.
@@ -29,7 +29,7 @@ from dataclasses import asdict, dataclass
 from . import config, findings, lanes
 
 MAX_BATCH_TASKS = 64           # anti-runaway: the existing cost model governs spend; this caps count
-VERIFY_MAX_ROUNDS = 6          # hard cap on the build->verify->repair loop (cost guard)
+VERIFY_MAX_ROUNDS = 6          # hard cap on converge review->revise rounds (cost guard)
 
 # Distinct angles refine_plan distributes across lanes (more lanes than angles -> redundancy =
 # cross-check; fewer -> one lane covers several). Each is a sharp, single-lens critique.
@@ -207,30 +207,25 @@ async def batch_run(tasks: list[dict], *, run_lane, resolve_lane, default_lane, 
     return run_id, results
 
 
-def render_batch(run_id: str, results: list[dict]) -> str:
-    cached = sum(1 for r in results if r.get("cached"))
-    ok = sum(1 for r in results if r["ok"])
-    lines = [f"# batch_run — {ok}/{len(results)} ok ({cached} replayed from cache)",
-             f"_resume with resume_id `{run_id}` (re-runs only what didn't finish)_\n"]
-    for i, r in enumerate(results, 1):
-        tag = "✅" if r["ok"] else "❌"
-        cache = " (cached)" if r.get("cached") else ""
-        lines.append(f"## {i}. {tag} {r['lane'] or '—'}{cache}\n")
-        lines.append(f"_task: {r['task'][:200]}_\n" if r["task"] else "")
-        lines.append((r["output"].strip() or "_(no output)_") + "\n")
-    return "\n".join(lines)
-
-
 # ── presets ──────────────────────────────────────────────────────────────────────────────────
 
-def _group(results: list[dict], header: str) -> str:
-    """Default synthesis: group findings as-is for the HOST to dedupe + integrate (string dedup
-    fails — 'lock race' == 'TOCTOU lockfile' needs a semantic merge, i.e. the host or a judge)."""
-    lines = [f"# {header}", "_Grouped per lane — dedupe + integrate yourself, or pass judge_lane "
-             "for a single deduped list._\n"]
-    for r in results:
-        tag = "✅" if r["ok"] else "❌"
-        lines.append(f"## {tag} {r['lane'] or '—'}\n")
+_GROUPED_NOTE = ("Grouped per lane — dedupe + integrate yourself, or pass judge_lane for a single "
+                 "deduped list.")
+
+
+def _render_results(results: list[dict], title: str, note: str, head: str = "") -> str:
+    """One renderer for every fan-out ([{lane, ok, output, cached, model}]); `head` is the
+    per-result heading prefix ('{i}. ', 'Option {i} — ', or none). Grouping as-is is the default
+    synthesis: the HOST (or judge_lane) does the semantic dedupe string matching can't."""
+    ok = sum(1 for r in results if r["ok"])
+    lines = [f"# {title} — {ok}/{len(results)} ok", f"_{note}_\n"]
+    for i, r in enumerate(results, 1):
+        who = r["lane"] or "—"
+        if r.get("model"):
+            who += f" ({r['model']})"
+        if r.get("cached"):
+            who += " (cached)"
+        lines.append(f"## {head.format(i=i)}{'✅' if r['ok'] else '❌'} {who}\n")
         lines.append((r["output"].strip() or "_(no output)_") + "\n")
     return "\n".join(lines)
 
@@ -251,24 +246,6 @@ def _lanes_or_default(lane_keys, resolve_lane, default_lanes):
         out = [resolve_lane(k) for k in lane_keys]
         return [ln for ln in out if ln is not None]
     return list(default_lanes)
-
-
-async def council_review(*, run_lane, resolve_lane, default_lanes, telemetry, question: str,
-                         lanes=None, judge_lane=None, run_id="", progress=None) -> str:
-    use = _lanes_or_default(lanes, resolve_lane, default_lanes)
-    if not use:
-        return "[error] no lanes available for council_review."
-    tasks = [{"lane": ln.key, "task": question} for ln in use]
-    run_id, results = await batch_run(tasks, run_lane=run_lane, resolve_lane=resolve_lane,
-                                      default_lane=use[0], telemetry=telemetry, run_id=run_id,
-                                      progress=progress)
-    if judge_lane:
-        jl = resolve_lane(judge_lane)
-        if jl:
-            return await _judge(jl, run_lane, results,
-                                "Synthesise these answers into one: agreements, disagreements, "
-                                "and the best conclusion.")
-    return _group(results, "Council review")
 
 
 async def map_review(*, run_lane, resolve_lane, default_lanes, telemetry, files: list[str],
@@ -294,7 +271,7 @@ async def map_review(*, run_lane, resolve_lane, default_lanes, telemetry, files:
         if jl:
             return await _judge(jl, run_lane, results,
                                 "Merge these per-file reviews into one prioritised list.")
-    return _group(results, "Map review (per file)")
+    return _render_results(results, "Map review (per file)", _GROUPED_NOTE)
 
 
 async def research_verify(*, run_lane, resolve_lane, default_lanes, telemetry, questions: list[str],
@@ -370,113 +347,10 @@ async def refine_plan(*, run_lane, resolve_lane, default_lanes, telemetry, plan_
             return await _judge(jl, run_lane, results,
                                 "Dedupe these plan critiques (semantic, not string), sort by "
                                 "severity, and output one actionable patch list for the plan.")
-    return _group(results, "Plan pressure-test (refine_plan)")
-
-
-# ── verify-repair: cross-model build -> review -> repair loop ───────────────────────────────────
-
-def _verdict(text: str) -> str:
-    """Read the verifier's verdict. Last `VERDICT: APPROVED|ISSUES` wins; absent => ISSUES
-    (fail-closed — never approve on a malformed/empty review, the adversarial-verify default)."""
-    hits = re.findall(r"VERDICT:\s*(APPROVED|ISSUES)", text or "", re.IGNORECASE)
-    return hits[-1].upper() if hits else "ISSUES"
-
-
-def _other_lane(default_lanes, not_key: str):
-    """First default lane whose key differs from `not_key` — the cross-model verifier."""
-    return next((ln for ln in default_lanes if ln.key != not_key), None)
-
-
-async def verify_repair(*, run_lane, resolve_lane, default_lanes, task: str, builder_lane: str = "",
-                        verifier_lane: str = "", max_rounds: int = 3, cwd: str = "",
-                        cross_family: bool = False, progress=None) -> str:
-    """A (builder) produces -> B (a DIFFERENT model, verifier) reviews -> if VERDICT: ISSUES the
-    issues go back to A -> loop until VERDICT: APPROVED or max_rounds. Cross-model is the point:
-    B's failure modes are uncorrelated with A's, so it catches what A's own self-review can't. A
-    light convention (the verifier ends with VERDICT: APPROVED|ISSUES), no schema. cross_family=True
-    picks a verifier from a DIFFERENT vendor family (default False = first other lane, back-compat)."""
-    builder = resolve_lane(builder_lane) if builder_lane else (default_lanes[0] if default_lanes else None)
-    if builder is None:
-        return "[error] no builder lane available for verify_repair."
-    if verifier_lane:
-        verifier = resolve_lane(verifier_lane)
-    elif cross_family:
-        verifier = next(iter(_cross_family_verifiers(default_lanes, builder, 1)), None) \
-            or _other_lane(default_lanes, builder.key)
-    else:
-        verifier = _other_lane(default_lanes, builder.key)
-    if verifier is None:
-        return ("[error] no verifier lane available — verify_repair needs a SECOND lane (a "
-                "different model). Install/login another CLI or pass verifier_lane.")
-    rounds = max(1, min(int(max_rounds or 1), VERIFY_MAX_ROUNDS))
-    same = verifier.key == builder.key
-    sub = {"cwd": cwd} if cwd else {}
-
-    lines = [f"# verify_repair — builder: {builder.display} · verifier: {verifier.display}"]
-    if same:
-        lines.append("> ⚠️ verifier is the SAME lane as builder — no cross-model benefit. "
-                     "Pass a distinct verifier_lane for uncorrelated review.\n")
-    approved = False
-    last = ""
-    prev_output = ""
-    for rnd in range(1, rounds + 1):
-        if rnd == 1:
-            btask = (f"{task}\n\nDo the work and output the complete result (code/diff/answer). "
-                     "No preamble.")
-        else:
-            btask = (f"{task}\n\nYour previous attempt:\n{prev_output}\n\nA reviewer (a different "
-                     f"model) found these issues:\n{last}\n\nRevise to fully address every issue. "
-                     "Output the corrected, complete result. No preamble.")
-        br = await run_lane(builder, {**sub, "task": btask}, tool="verify_repair")
-        if not br.ok:
-            lines.append(f"\n## Round {rnd} — builder {builder.display} FAILED ({br.kind})\n")
-            return "\n".join(lines) + "\n\n---\n**Final: ⚠️ aborted — builder failed.**"
-        prev_output = br.output.strip()
-
-        vtask = (f"You are a STRICT reviewer, a DIFFERENT model than the author. The task:\n{task}"
-                 f"\n\nThe author's result:\n{prev_output}\n\nReview it rigorously for correctness, "
-                 "completeness, bugs, and missed requirements. List concrete issues. Then end with "
-                 "exactly one final line: `VERDICT: APPROVED` if it fully and correctly satisfies "
-                 "the task, otherwise `VERDICT: ISSUES`. Default to ISSUES if unsure.")
-        vr = await run_lane(verifier, {**sub, "task": vtask}, tool="verify_repair")
-        if progress is not None:
-            await progress(rnd, rounds, f"round {rnd}")
-        if not vr.ok:
-            lines.append(f"\n## Round {rnd}\n**Builder:**\n{prev_output}\n\n"
-                         f"**Verifier {verifier.display} FAILED ({vr.kind})** — stopping.\n")
-            return "\n".join(lines) + "\n\n---\n**Final: ⚠️ aborted — verifier failed.**"
-        last = vr.output.strip()
-        verdict = _verdict(last)
-        lines.append(f"\n## Round {rnd} — {'✅ APPROVED' if verdict == 'APPROVED' else '🔧 ISSUES'}\n")
-        lines.append(f"**Builder ({builder.display}):**\n\n{prev_output}\n")
-        lines.append(f"**Verifier ({verifier.display}):**\n\n{last}\n")
-        if verdict == "APPROVED":
-            approved = True
-            break
-
-    head = (f"**Final: ✅ APPROVED in {rnd} round(s).**" if approved
-            else f"**Final: ⚠️ NOT APPROVED after {rounds} round(s) — the last issues stand. "
-                 "Increase max_rounds or fix manually.**")
-    return "\n".join(lines) + f"\n\n---\n{head}"
+    return _render_results(results, "Plan pressure-test (refine_plan)", _GROUPED_NOTE)
 
 
 # ── fanout-compare: same task to N lanes, side by side ──────────────────────────────────────────
-
-def _compare(results: list[dict], task: str) -> str:
-    ok = sum(1 for r in results if r["ok"])
-    lines = [f"# fanout_compare — {ok}/{len(results)} lanes answered the SAME task",
-             f"_task: {task[:200]}_",
-             "_Same prompt, N models — compare the alternatives and pick/merge one, or re-run with "
-             "judge_lane for a recommendation._\n"]
-    for i, r in enumerate(results, 1):
-        tag = "✅" if r["ok"] else "❌"
-        who = r["lane"] or "—"
-        if r.get("model"):
-            who += f" ({r['model']})"
-        lines.append(f"## Option {i} — {tag} {who}\n")
-        lines.append((r["output"].strip() or "_(no output)_") + "\n")
-    return "\n".join(lines)
-
 
 def _parse_lane_entries(lane_keys, resolve_lane, default_lanes):
     """Resolve ['gpt', 'opencode:opencode/deepseek-v4-flash-free', …] to (LaneSpec, model) pairs.
@@ -512,99 +386,17 @@ async def fanout_compare(*, run_lane, resolve_lane, default_lanes, telemetry, ta
                                 "These are alternative solutions to the SAME task. Compare them, "
                                 "note key differences and trade-offs, and recommend ONE to adopt "
                                 "(or a specific merge), with reasons.")
-    return _compare(results, task)
+    return _render_results(results, "fanout_compare", f"task: {task[:200]} · same prompt, N models — "
+                           "compare the alternatives and pick/merge one, or re-run with "
+                           "judge_lane for a recommendation.", head="Option {i} — ")
 
 
-# ── jury: cross-vendor verification with author≠reviewer-FAMILY (the product) ───────────────────
-
-def _vote(text: str) -> str:
-    """pass | fail | abstain — last VERDICT line wins; absent => abstain (never counts as a pass:
-    fail-closed, so a malformed/empty review can't approve)."""
-    hits = re.findall(r"VERDICT:\s*(PASS|FAIL|ABSTAIN)", text or "", re.IGNORECASE)
-    return hits[-1].lower() if hits else "abstain"
-
+# ── cross-family lane picking (converge) ───────────────────────────────────────────────────────
 
 def _cross_family_verifiers(default_lanes, author, n: int):
     fam = lanes.family_of(author)
     pool = [ln for ln in default_lanes if lanes.family_of(ln) != fam]
     return pool[:n] if n > 0 else pool
-
-
-def _jury_vote_prompt(task: str, answer: str) -> str:
-    return ("You are a juror reviewing ANOTHER model's answer — you did NOT write it. Judge it "
-            f"rigorously for correctness and completeness.\n\nTASK:\n{task}\n\nANSWER TO JUDGE:\n"
-            f"{answer}\n\nList any concrete problems, then end with EXACTLY one line: "
-            "`VERDICT: PASS` (correct + complete), `VERDICT: FAIL` (wrong or incomplete), or "
-            "`VERDICT: ABSTAIN` (cannot tell). Default to ABSTAIN if unsure.")
-
-
-def _render_jury(author, answer, votes, verdict, passes, fails, k, n, agreement, degraded) -> str:
-    head = [f"# jury — {verdict}  ({passes}/{n} PASS, threshold {k}; agreement {agreement})",
-            f"_author: {author.display} · verifiers: "
-            f"{', '.join(v['lane'] + '(' + v['family'] + ')' for v in votes)}_"]
-    if degraded:
-        head.append("> ⚠️ DEGRADED: no cross-family verifier available (mono-family pool) — voted by "
-                    "same-family lanes, so blind spots may be correlated. Add a different-vendor CLI.")
-    lines = head + ["", "## Answer (author)", "", answer or "_(empty)_", "", "## Verdicts", ""]
-    for v in votes:
-        mark = {"pass": "✅ PASS", "fail": "❌ FAIL", "abstain": "➖ ABSTAIN"}[v["vote"]]
-        lines.append(f"### {mark} — {v['lane']} ({v['family']})\n\n{v['review'] or '_(no review)_'}\n")
-    return "\n".join(lines)
-
-
-async def jury(*, run_lane, resolve_lane, default_lanes, telemetry, task: str, author_lane: str = "",
-               verifier_lanes=None, verifiers: int = 0, threshold: int = 0, cwd: str = "",
-               run_id: str = "", progress=None) -> str:
-    """Author produces -> N verifiers from DIFFERENT vendor families vote PASS/FAIL/ABSTAIN ->
-    k-of-N (fail-closed). Cross-vendor is the point: a model can't review its own family's blind
-    spots. Mono-family pool degrades (same-family vote + a warning), never an undefined verdict."""
-    author = resolve_lane(author_lane) if author_lane else (default_lanes[0] if default_lanes else None)
-    if author is None:
-        return "[error] no author lane available for jury."
-    degraded = False
-    if verifier_lanes:
-        panel = [ln for ln in (resolve_lane(k) for k in verifier_lanes)
-                 if ln is not None and ln.key != author.key]
-    else:
-        want = verifiers if verifiers > 0 else min(3, max(0, len(default_lanes) - 1))
-        panel = _cross_family_verifiers(default_lanes, author, want)
-        if not panel:                              # mono-family pool: degrade, never undefined
-            panel = [ln for ln in default_lanes if ln.key != author.key][:max(1, want)]
-            degraded = True
-    if not panel:
-        return ("[error] jury needs at least one verifier lane distinct from the author — install/"
-                "login a second CLI or pass verifier_lanes.")
-    sub = {"cwd": cwd} if cwd else {}
-    ar = await run_lane(author, {**sub, "task": task}, tool="jury")
-    if not ar.ok:
-        return f"# jury — author {author.display} FAILED ({ar.kind})\n\n{ar.render()}"
-    answer = ar.output.strip()
-    vtasks = [{"lane": v.key, "cwd": cwd, "task": _jury_vote_prompt(task, answer)} for v in panel]
-    _rid, results = await batch_run(vtasks, run_lane=run_lane, resolve_lane=resolve_lane,
-                                    default_lane=panel[0], telemetry=telemetry, run_id=run_id,
-                                    progress=progress)
-    votes = []
-    for v, r in zip(panel, results, strict=False):
-        votes.append({"lane": v.key, "family": lanes.family_of(v),
-                      "vote": _vote(r["output"]) if r["ok"] else "abstain",
-                      "review": r["output"].strip()})
-    n = len(votes)
-    k = threshold if threshold > 0 else (n // 2 + 1)
-    passes = sum(1 for x in votes if x["vote"] == "pass")
-    fails = sum(1 for x in votes if x["vote"] == "fail")
-    verdict = "APPROVED" if passes >= k else "REJECTED"        # fail-closed: short of k => rejected
-    agreement = round(passes / n, 2) if n else 0.0
-    # "Earn their seat" signal (best-effort): record each verifier's vote vs the final verdict so
-    # lane_stats can surface, over time, which lanes conform vs dissent. In live use there's no
-    # ground truth, so agreed = conformity with the MAJORITY verdict (labelled "conformity, not
-    # accuracy" downstream — a correct dissenter SHOULD score low here). abstain = no side (None).
-    jput = getattr(telemetry, "jury_put", None)
-    if jput is not None:
-        jput(run_id, [(x["lane"], x["vote"], verdict,
-                       None if x["vote"] == "abstain"
-                       else int((x["vote"] == "pass") == (verdict == "APPROVED")))
-                      for x in votes])
-    return _render_jury(author, answer, votes, verdict, passes, fails, k, n, agreement, degraded)
 
 
 # ── converge: governance loop (blind-verdict-first + no-silent-dismissal + no-self-approval) ──

@@ -21,6 +21,8 @@ import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from . import config
+
 # GUI MCP hosts (Claude Desktop, Hermes Desktop, …) launch their servers with a minimal
 # login PATH that misses Homebrew/npm/user bins — so a CLI that works fine in a terminal
 # is "not installed" from inside the app. When plain PATH lookup fails, retry in the
@@ -51,6 +53,22 @@ def which_path(cmd: str) -> str | None:
     return None
 
 
+def is_installed(lane: LaneSpec) -> bool:
+    # An opt-in API lane is unavailable until its key is set — gate it FIRST so it stays hidden
+    # even in dry-run mode (the key, not a binary, is what makes an API lane usable).
+    if not lane.has_required_key:
+        return False
+    # Dry-run mode reports every lane installed so the whole tool is explorable with no CLIs.
+    # which_path also searches the usual install dirs — GUI MCP hosts (Claude Desktop,
+    # Hermes Desktop, …) run with a minimal PATH that misses Homebrew/npm/user bins.
+    return True if config.mock() else which_path(lane.bin) is not None
+
+
+def installed_lanes(lanes: list[LaneSpec]) -> list[LaneSpec]:
+    """Lanes whose binary is on PATH AND that the user hasn't disabled via env."""
+    return [lane for lane in lanes if lane.enabled and is_installed(lane)]
+
+
 _EFFORT = {"": "", "minimal": "minimal", "low": "low", "medium": "medium",
            "high": "high", "max": "max"}
 
@@ -74,9 +92,6 @@ class LaneSpec:
     models_args: list[str] | None = None  # argv to list models, or None
     help_args: list[str] | None = None    # argv to print CLI help, or None
     version_args: tuple[str, ...] = ("--version",)   # argv to print the CLI's version (drift check)
-    probe_flags: tuple[str, ...] = ()     # flags this lane EMITS that must still exist in the
-                                          # CLI's --help; if one vanishes the invocation is broken
-                                          # (doctor deep flags the drift before a silent failure)
     caps: frozenset[str] = field(default_factory=frozenset)        # {"model","effort","agent","images"}
     # Some CLIs expose NO `models` subcommand but do cache the list the server said this account
     # may use. Point this at that file and cli-bridge reads the entitled set itself, so the caller
@@ -99,21 +114,12 @@ class LaneSpec:
     install_hint: str = ""                # shown by doctor when the CLI isn't installed
     note: str = ""
     # OPT-IN API lanes: when set, this lane needs an API key in the named env var, and stays
-    # HIDDEN until that var is non-empty (see has_required_key + detect.is_installed). The ban-safe
+    # HIDDEN until that var is non-empty (see has_required_key + is_installed). The ban-safe
     # DEFAULT surface — official CLIs, no keys — is therefore unchanged for anyone who doesn't opt in.
     availability_env: str | None = None
     # Some CLIs pick a model via an ENV var, not a flag (e.g. vibe reads VIBE_ACTIVE_MODEL). A
     # lane may supply extra env vars for the spawn via this builder; default = none.
     env_ask: Callable[..., dict] | None = None
-    # Native session continuity for round-table turns (an optimization over transcript replay —
-    # replay stays the cross-lane source of truth). Two modes:
-    #   mint:    we generate the handle and hand it to the CLI ({"mode":"mint",
-    #            "first":[...{sid}...], "resume":[...{sid}...]})
-    #   capture: the CLI names its session in officially-flagged output ({"mode":"capture",
-    #            "spawn":[flags...], "pattern": regex, "resume":[...{sid}...]})
-    # Extra argv is inserted just before the task (the last argv element). None = replay only.
-    native_session: dict | None = None
-
     def _env(self, suffix: str) -> str:
         # Env vars can't contain '-', but tool keys can; map so a 'my-lane' key still reads
         # CLI_BRIDGE_MY_LANE_COST. (Underscore is the only safe word separator in shells.)
@@ -230,7 +236,7 @@ class LaneSpec:
         return self.default_model
 
 
-# ─────────────────────────── vendor family (cross-vendor jury) ───────────────────────────
+# ─────────────────────────── vendor family (cross-vendor converge) ───────────────────────────
 # A model can't trustworthily review its OWN family's output (correlated blind spots). Derive the
 # family from client_ids/key so new lanes need no manual upkeep; override with
 # CLI_BRIDGE_FAMILY_OVERRIDES="lanekey:family,lanekey2:family2".
@@ -597,12 +603,8 @@ BUILTIN_LANES: list[LaneSpec] = [
                        "limit (opt-in extra API credits exist). Official-CLI scripting is "
                        "ToS-permitted.",
              models_args=None, help_args=["--help"], caps=frozenset({"model", "agent"}),
-             probe_flags=("--print", "--permission-mode"),
              client_ids=frozenset({"claude-code", "claude", "claude-desktop"}),
              install_hint="npm i -g @anthropic-ai/claude-code  (then `claude` to log in)",
-             native_session={"mode": "mint",                       # verified live 2026-06-12
-                             "first": ["--session-id", "{sid}"],
-                             "resume": ["--resume", "{sid}"]},
              note="Anthropic. Strong all-round reasoning. model=claude-opus-4-6/claude-sonnet-4-6 "
                   "etc; agent='build' EDITS files (acceptEdits). Default plan = read-only."),
     LaneSpec("gpt", "GPT (OpenAI Codex CLI)", "codex", _codex_ask,
@@ -615,7 +617,6 @@ BUILTIN_LANES: list[LaneSpec] = [
              # is the sole local source for the set the ACCOUNT may use — without it a caller can't
              # tell that e.g. a frontier model is already included in the plan.
              models_file="~/.codex/models_cache.json",
-             probe_flags=("--sandbox", "-m", "-i"),
              client_ids=frozenset({"codex", "codex-mcp-client", "codex-cli"}),
              install_hint="npm i -g @openai/codex  (then `codex` to log in)",
              note="OpenAI. effort=high for hard reasoning, low/empty for quick; agent='build' "
@@ -631,7 +632,6 @@ BUILTIN_LANES: list[LaneSpec] = [
              help_args=["--help"], caps=frozenset({"model", "agent", "images"}), bin_alts=("agy",),
              image_arg="@",                        # @-file reference inside the prompt text
              sunset="2026-06-18",   # consumer tiers dead; past this, prefer agy + degrade to limited
-             probe_flags=("-p",),   # common to gemini & agy; -m differs by binary, so not probed
              client_ids=frozenset({"gemini-cli-mcp-client", "gemini", "antigravity"}),
              install_hint="install Antigravity for `agy` (free tier ~20 req/day, no card — "
                           "antigravity.google); the old `gemini` CLI now needs a paid API key / "
@@ -647,7 +647,6 @@ BUILTIN_LANES: list[LaneSpec] = [
              cost_note="Conservative default — the free tier works but its quotas are unverified and "
                        "Mistral sells paid plans (docs/COSTS.md); set to free if you're on the free tier.",
              help_args=["--help"], caps=frozenset({"model", "agent"}), env_ask=_mistral_env,
-             probe_flags=("-p", "--agent", "--trust"),
              client_ids=frozenset({"vibe", "mistral"}),
              install_hint="see Mistral Vibe CLI docs (`vibe`)",
              note="Mistral (Vibe CLI). Lightweight quick takes. model=<id> selects via "
@@ -661,13 +660,8 @@ BUILTIN_LANES: list[LaneSpec] = [
              models_args=["models"], help_args=["run", "--help"],
              caps=frozenset({"model", "effort", "agent", "images"}),
              image_arg="-f",                       # `-f <path>` attach — yargs array, so it goes LAST
-             probe_flags=("--agent", "-m", "-f"),
              client_ids=frozenset({"opencode"}),
              install_hint="curl -fsSL https://opencode.ai/install | bash",
-             native_session={"mode": "capture",                    # verified live 2026-06-12
-                             "spawn": ["--print-logs"],            # logs (stderr) name the session
-                             "pattern": r"ses_[A-Za-z0-9]{10,}",
-                             "resume": ["-s", "{sid}"]},
              note=("Gateway to deepseek/qwen/glm/kimi/minimax/... Empty model = a discovered "
                    "'opencode/*-free' model ($0, rate-limited; may train on your data during its "
                    "free period). PAID otherwise: a bare 'opencode/*' Zen model bills per-token "
@@ -682,7 +676,6 @@ BUILTIN_LANES: list[LaneSpec] = [
                        "(e.g. OpenRouter/BYOK). ⚠ Alibaba's Coding Plan ToS prohibits "
                        "non-interactive use, so that plan is NOT a valid path for cli-bridge.",
              help_args=["--help"], caps=frozenset({"model", "agent"}),
-             probe_flags=("-p",),
              client_ids=frozenset({"qwen", "qwen-code"}),
              experimental=True,
              install_hint="npm i -g @qwen-code/qwen-code  (needs a metered API key since Apr 2026)",
@@ -693,7 +686,6 @@ BUILTIN_LANES: list[LaneSpec] = [
              cost_note="Copilot billing moved to usage-based credits on 2026-06-01 — quota "
                        "exhaustion can meter, not hard-stop.",
              help_args=["--help"], caps=frozenset({"model", "agent"}),
-             probe_flags=("-p",),
              client_ids=frozenset({"copilot", "github-copilot"}),
              experimental=True,
              install_hint="gh extension install github/gh-copilot  (subscription)",
@@ -708,7 +700,6 @@ BUILTIN_LANES: list[LaneSpec] = [
                        "conservative `limited` default; set free if your plan covers it.",
              models_args=["--list-models"], help_args=["--help"],
              caps=frozenset({"model", "agent"}),
-             probe_flags=("-p", "--mode", "--force"),
              client_ids=frozenset({"cursor", "cursor-agent", "cursor-cli"}),
              install_hint="curl https://cursor.com/install -fsS | bash  (then `cursor-agent login`)",
              note="Cursor's agent CLI. ⚠ A bare `-p` has FULL tool access (write+shell) — this lane's "
@@ -720,7 +711,6 @@ BUILTIN_LANES: list[LaneSpec] = [
              cost_note="Requires a SuperGrok / X Premium+ subscription (no free CLI tier as of "
                        "June 2026); headless via `-p`.",
              help_args=["--help"], caps=frozenset({"model"}),
-             probe_flags=("-p",),
              client_ids=frozenset({"grok", "grok-cli", "xai"}),
              experimental=True,
              install_hint="curl -fsSL https://x.ai/cli/install.sh | bash",
@@ -733,14 +723,13 @@ BUILTIN_LANES: list[LaneSpec] = [
              models_args=["list"], help_args=["run", "--help"],
              caps=frozenset({"model", "images"}), env_ask=_ollama_env,
              image_arg="",                         # a BARE path in the prompt; the CLI resolves it
-             probe_flags=("--hidethinking",),
              client_ids=frozenset({"ollama"}),
              install_hint="macOS: brew install ollama · Linux: curl -fsSL "
                           "https://ollama.com/install.sh | sh ; then `ollama pull <model>`",
              note="Local via ollama. $0, private, offline. Read-only (no build). Empty model = the "
-                  "first model from `ollama list`. Max decorrelation for the jury — but note a "
+                  "first model from `ollama list`. Max decorrelation for the council — but note a "
                   "local runtime of open weights still correlates with OTHER local runtimes of the "
-                  "same weights; real jury diversity comes from distinct vendors."),
+                  "same weights; real diversity comes from distinct vendors."),
     LaneSpec("apple", "Apple Foundation Models (on-device)", "fm", _apple_ask,
              cost_default="free",
              cost_note="on-device Apple Intelligence — $0, offline, private, and UNMETERED "
@@ -751,7 +740,6 @@ BUILTIN_LANES: list[LaneSpec] = [
              models_args=None, help_args=["respond", "--help"],
              caps=frozenset({"model", "images"}),
              image_arg="--image",
-             probe_flags=("-m", "--image"),
              client_ids=frozenset({"apple", "fm", "foundation-models"}),
              install_hint="Apple's Foundation Models CLI (`fm`), macOS with Apple Intelligence on",
              note="Apple, on-device. $0, offline, private, unmetered. Read-only (no build mode — "
@@ -887,25 +875,8 @@ def load_custom_lanes(path: str | None = None) -> list[LaneSpec]:
         if cost not in {"free", "limited", "paid"}:
             cost = "paid" if bool(item.get("paid", False)) else "free"
         model_flag = str(item.get("model_flag", "")).strip()
-        # Derive the drift-check flags from the template itself: the model flag + any dash-args
-        # in the ask template (e.g. a subcommand flag). So custom lanes get the same `doctor deep`
-        # breakage warning as built-ins, with no extra config.
-        probe = tuple(dict.fromkeys(
-            ([model_flag] if model_flag else []) + [t for t in ask if t.startswith("-")]))
         if argv_secret_risk(ask):
             LANES_LOAD_STATUS["argv_secret_risk"].append(key)
-        # Native session continuity is plain lane DATA — a custom lane gets it from config,
-        # no code change ({"mode": "mint"|"capture", "first"/"spawn": [...], "pattern": "...",
-        # "resume": [..."{sid}"...]}). Malformed blocks are dropped (lane still works, replay).
-        ns_raw = item.get("native_session")
-        native = None
-        if (isinstance(ns_raw, dict) and str(ns_raw.get("mode", "")) in {"mint", "capture"}
-                and _str_list(ns_raw.get("resume"))):
-            native = {"mode": str(ns_raw["mode"]),
-                      "first": _str_list(ns_raw.get("first")) or [],
-                      "spawn": _str_list(ns_raw.get("spawn")) or [],
-                      "pattern": str(ns_raw.get("pattern", "")),
-                      "resume": _str_list(ns_raw.get("resume")) or []}
         lanes.append(LaneSpec(
             key=key,
             display=str(item.get("display", key)),
@@ -915,13 +886,11 @@ def load_custom_lanes(path: str | None = None) -> list[LaneSpec]:
             default_model=str(item.get("default_model", "")),
             models_args=_str_list(item.get("models")),
             help_args=_str_list(item.get("help")),
-            probe_flags=probe,
             caps=frozenset({"model"}) if model_flag else frozenset(),
             client_ids=frozenset(c for c in item.get("client_ids", []) if isinstance(c, str)),
             experimental=bool(item.get("experimental", False)),
             install_hint=str(item.get("install_hint", "")),
             note=str(item.get("note", "user-defined lane")),
-            native_session=native,
             availability_env=(str(item.get("availability_env", "")).strip() or None),
         ))
     LANES_LOAD_STATUS.update({"loaded": len(lanes), "skipped": skipped})
@@ -938,16 +907,6 @@ def is_paid_opencode_model(model: str) -> bool:
     if m.startswith("opencode-go/"):
         return True
     return m.startswith("opencode/") and not m.endswith("-free")
-
-
-def missing_flags(help_text: str, probe_flags) -> list[str]:
-    """Which of a lane's required flags are ABSENT from its CLI help text — i.e. likely removed or
-    renamed upstream, so the lane's invocation would break. Plain substring match (a flag like
-    `-m` / `--sandbox` appears verbatim in help). Empty help or no probe_flags -> [] (can't tell,
-    so never a false alarm). Pure + offline-testable; the live `--help` spawn lives in the server."""
-    if not probe_flags or not help_text:
-        return []
-    return [f for f in probe_flags if f not in help_text]
 
 
 def all_lanes() -> list[LaneSpec]:

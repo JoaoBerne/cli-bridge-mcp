@@ -24,36 +24,6 @@ def test_slug_normalizes_host_names():
     assert server._slug("Anthropic  Claude!") == "anthropic--claude"
 
 
-def test_flag_drift_section_flags_broken_lane(monkeypatch):
-    clean = LaneSpec("c", "C", "cbin", lambda *x: [], help_args=["--help"], probe_flags=("-p", "-m"))
-    broke = LaneSpec("b", "B", "bbin", lambda *x: [], help_args=["--help"], probe_flags=("--old",))
-    gone = LaneSpec("g", "G", "gbin", lambda *x: [], help_args=["--help"], probe_flags=("-x",))
-
-    async def fake_arun(argv, timeout, cwd=None, env=None):
-        text = {"cbin": "options: -p PROMPT, -m MODEL", "bbin": "options: --fresh only"}.get(argv[0])
-        if text is None:                                   # gbin: CLI not installed
-            return RunResult(False, "not found", "not_found")
-        return RunResult(True, text, "ok")
-    monkeypatch.setattr(server.runner, "arun", fake_arun)
-
-    out = asyncio.run(server._flag_drift_section([clean, broke, gone]))
-    assert "Flag drift" in out
-    assert "**b**" in out and "--old" in out               # broke: flag missing from help
-    assert "**c**" not in out                              # clean: all flags present
-    assert "**g**" not in out                              # uninstalled: no help -> no false alarm
-
-
-def test_flag_drift_section_clean_when_all_present(monkeypatch):
-    lane = LaneSpec("c", "C", "cbin", lambda *x: [], help_args=["--help"], probe_flags=("-p",))
-
-    async def fake_arun(argv, timeout, cwd=None, env=None):
-        return RunResult(True, "usage: -p PROMPT", "ok")
-    monkeypatch.setattr(server.runner, "arun", fake_arun)
-
-    out = asyncio.run(server._flag_drift_section([lane]))
-    assert "still present" in out and "drift" not in out.lower()
-
-
 def test_str_coerces_null_to_empty():
     assert server._str({"x": None}, "x") == ""        # JSON null must not become "None"
     assert server._str({}, "x") == ""

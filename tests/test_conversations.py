@@ -70,16 +70,6 @@ def test_is_valid_id():
     assert not conversations.is_valid_id("x" * 65)
 
 
-def test_log_mirror_writes_readable_markdown(tmp_path, monkeypatch):
-    monkeypatch.setenv("CLI_BRIDGE_CONVO_LOG_DIR", str(tmp_path / "logs"))
-    cid = conversations.new_id()
-    conversations.record_turn(cid, "gemini", "user", "the question")
-    conversations.record_turn(cid, "gemini", "assistant", "the answer")
-    md = (tmp_path / "logs" / f"{cid}.md").read_text()
-    assert "### User" in md and "the question" in md
-    assert "### gemini" in md and "the answer" in md
-
-
 def test_list_recovers_threads_after_reset():
     a, b = conversations.new_id(), conversations.new_id()
     conversations.record_turn(a, "gemini", "user", "thread A q")

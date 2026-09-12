@@ -7,8 +7,7 @@ no delegate output here.
 from __future__ import annotations
 
 from . import config, guards, preamble
-from .detect import is_installed
-from .lanes import all_lanes
+from .lanes import all_lanes, is_installed
 
 
 def _config_snapshot(host: str) -> dict:

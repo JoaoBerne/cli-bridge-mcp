@@ -275,9 +275,6 @@ def test_community_lanes_example_loads_safely(monkeypatch):
         assert ln.cost_label == "limited"            # cost-safe: out of fan-out until declared
         argv = ln.build_ask("hi", "", "", "")
         assert "hi" in argv and "{task}" not in " ".join(argv)
-    by_key = {ln.key: ln for ln in loaded}
-    for k in ("aider", "goose", "amp", "q"):         # flagged lanes are drift-checkable
-        assert by_key[k].probe_flags
 
 
 # ── the $0 council ships working ─────────────────────────────────────────────────────────

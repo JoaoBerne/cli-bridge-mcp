@@ -14,11 +14,9 @@ Pure logic + thin telemetry calls; no import of server.py, so server.py stays th
 """
 from __future__ import annotations
 
-import os
-import re
 import uuid
 
-from . import config, telemetry
+from . import telemetry
 
 _HEADER = (
     "=== ROUND-TABLE CONVERSATION (continuation) ===\n"
@@ -46,25 +44,7 @@ def record_turn(conversation_id: str, lane: str, role: str, content: str) -> int
     """Append one turn (role='user' for the host's prompt, 'assistant' for a lane's reply).
     Returns the turn number (0 if telemetry is off). Stores the RAW text — never the
     history-augmented prompt — so replays don't nest and explode."""
-    n = telemetry.convo_append(conversation_id, lane, role, content)
-    _mirror_log(conversation_id, lane, role, content)
-    return n
-
-
-def _mirror_log(conversation_id: str, lane: str, role: str, content: str) -> None:
-    """If CLI_BRIDGE_CONVO_LOG_DIR is set, append the turn to a readable <id>.md transcript —
-    a human-friendly mirror of the sqlite store, handy to re-read a round-table after a
-    /compact. Best-effort: never raises into a delegation."""
-    d = config.convo_log_dir()
-    if not d:
-        return
-    who = "User" if role == "user" else (lane or "assistant")
-    try:
-        os.makedirs(d, exist_ok=True)
-        with open(os.path.join(d, f"{conversation_id}.md"), "a", encoding="utf-8") as fh:
-            fh.write(f"\n### {who}\n\n{content}\n")
-    except OSError:
-        pass
+    return telemetry.convo_append(conversation_id, lane, role, content)
 
 
 def _render_turn(turn: dict, recipient_lane: str) -> str:
@@ -127,64 +107,8 @@ def apply_compaction(conversation_id: str, upto_n: int, summary: str, lane: str)
     return telemetry.convo_compact(conversation_id, upto_n, summary, lane)
 
 
-def native_step(ns: dict, conversation_id: str, lane_key: str) -> tuple[list[str], str, int]:
-    """Pre-spawn half of native session continuity. Returns (extra_argv, sid, last_seen_turn):
-    a known handle → resume argv + the last turn this lane's native session already contains
-    (so the prompt replays only the DELTA — turns other lanes added since). No handle yet →
-    mint one ourselves (mode=mint) or spawn with the CLI's officially-flagged verbose output
-    and capture it after the run (mode=capture)."""
-    sid, last = telemetry.convo_session(conversation_id, lane_key)
-    if sid and _fold_overlaps(conversation_id, last):
-        # Compaction folded turns this lane's native session already holds verbatim — resuming
-        # would hand it the summary AGAIN (duplicate context). Drop the handle: this turn runs
-        # on a fresh session backed by a full replay (summary included exactly once).
-        telemetry.convo_session_drop(conversation_id, lane_key)
-        sid, last = "", 0
-    if sid:
-        return [a.replace("{sid}", sid) for a in ns.get("resume", [])], sid, last
-    if ns.get("mode") == "mint":
-        sid = str(uuid.uuid4())
-        return [a.replace("{sid}", sid) for a in ns.get("first", [])], sid, 0
-    return list(ns.get("spawn", [])), "", 0
-
-
-def head_turn(conversation_id: str) -> int:
-    """The newest stored turn number (0 when the thread is empty). Used to check that a native
-    session really holds everything below its high-water mark before that mark is committed."""
-    turns = telemetry.convo_turns(conversation_id)
-    return int(turns[-1].get("turn_number", 0)) if turns else 0
-
-
-def _fold_overlaps(conversation_id: str, last_seen: int) -> bool:
-    """True when the thread's leading summary turn folds turns the native session has already
-    seen verbatim (summary turn_number > last_seen ≥ a folded turn): the delta would duplicate
-    context the vendor session already holds."""
-    if not last_seen:
-        return False
-    turns = telemetry.convo_turns(conversation_id)
-    return bool(turns) and turns[0].get("role") == "summary" \
-        and int(turns[0].get("turn_number", 0)) > last_seen
-
-
-def native_commit(ns: dict, conversation_id: str, lane_key: str, sid: str,
-                  raw_streams: str, last_turn: int) -> None:
-    """Post-spawn half: capture the handle from the CLI's output if we don't hold one yet
-    (mode=capture), then record handle + high-water turn so the next same-lane turn resumes
-    natively and replays only the delta. Best-effort."""
-    if not sid and ns.get("pattern"):
-        m = re.search(ns["pattern"], raw_streams or "")
-        sid = m.group(0) if m else ""
-    if sid:
-        telemetry.convo_session_set(conversation_id, lane_key, sid, last_turn)
-
-
-def native_drop(conversation_id: str, lane_key: str) -> None:
-    """A resume turn failed — forget the handle; the next turn falls back to full replay."""
-    telemetry.convo_session_drop(conversation_id, lane_key)
-
-
 def build_history_prefix(conversation_id: str, recipient_lane: str,
-                         max_chars: int, since_turn: int = 0) -> tuple[str, bool]:
+                         max_chars: int) -> tuple[str, bool]:
     """Build the recipient-aware transcript to prepend before the next turn to `recipient_lane`.
 
     Dual-phase windowing (the technique zen uses): collect turns newest-first until the char
@@ -196,8 +120,6 @@ def build_history_prefix(conversation_id: str, recipient_lane: str,
     first turn behaves exactly like a normal one-shot ask (zero regression).
     """
     turns = telemetry.convo_turns(conversation_id)
-    if since_turn:                 # native resume: the lane's own session already holds the rest
-        turns = [t for t in turns if int(t.get("turn_number", 0)) > since_turn]
     if not turns:
         return "", False
 

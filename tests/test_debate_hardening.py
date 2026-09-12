@@ -1,7 +1,7 @@
 """Debate/consensus hardening from the June 2026 field report: grounding contract,
-fact-check pass, summary_only, independent judge, brief linter, provenance tags,
-anti-unanimity steelman, rate_lane hook."""
+summary_only, independent judge, provenance tags, rate_lane hook."""
 import asyncio
+import json
 
 from cli_bridge import workflows
 from cli_bridge.lanes import LaneSpec
@@ -79,29 +79,9 @@ def test_debate_dry_run_manifest_spawns_nothing(tmp_path):
     out = asyncio.run(workflows.debate(
         _panel(3), {"task": "q?", "context_files": [str(f)], "dry_run": True}, _recorder(rec)))
     assert rec == []                                        # no lane spawned
-    assert "Preflight data manifest" in out
-    assert "facts.md" in out
-    # each debater vendor is named as a recipient
-    assert "Gemini" in out and "Gpt" in out
-
-
-# ── FR-2 fact-check pass ─────────────────────────────────────────────────────────────────
-
-def test_fact_check_runs_by_default_and_reports_unverified():
-    rec = []
-    out = asyncio.run(workflows.debate(_panel(3), {"task": "q?", "rounds": 0}, _recorder(rec)))
-    assert "## ⚠️ Fact-check" in out
-    assert "ollama pull bogus:tag" in out                  # the hallucinated tag is surfaced
-    assert any("fact-checker" in c["task"] for c in rec)
-
-
-def test_fact_check_off_switch():
-    rec = []
-    out = asyncio.run(workflows.debate(
-        _panel(3), {"task": "q?", "rounds": 0, "fact_check": False}, _recorder(rec)))
-    assert "## ⚠️ Fact-check" not in out
-    assert not any("fact-checker" in c["task"] for c in rec)
-    assert '"fact_check": "off"' in out                    # honest in the trace
+    man = json.loads(out)
+    assert "facts.md" in man["files"][0]["path"]
+    assert any("Gemini" in r for r in man["recipients"]) and any("Gpt" in r for r in man["recipients"])
 
 
 # ── FR-3 summary_only ────────────────────────────────────────────────────────────────────
@@ -183,47 +163,10 @@ def test_debate_anonymizes_peers_to_judge_and_legends_in_report():
     assert "Labels (judge saw these" in report and "Debater A = " in report
 
 
-# ── T2.3 convergence ladder (cosmetic 3-state label) ─────────────────────────────────────
+def test_prompts_tell_lanes_to_stop_on_unseen_files():
+    assert "files you cannot see" in workflows.debate_open_prompt("q")
+    assert "files you cannot see" in workflows.consensus_answer_prompt("q")
 
-def test_convergence_state_ladder_thresholds():
-    assert workflows._convergence_state(0.95) == "converged"
-    assert workflows._convergence_state(0.85) == "converged"     # boundary inclusive
-    assert workflows._convergence_state(0.6) == "refining"
-    assert workflows._convergence_state(0.39) == "diverging"
-    assert workflows._convergence_state(None) == "n/a"           # no comparable prior round
-
-
-def test_debate_report_shows_convergence_state():
-    rec = []
-    report = asyncio.run(workflows.debate(_panel(3), {"task": "q?", "rounds": 1}, _recorder(rec)))
-    assert "convergence:" in report                              # ladder label surfaced in the header
-
-
-# ── FR-5 brief linter (pure) ─────────────────────────────────────────────────────────────
-
-def test_brief_lint_flags_thin_brief():
-    warns = workflows.brief_lint("MLX or Ollama?")
-    assert any("short brief" in w for w in warns)
-    assert any("options" in w for w in warns)
-    assert any("criteria" in w for w in warns)
-
-
-def test_brief_lint_passes_a_rich_brief():
-    rich = ("Decide the inference backend for a 16GB M1. Verified facts: 3 Metal OOMs "
-            "reproduced; bench of 10 labeled cases. Options: A) MLX in-process B) Ollama "
-            "server C) llama.cpp direct D) keep current. Weigh by: stability under memory "
-            "pressure, maintainability, throughput. Constraints: no cloud, single machine, "
-            "production weekly run with client deliverable.")
-    assert workflows.brief_lint(rich) == []
-
-
-def test_thin_brief_warning_lands_in_report():
-    out = asyncio.run(workflows.debate(_panel(3), {"task": "MLX or Ollama?", "rounds": 0},
-                                       _recorder([])))
-    assert "Thin brief → thin consensus" in out
-
-
-# ── FR-6 provenance tags ─────────────────────────────────────────────────────────────────
 
 def test_debater_prompts_require_provenance_tags():
     rec = []
@@ -233,31 +176,6 @@ def test_debater_prompts_require_provenance_tags():
     assert debater_calls
     for c in debater_calls:
         assert "[own-knowledge]" in c["task"] and "[verified]" in c["task"]
-
-
-# ── FR-7 anti-unanimity steelman ─────────────────────────────────────────────────────────
-
-def test_unanimous_verdict_triggers_steelman_when_opted_in():
-    rec = []
-    out = asyncio.run(workflows.debate(
-        _panel(3), {"task": "q?", "rounds": 0, "steelman": True}, _recorder(
-            rec, judge_says="UNANIMOUS: yes\nAll agree: option B.")))
-    assert any("STEELMAN" in c["task"] for c in rec)       # one lane argued against
-    judge_calls = [c for c in rec if "debated the question" in c["task"]]
-    assert len(judge_calls) == 2                           # judge re-concluded
-    assert '"unanimous": true' in out
-    assert "steelman_round" in out
-
-
-def test_no_steelman_without_opt_in_or_unanimity():
-    rec = []
-    asyncio.run(workflows.debate(_panel(3), {"task": "q?", "rounds": 0}, _recorder(
-        rec, judge_says="UNANIMOUS: yes\nAll agree.")))    # unanimous but steelman not set
-    assert not any("STEELMAN" in c["task"] for c in rec)
-    rec2 = []
-    asyncio.run(workflows.debate(_panel(3), {"task": "q?", "rounds": 0, "steelman": True},
-                                 _recorder(rec2)))         # steelman set but not unanimous
-    assert not any("STEELMAN" in c["task"] for c in rec2)
 
 
 def test_unanimous_marker_stripped_from_displayed_answer():

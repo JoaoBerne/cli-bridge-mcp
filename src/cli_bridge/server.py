@@ -64,8 +64,7 @@ from .config import (
     OVERFLOW_DIR,
     SETUP_TEXT,
 )
-from .detect import installed_lanes
-from .lanes import LaneSpec, all_lanes, models_from_file
+from .lanes import LaneSpec, all_lanes, installed_lanes, models_from_file
 
 # config.py is the single source of truth for env/timeouts/profile/onboarding. These thin
 # aliases keep the historical server.* call sites (and tests) working after the extraction.
@@ -89,7 +88,6 @@ _PROMPTS = prompts._PROMPTS
 _RESOURCES = resources._RESOURCES
 _config_snapshot = resources._config_snapshot
 _render_usage = reports._render_usage
-_render_budget = reports._render_budget
 _render_job_status = reports._render_job_status
 _render_jobs_list = reports._render_jobs_list
 _render_lane_stats = reports._render_lane_stats
@@ -97,7 +95,6 @@ _setup_recommendation = reports._setup_recommendation
 _rel_time = reports._rel_time
 _parse_since = reports._parse_since
 _lane_version = reports._lane_version
-_flag_drift_section = reports._flag_drift_section
 
 
 server: Server = Server("cli-bridge", instructions=INSTRUCTIONS)
@@ -532,9 +529,7 @@ async def _run_lane(lane: LaneSpec, args: dict, *, tool: str = "ask",
     terse_level = preamble.level() if terse else "off"
     ttl = config.CACHE_TTL_S
     key = ""
-    # Never cache native-session turns: the same prompt means something different inside a
-    # session (the CLI holds prior context the cache key can't see).
-    if ttl > 0 and agent != "build" and not args.get("_native_argv"):
+    if ttl > 0 and agent != "build":
         key = _cache_key(lane, model, effort, agent, expanded or "", task, terse_level)
         hit = telemetry.cache_get(key, ttl)
         if hit is not None:
@@ -551,15 +546,7 @@ async def _run_lane(lane: LaneSpec, args: dict, *, tool: str = "ask",
         task = f"{task}\n\n{' '.join(lane.image_arg + p for p in img_paths)}"
     prompt = preamble.apply(task) if terse else task
     argv = [lane.bin] + lane.build_ask(prompt, model, effort, agent, lane.bin)
-    # Native-session extras (conversation turns only): inserted just before the PROMPT, found by
-    # position rather than assumed to be the tail. Custom lanes can declare a native_session
-    # (lanes.py's JSON loader builds one), and a template may well end in a flag's value —
-    # splicing at the tail would then land between a flag and what it takes.
-    native_extra = args.get("_native_argv")
-    if native_extra and len(argv) > 1:
-        i = argv.index(prompt) if prompt in argv else len(argv) - 1
-        argv = argv[:i] + [str(a) for a in native_extra] + argv[i:]
-    # Flag lanes get their images AFTER that splice, and after the task: codex's `-i <FILE>...` and
+    # Flag lanes get their images after the task: codex's `-i <FILE>...` and
     # opencode's `-f` are variadic and would otherwise swallow the prompt (verified live 2026-07).
     if img_paths and lane.image_arg.startswith("-"):
         argv += [a for p in img_paths for a in (lane.image_arg, p)]
@@ -579,14 +566,8 @@ async def _run_lane(lane: LaneSpec, args: dict, *, tool: str = "ask",
     rec = telemetry.start(tool, lane.key, model, task)
     timeout = _timeout(args.get("timeout_s"))
     t0 = time.monotonic()
-    # A spawn carrying STATE is not idempotent, so replaying it does not retry — it corrupts.
-    # A minted --session-id collides on the second attempt ("Session ID … is already in use",
-    # which then MASKS the transient error that caused the retry); a --resume re-delivers the
-    # same delta into a session that already ingested it; a build agent re-edits a tree it has
-    # already changed. Gated on the session HANDLE, not on _native_argv: opencode's capture-first
-    # turn passes --print-logs with no handle, and it is still perfectly safe to retry.
-    res = await _spawn_with_retry(argv, timeout, expanded, spawn_env,
-                                  retry=not (agent == "build" or args.get("_native_sid")))
+    # A build agent re-edits a tree it has already changed: replaying it is not a retry.
+    res = await _spawn_with_retry(argv, timeout, expanded, spawn_env, retry=agent != "build")
     res.latency_ms = int((time.monotonic() - t0) * 1000)
     res.model = model                          # provenance: the resolved model that actually ran
     if ro_before is not None and res.ok:       # read-only delegate that wrote files -> flag (no revert)
@@ -631,7 +612,7 @@ async def _run_lane_maybe_convo(lane: LaneSpec, args: dict) -> tuple[runner.RunR
     Returns (result, conversation_id) where the id is "" when no thread is in play."""
     cid = _str(args, "conversation").strip()
     if not cid:
-        # Auto-thread: run as a plain ask (no replay, no native session — nothing to resume yet),
+        # Auto-thread: run as a plain ask (no replay — nothing to resume yet),
         # then record the one exchange under a fresh id so it's resumable later without the caller
         # having had to pass conversation='new'. Cache/behaviour of the run itself are unchanged.
         if not config.convo_autothread_enabled():
@@ -650,45 +631,13 @@ async def _run_lane_maybe_convo(lane: LaneSpec, args: dict) -> tuple[runner.RunR
         return runner.RunResult(False, f"invalid conversation id: {cid!r}", "failed"), ""
     task = _str(args, "task")
     sub = dict(args)
-    # Native session continuity (claude mint / opencode capture …): the lane's own session
-    # carries the turns it has already seen, so the prompt replays only the DELTA other lanes
-    # added since. Replay stays the cross-lane source of truth (sqlite records every turn).
-    # Not under mock: nothing is spawned, so a handle committed here names a session that was
-    # never created. Turn mock off mid-thread and the next real turn resumes a ghost — with an
-    # empty replay prefix, so it has no context from either store.
-    ns = lane.native_session if config.native_sessions_enabled() and not config.mock() else None
-    sid, last_seen = "", 0
-    if ns:
-        extra, sid, last_seen = conversations.native_step(ns, cid, lane.key)
-        if extra:
-            sub["_native_argv"] = extra
-        if sid:                    # mint/resume only — a capture-first turn has no handle yet
-            sub["_native_sid"] = sid
-    prefix, trimmed = conversations.build_history_prefix(
-        cid, lane.key, config.convo_max_chars(), since_turn=last_seen)
-    # The high-water mark this prompt actually delivers. -1 when the delta was cut to fit the
-    # budget, so it can never compare equal below.
-    covered = -1 if trimmed else conversations.head_turn(cid)
+    prefix, _ = conversations.build_history_prefix(cid, lane.key, config.convo_max_chars())
     if prefix:
         sub["task"] = f"{prefix}\n{task}"
     res = await _run_lane(lane, sub)
-    if ns and not res.ok and last_seen:        # broken resume → fall back to replay next turn
-        conversations.native_drop(cid, lane.key)
     if task and res.ok:                        # only record a real exchange
         conversations.record_turn(cid, lane.key, "user", task)
-        n = conversations.record_turn(cid, lane.key, "assistant", res.output)
-        if ns:
-            # Keep the handle only if this lane's session now holds EVERY turn below n. Three
-            # ways the mark would otherwise lie: the delta was budget-trimmed, another lane
-            # appended a turn while this spawn was awaiting, or the append itself failed (n=0).
-            # A lying mark is permanent — later deltas filter on turn_number > last_turn, so the
-            # skipped turns are never sent to this lane again. Dropping the handle only costs a
-            # re-mint plus a full replay; replay remains the source of truth.
-            if n and n - 2 == covered:
-                conversations.native_commit(ns, cid, lane.key, sid,
-                                            f"{res.err}\n{res.output}", n)
-            else:
-                conversations.native_drop(cid, lane.key)
+        conversations.record_turn(cid, lane.key, "assistant", res.output)
         await _maybe_compact_convo(cid, lane)
     return res, cid
 
@@ -926,7 +875,9 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
                 max_concurrency=int(args.get("max_concurrency") or 0),
                 max_calls=int(args.get("max_calls") or 0),
                 max_credits=float(args.get("max_credits") or 0.0))
-            return orchestrate.render_batch(rid, res)
+            return orchestrate._render_results(
+                res, "batch_run", f"resume with resume_id `{rid}` (re-runs only what didn't finish)",
+                head="{i}. ")
         if bool(args.get("async")):
             job_id = jobs.start_job("batch", _batch_body, preview=f"{len(tasks)} tasks")
             return [TextContent(type="text", text=(
@@ -1108,28 +1059,14 @@ async def _run_workflow_preset(args: dict, lanes: list[LaneSpec]) -> list[TextCo
         "refine_plan": lambda: orchestrate.refine_plan(
             **common, plan_file=_str(args, "plan_file"), plan=_str(args, "plan"),
             lanes=args.get("lanes"), angles=args.get("angles"), judge_lane=judge),
-        "council_review": lambda: orchestrate.council_review(
-            **common, question=_str(args, "question") or _str(args, "task"),
-            lanes=args.get("lanes"), judge_lane=judge),
         "map_review": lambda: orchestrate.map_review(
             **common, files=args.get("files") or [], lane=_str(args, "lane") or None,
             judge_lane=judge),
         "research_verify": lambda: orchestrate.research_verify(
             **common, questions=args.get("questions") or [], lanes=args.get("lanes")),
-        # verify_repair is a sequential dependent loop (not a fan-out), so it does NOT use the
-        # batch journal — pass only what it needs, not the durable **common.
-        "verify_repair": lambda: orchestrate.verify_repair(
-            run_lane=_run_lane, resolve_lane=_resolve, default_lanes=default_lanes,
-            task=_str(args, "task"), builder_lane=_str(args, "builder_lane"),
-            verifier_lane=_str(args, "verifier_lane"), max_rounds=rounds or 3,
-            cwd=_str(args, "cwd"), cross_family=bool(args.get("cross_family"))),
         "fanout_compare": lambda: orchestrate.fanout_compare(
             **common, task=_str(args, "task"), lanes=args.get("lanes"), judge_lane=judge,
             cwd=_str(args, "cwd")),
-        "jury": lambda: orchestrate.jury(
-            **common, task=_str(args, "task"), author_lane=_str(args, "author_lane"),
-            verifier_lanes=args.get("verifier_lanes"), verifiers=int(args.get("verifiers") or 0),
-            threshold=int(args.get("threshold") or 0), cwd=_str(args, "cwd")),
         "converge": lambda: orchestrate.converge(
             **common, task=_str(args, "task"), author_lane=_str(args, "author_lane"),
             arbiter_lane=_str(args, "arbiter_lane"), peer_lanes=args.get("peer_lanes"),

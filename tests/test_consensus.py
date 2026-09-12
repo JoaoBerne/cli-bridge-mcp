@@ -1,5 +1,6 @@
 """Consensus: anonymized peer-ranking + deterministic Borda aggregation + chairman synthesis."""
 import asyncio
+import json
 
 import pytest
 
@@ -114,9 +115,8 @@ def test_consensus_dry_run_manifest_spawns_nothing(tmp_path, monkeypatch):
     out = asyncio.run(workflows.consensus(
         _panel(), {"task": "q", "context_files": [str(f)], "dry_run": True}, run_lane))
     assert spawned == []                                    # nothing sent
-    assert "Preflight data manifest" in out
-    assert "spec.md" in out and "Gemini" in out            # file + vendor listed
-    assert "nothing has been sent" in out.lower()
+    man = json.loads(out)
+    assert "spec.md" in man["files"][0]["path"] and any("Gemini" in r for r in man["recipients"])
 
 
 @pytest.fixture

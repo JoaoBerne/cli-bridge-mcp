@@ -164,7 +164,7 @@ def test_ollama_is_read_only_free_lane():
     lane = _lane("ollama")
     assert lane.cost_label == "free" and lane.is_paid is False
     assert not (lane.caps & {"effort", "agent"})          # no effort/agent — read-only, no build
-    assert lanes.family_of(lane) == "ollama"              # distinct family for jury decorrelation
+    assert lanes.family_of(lane) == "ollama"              # distinct family for converge decorrelation
 
 
 def test_ollama_spawn_env_strips_ansi():
@@ -292,31 +292,6 @@ def test_opencode_default_de_pinned_picks_any_free(monkeypatch):
         lanes._opencode_model_cache.clear()
 
 
-# ── flag-drift health check (pure part) + custom-lane probe derivation ──────────────────
-
-def test_missing_flags_pure():
-    help_text = "Usage: codex exec [--sandbox MODE] [-m MODEL]"
-    assert lanes.missing_flags(help_text, ("--sandbox", "-m")) == []
-    assert lanes.missing_flags(help_text, ("--sandbox", "--gone")) == ["--gone"]
-    assert lanes.missing_flags("", ("-m",)) == []          # no help -> can't tell -> no alarm
-    assert lanes.missing_flags(help_text, ()) == []        # nothing to probe
-
-
-def test_builtin_lanes_declare_probe_flags():
-    for key in ("claude", "gpt", "gemini", "mistral", "opencode", "grok"):
-        assert _lane(key).probe_flags, f"{key} should declare probe_flags for drift detection"
-
-
-def test_custom_lane_derives_probe_flags(tmp_path, monkeypatch):
-    cfg = tmp_path / "lanes.json"
-    cfg.write_text(json.dumps([{
-        "key": "grok2", "display": "Grok2", "bin": "grok", "model_flag": "-m",
-        "ask": ["chat", "--json", "{task}"]}]))
-    monkeypatch.setenv("CLI_BRIDGE_LANES_FILE", str(cfg))
-    lane = next(ln for ln in lanes.load_custom_lanes() if ln.key == "grok2")
-    assert lane.probe_flags == ("-m", "--json")            # model flag + dash-args from template
-
-
 def test_env_bin_override(monkeypatch):
     monkeypatch.setenv("CLI_BRIDGE_GEMINI_BIN", "agy")
     assert _lane("gemini").bin == "agy"
@@ -442,7 +417,7 @@ def test_apple_lane_is_read_only_and_on_device():
     assert lane.build_ask("Reply OK", "system", "", "build") == ["respond", "-m", "system", "Reply OK"]
     assert not (lane.caps & {"effort", "agent"})             # `fm respond` cannot write: no build mode
     assert lane.cost_label == "free" and lane.is_paid is False
-    assert lanes.family_of(lane) == "apple"                  # own family — real jury decorrelation
+    assert lanes.family_of(lane) == "apple"                  # own family — real converge decorrelation
 
 
 def test_applepcc_lane_is_opt_in_and_keyless(monkeypatch):
@@ -465,13 +440,12 @@ def test_vision_lanes_declare_a_shape_for_their_images_cap():
 
 
 def test_detect_hides_opt_in_lane_until_its_env_is_set(monkeypatch):
-    from cli_bridge import detect
     monkeypatch.setenv("CLI_BRIDGE_MOCK", "1")                  # even in dry-run mode
     monkeypatch.delenv("APPLE_FM_SERVE_URL", raising=False)
-    assert detect.is_installed(_lane("applepcc")) is False
+    assert lanes.is_installed(_lane("applepcc")) is False
     monkeypatch.setenv("APPLE_FM_SERVE_URL", "http://127.0.0.1:1976/v1")
-    assert detect.is_installed(_lane("applepcc")) is True     # url set + mock -> available
-    assert detect.is_installed(_lane("gpt")) is True            # a normal lane is unaffected
+    assert lanes.is_installed(_lane("applepcc")) is True     # url set + mock -> available
+    assert lanes.is_installed(_lane("gpt")) is True            # a normal lane is unaffected
 
 
 def test_custom_lane_reads_availability_env(tmp_path, monkeypatch):

@@ -8,7 +8,7 @@
   cli-bridge review-diff [--base REF] [--json] [--include-paid]
   cli-bridge security-review [--base REF] [--json]
   cli-bridge test-plan [--base REF] | cli-bridge premortem <task...>
-  cli-bridge stats | usage [--since 24h] [--json] | budget | jobs
+  cli-bridge stats | usage [--since 24h] [--json] | jobs
 
 Every command calls the SAME internal functions the MCP tools use, so behaviour matches. The
 output guard is an MCP-host protection and is not applied here (a human reads the terminal).
@@ -107,11 +107,6 @@ def _cmd_stats(a):
 def _cmd_usage(a):
     rep = telemetry.usage_report(since_s=server._parse_since(a.since))
     print(json.dumps(rep, indent=2) if a.json else server._render_usage(rep))
-
-
-def _cmd_budget(a):
-    rep = telemetry.usage_budget()
-    print(json.dumps(rep, indent=2) if a.json else server._render_budget(rep))
 
 
 def _cmd_jobs(a):
@@ -216,10 +211,6 @@ def build_parser() -> argparse.ArgumentParser:
     us.add_argument("--since", default="")
     us.add_argument("--json", action="store_true")
     us.set_defaults(func=_cmd_usage)
-
-    bg = sub.add_parser("budget", help="today's usage vs daily limits")
-    bg.add_argument("--json", action="store_true")
-    bg.set_defaults(func=_cmd_budget)
 
     jb = sub.add_parser("jobs", help="recent async jobs")
     jb.add_argument("--json", action="store_true")

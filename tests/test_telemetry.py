@@ -165,16 +165,6 @@ def test_usage_report_no_rate_means_no_credits():
     assert by["mistral"]["est_credits"] is None
 
 
-def test_usage_budget_counts_today_and_flags_over_limit(monkeypatch):
-    monkeypatch.setenv("CLI_BRIDGE_GPT_DAILY_LIMIT", "1")
-    _run_chars("gpt", 40, 40)
-    _run_chars("gpt", 40, 40)                     # 2 runs > limit 1
-    rep = telemetry.usage_budget()
-    by = {r["lane"]: r for r in rep["by_lane"]}
-    assert by["gpt"]["runs_today"] == 2 and by["gpt"]["daily_limit"] == 1
-    assert by["gpt"]["over_limit"] is True
-
-
 def test_usage_report_since_filter():
     _run_chars("gemini", 40, 40)
     # a 1-second window still includes the just-recorded run

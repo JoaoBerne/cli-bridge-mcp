@@ -164,13 +164,11 @@ def _meta():
 
 def test_render_markdown_groups_and_trace():
     fs = [Finding("blocker", "RCE", "x.py", 9, "evil", "sanitize", ["Gemini", "Mistral"])]
-    out = findings.render_markdown(fs, total_reviewers=2, heading="Code review", meta=_meta(),
-                                   residual_risk="be careful")
+    out = findings.render_markdown(fs, total_reviewers=2, heading="Code review", meta=_meta())
     assert "# Code review" in out
     assert "## Blocker" in out and "**RCE**" in out and "`x.py:9`" in out
     assert "consensus" in out and "Gemini, Mistral" in out
     assert "**Fix:** sanitize" in out
-    assert "## Residual risk" in out and "be careful" in out
     trace = json.loads(out.split("```json\n", 1)[1].split("\n```", 1)[0])
     assert trace["base"] == "HEAD"
 
@@ -198,12 +196,11 @@ def test_show_trace_env(monkeypatch):
 def test_result_json_schema():
     fs = [Finding("high", "Bug", "f.py", 3, "ev", "fix", ["Gemini"])]
     res = findings.result_json(fs, total_reviewers=1, tool="review_diff",
-                               summary="1 finding", meta=_meta(), residual_risk="r")
+                               summary="1 finding", meta=_meta())
     assert res["tool"] == "review_diff" and res["status"] == "ok"
     assert res["findings"][0]["id"] == "F001"
     assert res["findings"][0]["confidence"] == "single"
     assert res["findings"][0]["file"] == "f.py" and res["findings"][0]["line"] == 3
-    assert res["residual_risk"] == "r"
     json.dumps(res)   # must be serializable
 
 

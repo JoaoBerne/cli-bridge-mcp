@@ -295,8 +295,7 @@ def _cat_counts(findings: list[Finding]) -> str:
 
 
 def render_markdown(findings: list[Finding], *, total_reviewers: int, heading: str,
-                    meta: dict, recap: str = "", residual_risk: str = "",
-                    show_trace: bool = True) -> str:
+                    meta: dict, recap: str = "", show_trace: bool = True) -> str:
     lines = [f"# {heading}", ""]
     flags = (["diff truncated"] if meta.get("truncated") else []) + ["read-only"]
     lines.append(f"_Base: `{meta.get('base', 'HEAD')}` · reviewers: "
@@ -325,15 +324,13 @@ def render_markdown(findings: list[Finding], *, total_reviewers: int, heading: s
             lines.append(f"  {f.evidence}")
         if f.recommendation:
             lines.append(f"  **Fix:** {f.recommendation}")
-    if residual_risk:
-        lines.append(f"\n## Residual risk\n\n{residual_risk}")
     if show_trace:
         lines.append("\n## Trace\n```json\n" + json.dumps(meta, indent=2) + "\n```")
     return "\n".join(lines)
 
 
 def result_json(findings: list[Finding], *, total_reviewers: int, tool: str, summary: str,
-                meta: dict, residual_risk: str = "") -> dict:
+                meta: dict) -> dict:
     return {
         "tool": tool,
         "status": "ok",
@@ -354,6 +351,5 @@ def result_json(findings: list[Finding], *, total_reviewers: int, tool: str, sum
             }
             for i, f in enumerate(findings)
         ],
-        "residual_risk": residual_risk,
         "meta": meta,
     }

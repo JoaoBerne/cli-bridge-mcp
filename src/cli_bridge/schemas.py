@@ -224,11 +224,9 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
             description=("Run a ready-made multi-model workflow (a 'button') over the durable "
                          "batch substrate. refine_plan: let the council DEMOLISH your plan from "
                          "distinct angles (pass plan_file — each lane reads it, no recopy). "
-                         "council_review: N lanes answer one question, optional judge synthesises. "
                          "map_review: review many files in parallel. research_verify: answer "
-                         "questions then adversarially cross-check them. verify_repair: one lane "
-                         "builds, a DIFFERENT model reviews, repair loop until approved (cross-model "
-                         "= uncorrelated blind spots). fanout_compare: same task to N lanes, answers "
+                         "questions then adversarially cross-check them. "
+                         "fanout_compare: same task to N lanes, answers "
                          "side by side to pick/merge. converge: governance loop — an author drafts, "
                          "an independent ARBITER commits a BLIND verdict, anonymized cross-family "
                          "peers review, the arbiter adjudicates every issue WITH A REASON, then "
@@ -244,9 +242,8 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "preset": {"type": "string",
-                               "enum": ["refine_plan", "council_review", "map_review",
-                                        "research_verify", "verify_repair", "fanout_compare",
-                                        "jury", "converge", "premortem", "test_plan", "challenge"],
+                               "enum": ["refine_plan", "map_review", "research_verify",
+                                        "fanout_compare", "converge", "premortem", "test_plan", "challenge"],
                                "description": "Which workflow to run."},
                     "plan_file": {"type": "string",
                                   "description": "refine_plan: path to the plan (PREFERRED — read "
@@ -254,9 +251,8 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                     "plan": {"type": "string", "description": "refine_plan: inline plan (fallback)."},
                     "angles": {"type": "array", "items": {"type": "string"},
                                "description": "refine_plan: override the critique angles."},
-                    "question": {"type": "string", "description": "council_review: the question."},
                     "task": {**_P["task"],
-                             "description": "verify_repair / fanout_compare: the task to run. "
+                             "description": "fanout_compare / converge: the task to run. "
                                             "premortem: the plan. challenge: the claim. test_plan: "
                                             "describe the change (or omit to use the git diff)."},
                     "base": _P["base"],
@@ -276,21 +272,11 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                     "lane": {"type": "string",
                              "description": "map_review / challenge: the single lane (challenge "
                                             "default: a free one)."},
-                    "builder_lane": {"type": "string",
-                                     "description": "verify_repair: lane that produces (default: "
-                                     "first council lane)."},
-                    "verifier_lane": {"type": "string",
-                                      "description": "verify_repair: a DIFFERENT lane that reviews "
-                                      "(default: first other council lane)."},
                     "max_rounds": {"type": "integer",
-                                   "description": "verify_repair: build->verify->repair rounds "
-                                   f"(default 3); converge: review->revise rounds (default 5); "
+                                   "description": "converge: review->revise rounds (default 5); "
                                    f"max {orchestrate.VERIFY_MAX_ROUNDS}."},
-                    "cross_family": {"type": "boolean",
-                                     "description": "verify_repair: pick the verifier from a "
-                                     "DIFFERENT vendor family (default false)."},
                     "author_lane": {"type": "string",
-                                    "description": "jury / converge: lane that drafts the answer "
+                                    "description": "converge: lane that drafts the answer "
                                     "(default: first council lane)."},
                     "arbiter_lane": {"type": "string",
                                      "description": "converge: the independent decider that gives "
@@ -298,15 +284,8 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                     "peer_lanes": {"type": "array", "items": {"type": "string"},
                                    "description": "converge: explicit peer reviewer lanes (default: "
                                    "cross-family, distinct from author + arbiter)."},
-                    "verifier_lanes": {"type": "array", "items": {"type": "string"},
-                                       "description": "jury: explicit verifier lanes (default: "
-                                       "auto-picked from DIFFERENT vendor families than the author)."},
                     "verifiers": {"type": "integer",
-                                  "description": "jury verifiers / converge peers — how many "
-                                  "(default min(3, pool))."},
-                    "threshold": {"type": "integer",
-                                  "description": "jury: PASS votes needed to APPROVE (default "
-                                  "majority); short of it = REJECTED, fail-closed."},
+                                  "description": "converge: how many peers (default min(3, pool))."},
                     "cwd": _P["cwd"],
                     "judge_lane": {"type": "string",
                                    "description": "Optional: one lane dedupes + ranks the pooled "
@@ -616,25 +595,11 @@ def _tools_for(lanes: list[LaneSpec]) -> list[Tool]:
                                       "every debater prompt (the grounding contract — without "
                                       "this the council only paraphrases your brief). Relative "
                                       "paths resolve against cwd."},
-                    "allow_ungrounded": {"type": "boolean",
-                                         "description": "If the brief names local files you didn't "
-                                         "pass as context_files, the tool stops and asks for them "
-                                         "(files_required_to_continue). Set true to debate anyway "
-                                         "without reading the code. Default false."},
-                    "fact_check": {"type": "boolean",
-                                   "description": "Post-judge pass: a free lane extracts the "
-                                   "verdict's verifiable claims (commands, model tags, versions) "
-                                   "and flags what it cannot confirm. Default ON when a free "
-                                   "lane exists; false to skip."},
                     "summary_only": _P["summary_only"],
                     "allow_self_judge": {"type": "boolean",
                                          "description": "Let the judge also debate (default: "
                                          "with 3+ lanes one lane is held out to judge "
                                          "independently)."},
-                    "steelman": {"type": "boolean",
-                                 "description": "If the verdict is unanimous, one lane argues "
-                                 "the strongest case AGAINST it and the judge re-concludes "
-                                 "(anti-echo-chamber bonus round). Default false."},
                     "dry_run": _P["dry_run"],
                     "include_paid": _P["include_paid"],
                     "cwd": _P["cwd"],

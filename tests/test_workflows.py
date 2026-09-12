@@ -169,7 +169,7 @@ def test_review_diff_truncates_large_diff(monkeypatch):
 
 # ── security_review (shares the diff-review engine, security-only roles) ──
 
-def test_security_review_uses_owasp_roles_heading_and_residual():
+def test_security_review_uses_owasp_roles_heading():
     rec = []
     targets = [_lane("a", "LaneA"), _lane("b", "LaneB")]
     report = asyncio.run(workflows.security_review(
@@ -178,7 +178,6 @@ def test_security_review_uses_owasp_roles_heading_and_residual():
     assert all(c["tool"] == "security_review" and c["terse"] is False for c in rec)
     assert any("OWASP-aware" in c["task"] for c in rec)
     assert len(rec) == len(workflows.SECURITY_ROLES)   # roles only, no merge pass
-    assert "## Residual risk" in report                # security report carries residual risk
     assert "os.system" in report                       # precheck flagged the dangerous call
 
 
@@ -196,8 +195,7 @@ def test_debate_rounds_and_report():
                                           _fake_run_lane(rec)))
     assert "# Debate" in report and "## Final answer" in report and "## Final positions" in report
     assert "rounds: 1" in report
-    # 2 openers + 2 revisions + 1 judge + 1 fact-check (free lane present → default on)
-    assert len(rec) == 6
+    assert len(rec) == 5            # 2 openers + 2 revisions + 1 judge
     assert all(c["tool"] == "debate" for c in rec)
 
 
@@ -205,7 +203,7 @@ def test_debate_zero_rounds_skips_revision():
     rec = []
     targets = [_lane("a"), _lane("b")]
     asyncio.run(workflows.debate(targets, {"task": "q", "rounds": 0}, _fake_run_lane(rec)))
-    assert len(rec) == 4            # 2 openers + judge + fact-check, no revision round
+    assert len(rec) == 3            # 2 openers + judge, no revision round
 
 
 def test_debate_single_debater_no_judge():
@@ -225,7 +223,7 @@ def test_debate_caps_debaters():
     rec = []
     targets = [_lane(f"l{i}") for i in range(8)]   # 8 lanes, cap is 4
     asyncio.run(workflows.debate(targets, {"task": "q", "rounds": 0}, _fake_run_lane(rec)))
-    assert len(rec) == workflows.DEBATE_MAX_DEBATERS + 2   # 4 openers + judge + fact-check
+    assert len(rec) == workflows.DEBATE_MAX_DEBATERS + 1   # 4 openers + judge
 
 
 # ── premortem / test_plan (M7) ──

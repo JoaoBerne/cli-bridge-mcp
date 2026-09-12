@@ -236,24 +236,6 @@ def test_refine_plan_requires_a_plan():
     assert "pass plan_file" in report
 
 
-def test_council_review_judge_receives_all_outputs():
-    tel = FakeTelemetry()
-    lanes = {"a": _lane("a"), "b": _lane("b"), "j": _lane("j")}
-    captured = {}
-
-    async def rl(lane, args, *, tool="ask", terse=True):
-        if lane.key == "j":
-            captured["task"] = args.get("task")
-            return RunResult(True, "verdict", "ok", 1)
-        return RunResult(True, f"answer-{lane.key}", "ok", 1)
-
-    report = asyncio.run(orchestrate.council_review(
-        run_lane=rl, resolve_lane=lanes.get, default_lanes=[lanes["a"], lanes["b"]],
-        telemetry=tel, question="Q?", judge_lane="j"))
-    assert "answer-a" in captured["task"] and "answer-b" in captured["task"]  # judge sees all N
-    assert "Synthesis" in report
-
-
 def test_map_review_points_at_files_not_inline(tmp_path):
     f1 = tmp_path / "x.py"
     f1.write_text("secret_code_xyz\n")
@@ -281,67 +263,13 @@ def test_research_verify_two_phase():
     assert "research_verify" in report and "Verification" in report
 
 
-def test_render_batch_reports_cache_and_resume():
-    out = orchestrate.render_batch("run_x", [
+def test_render_results_counts_and_tags_cache():
+    out = orchestrate._render_results([
         {"i": 0, "task": "a", "lane": "x", "ok": True, "output": "hi", "cached": True},
-        {"i": 1, "task": "b", "lane": "y", "ok": False, "output": "[failed] boom", "cached": False}])
-    assert "1/2 ok" in out and "1 replayed" in out and "resume_id `run_x`" in out
-
-
-# ── verify_repair (G.2: cross-model build -> review -> repair loop) ────────────────────────────
-
-def test_verdict_parse_fail_closed_and_last_wins():
-    assert orchestrate._verdict("looks good\nVERDICT: APPROVED") == "APPROVED"
-    assert orchestrate._verdict("VERDICT: ISSUES") == "ISSUES"
-    assert orchestrate._verdict("no verdict at all") == "ISSUES"           # fail-closed
-    assert orchestrate._verdict("VERDICT: ISSUES\nthen\nVERDICT: APPROVED") == "APPROVED"
-
-
-def _builder_verifier(verdicts):
-    """Fake: builder lane returns code; verifier lane returns the next queued verdict."""
-    seq = list(verdicts)
-    state = {"i": 0}
-
-    async def rl(lane, args, *, tool="ask", terse=True):
-        if lane.key == "check":
-            v = seq[min(state["i"], len(seq) - 1)]
-            state["i"] += 1
-            return RunResult(True, f"review notes.\nVERDICT: {v}", "ok", 1)
-        return RunResult(True, "an attempt", "ok", 1)
-    return rl
-
-
-def test_verify_repair_approved_first_round():
-    lanes = {"build": _lane("build"), "check": _lane("check")}
-    report = asyncio.run(orchestrate.verify_repair(
-        run_lane=_builder_verifier(["APPROVED"]), resolve_lane=lanes.get,
-        default_lanes=[lanes["build"], lanes["check"]], task="write f"))
-    assert "APPROVED in 1 round" in report
-    assert "Round 1" in report and "Round 2" not in report
-
-
-def test_verify_repair_loops_then_approves():
-    lanes = {"build": _lane("build"), "check": _lane("check")}
-    report = asyncio.run(orchestrate.verify_repair(
-        run_lane=_builder_verifier(["ISSUES", "APPROVED"]), resolve_lane=lanes.get,
-        default_lanes=[lanes["build"], lanes["check"]], task="write f", max_rounds=3))
-    assert "APPROVED in 2 round" in report and "Round 2" in report
-
-
-def test_verify_repair_bounds_at_max_rounds():
-    lanes = {"build": _lane("build"), "check": _lane("check")}
-    report = asyncio.run(orchestrate.verify_repair(
-        run_lane=_builder_verifier(["ISSUES"]), resolve_lane=lanes.get,
-        default_lanes=[lanes["build"], lanes["check"]], task="x", max_rounds=2))
-    assert "NOT APPROVED after 2 round" in report
-    assert "Round 1" in report and "Round 2" in report
-
-
-def test_verify_repair_needs_a_distinct_verifier():
-    lanes = {"only": _lane("only")}
-    report = asyncio.run(orchestrate.verify_repair(
-        run_lane=_ok_run_lane(), resolve_lane=lanes.get, default_lanes=[lanes["only"]], task="x"))
-    assert "needs a SECOND lane" in report
+        {"i": 1, "task": "b", "lane": "y", "ok": False, "output": "[failed] boom", "cached": False}],
+        "batch_run", "resume_id `run_x`", head="{i}. ")
+    assert "# batch_run — 1/2 ok" in out and "resume_id `run_x`" in out
+    assert "## 1. ✅ x (cached)" in out and "## 2. ❌ y" in out
 
 
 # ── fanout_compare (G.3: same task to N lanes, side by side) ───────────────────────────────────
@@ -354,96 +282,6 @@ def test_fanout_compare_lists_each_option():
         telemetry=tel, task="fix the bug"))
     assert "fanout_compare" in report
     assert "Option 1" in report and "Option 2" in report
-
-
-# ── jury (P3: cross-vendor verification, author≠reviewer family) ──────────────────────────────
-
-def _jury_rl(votes_in_order):
-    """Fake: author returns an answer; each verifier (prompt contains 'juror') returns the next vote."""
-    seq = list(votes_in_order)
-    st = {"i": 0}
-    seen = []
-
-    async def rl(lane, args, *, tool="ask", terse=True):
-        if "juror" in args["task"]:
-            seen.append(lane.key)
-            v = seq[min(st["i"], len(seq) - 1)]
-            st["i"] += 1
-            return RunResult(True, f"review\nVERDICT: {v}", "ok", 1)
-        return RunResult(True, "the answer", "ok", 1)
-    return rl, seen
-
-
-def test_jury_approves_on_majority_pass():
-    tel = FakeTelemetry()
-    lanes = {k: _lane(k) for k in ("gpt", "gemini", "claude")}   # openai / google / anthropic
-    rl, _seen = _jury_rl(["PASS", "PASS"])
-    report = asyncio.run(orchestrate.jury(
-        run_lane=rl, resolve_lane=lanes.get, default_lanes=list(lanes.values()),
-        telemetry=tel, task="2+2?", author_lane="gpt"))
-    assert "APPROVED" in report and "DEGRADED" not in report
-
-
-def test_jury_rejects_fail_closed_on_split():
-    tel = FakeTelemetry()
-    lanes = {k: _lane(k) for k in ("gpt", "gemini", "claude")}
-    rl, _seen = _jury_rl(["PASS", "FAIL"])                       # 1/2 pass, threshold 2 -> REJECTED
-    report = asyncio.run(orchestrate.jury(
-        run_lane=rl, resolve_lane=lanes.get, default_lanes=list(lanes.values()),
-        telemetry=tel, task="q", author_lane="gpt"))
-    assert "REJECTED" in report
-
-
-def test_jury_excludes_author_family():
-    tel = FakeTelemetry()
-    lanes = {k: _lane(k) for k in ("gpt", "codex", "gemini")}    # gpt+codex both openai
-    rl, seen = _jury_rl(["PASS", "PASS", "PASS"])
-    asyncio.run(orchestrate.jury(
-        run_lane=rl, resolve_lane=lanes.get, default_lanes=list(lanes.values()),
-        telemetry=tel, task="q", author_lane="gpt"))
-    assert "codex" not in seen and "gemini" in seen             # same-family codex excluded
-
-
-def test_jury_mono_family_degrades():
-    tel = FakeTelemetry()
-    lanes = {k: _lane(k) for k in ("gpt", "codex")}             # both openai -> no cross-family
-    rl, _seen = _jury_rl(["PASS"])
-    report = asyncio.run(orchestrate.jury(
-        run_lane=rl, resolve_lane=lanes.get, default_lanes=list(lanes.values()),
-        telemetry=tel, task="q", author_lane="gpt"))
-    assert "DEGRADED" in report                                  # degraded, never an undefined verdict
-
-
-def test_jury_logs_seat_signal_as_conformity(tmp_path, monkeypatch):
-    # Two verifiers split PASS/FAIL → fail-closed REJECTED. The seat signal records each vote's
-    # CONFORMITY with the final verdict (live, no ground truth): the FAIL voter agrees with REJECTED,
-    # the PASS voter does not. It is conformity, NOT accuracy — that's the whole labelling point.
-    monkeypatch.setenv("CLI_BRIDGE_STATE_DB", str(tmp_path / "t.sqlite"))
-    telemetry._reset_for_tests()
-    lanes = {k: _lane(k) for k in ("gpt", "gemini", "claude")}    # openai / google / anthropic
-    for _ in range(2):                                            # two runs accumulate votes
-        rl, _seen = _jury_rl(["PASS", "FAIL"])
-        asyncio.run(orchestrate.jury(
-            run_lane=rl, resolve_lane=lanes.get, default_lanes=list(lanes.values()),
-            telemetry=telemetry, task="q", author_lane="gpt"))   # the REAL telemetry
-    seat = telemetry.seat_report()
-    assert seat["gemini"]["n_votes"] == 2 and seat["gemini"]["conformity_rate"] == 0.0  # PASS vs REJECTED
-    assert seat["claude"]["n_votes"] == 2 and seat["claude"]["conformity_rate"] == 1.0  # FAIL vs REJECTED
-    assert seat["gemini"]["accuracy_rate"] is None               # no eval ground truth in live runs
-    telemetry._reset_for_tests()
-
-
-def test_seat_report_separates_eval_accuracy_from_live_conformity(tmp_path, monkeypatch):
-    monkeypatch.setenv("CLI_BRIDGE_STATE_DB", str(tmp_path / "t.sqlite"))
-    telemetry._reset_for_tests()
-    telemetry.jury_put("r1", [("gpt", "fail", "REJECTED", 1)], source="live")     # conformity
-    telemetry.jury_put("r2", [("gpt", "fail", "REJECTED", 1)], source="eval")     # vs ground truth
-    telemetry.jury_put("r3", [("gpt", "pass", "REJECTED", None)], source="live")  # abstain-like, undecided
-    seat = telemetry.seat_report()
-    assert seat["gpt"]["conformity_rate"] == 1.0                 # 1 decided live vote agreed
-    assert seat["gpt"]["accuracy_rate"] == 1.0                   # separate eval lens
-    assert seat["gpt"]["n_votes"] == 3                           # all rows counted
-    telemetry._reset_for_tests()
 
 
 def test_fanout_compare_judge_recommends_one():

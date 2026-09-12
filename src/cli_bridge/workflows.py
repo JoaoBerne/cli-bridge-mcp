@@ -210,19 +210,7 @@ def prechecks(diff: str) -> list[findings.Finding]:
     return out
 
 
-def _residual_risk(meta: dict) -> str:
-    bits = ["this is a static review of the shown diff only — no runtime, dependency, or "
-            "deployment/secrets-config analysis was performed"]
-    if meta.get("truncated"):
-        bits.insert(0, "the diff was truncated, so code past the cutoff was NOT reviewed")
-    if meta.get("roles_failed"):
-        bits.insert(0, f"reviewer role(s) failed ({', '.join(meta['roles_failed'])}); their "
-                       "categories are unassessed")
-    return "Treat with care — " + "; ".join(bits) + "."
-
-
-async def _diff_review(targets, args, run_lane, *, roles_def, prompt_fn, heading, tool,
-                       residual: bool = False) -> str:
+async def _diff_review(targets, args, run_lane, *, roles_def, prompt_fn, heading, tool) -> str:
     """Shared engine for review_diff / security_review: fetch a diff, run deterministic
     prechecks, fan role-diverse reviewers across lanes in parallel (each returns JSON), then
     merge findings deterministically by file/line/title. `run_lane` is injected for tests.
@@ -302,17 +290,16 @@ async def _diff_review(targets, args, run_lane, *, roles_def, prompt_fn, heading
         "severity_filter": sev_floor or None,
         "filtered_out": filtered_out,
     }
-    residual_risk = _residual_risk(meta) if residual else ""
 
     if output_format == "json":
         summary = f"{len(merged)} finding(s); {findings.verdict(merged)}"
         return json.dumps(findings.result_json(
             merged, total_reviewers=total_reviewers, tool=tool, summary=summary,
-            meta=meta, residual_risk=residual_risk), indent=2)
+            meta=meta), indent=2)
 
     recap = council_recap(recap_rows, title="Reviewers")
     return findings.render_markdown(merged, total_reviewers=total_reviewers, heading=heading,
-                                    meta=meta, recap=recap, residual_risk=residual_risk,
+                                    meta=meta, recap=recap,
                                     show_trace=config.show_trace())
 
 
@@ -327,8 +314,7 @@ async def security_review(targets: list[LaneSpec], args: dict, run_lane) -> str:
     """OWASP-aware security review of a git diff — security-only role-diverse reviewers."""
     return await _diff_review(targets, args, run_lane, roles_def=SECURITY_ROLES,
                               prompt_fn=security_prompt,
-                              heading="Security review (OWASP-aware)", tool="security_review",
-                              residual=True)
+                              heading="Security review (OWASP-aware)", tool="security_review")
 
 
 # ── grounding contract: an explicit context pack beats a cwd nobody reads ────────────────
@@ -390,113 +376,14 @@ def build_context_pack(context_files, cwd: str = "") -> tuple[str, list[str]]:
 
 
 def data_manifest(targets, question: str, context_files, cwd: str = "") -> str:
-    """PREFLIGHT data manifest (M11-2): show EXACTLY what would leave this machine and to which
-    vendors BEFORE spawning anything — the cheapest data-governance control. Pure (only reads the
-    listed files). `targets` = the lanes that would be queried (each = a separate vendor)."""
-    rows, notes = _read_context_files(context_files, cwd)
-    brief_chars = len(question or "")
-    files_chars = sum(r["chars"] for r in rows)
-    total = brief_chars + files_chars
-    est_tok = max(1, total // config.CHARS_PER_TOKEN)
-    lines = ["# Preflight data manifest — nothing has been sent", "",
-             "_What WOULD be sent to each vendor if you run this. No CLI was spawned._\n",
-             f"**Recipients ({len(targets)} vendor process(es), each gets the same payload):**"]
-    for ln in targets:
-        lines.append(f"- {ln.display} (`{ln.bin}`) — {ln.cost_label}")
-    lines.append(f"\n**Payload:** brief {brief_chars} chars + {len(rows)} context file(s) "
-                 f"{files_chars} chars = **{total} chars (~{est_tok} tok)** per vendor.")
-    if rows:
-        lines.append("\n| context file | chars | note |\n|---|---|---|")
-        for r in rows:
-            note = r["error"] or ("truncated" if r["truncated"] else "")
-            lines.append(f"| {r['path']} | {r['chars']} | {note} |")
-    for n in notes:
-        lines.append(f"\n⚠️ {n}")
-    lines.append("\n_Re-run without `dry_run` to send. Drop a file from `context_files` to "
-                 "withhold it._")
-    return "\n".join(lines)
+    """PREFLIGHT (dry_run): exactly what WOULD leave this machine, and to which vendors — nothing
+    is spawned. Pure (only reads the listed files)."""
+    rows, _notes = _read_context_files(context_files, cwd)
+    return json.dumps({"recipients": [f"{ln.display} ({ln.bin}, {ln.cost_label})" for ln in targets],
+                       "brief_chars": len(question or ""), "files": rows}, indent=2)
 
 
-# ── files_required_to_continue: don't reason from a paraphrase — ask for the named code ───────
-# Forced-pacing, adapted (pal-mcp-server's "files_required_to_continue") to cli-bridge's actual
-# failure mode. cli-bridge delegates INVESTIGATION to the council, so it doesn't need pal's
-# host-must-investigate state machine; but the same instinct applies — when a brief NAMES source
-# files that exist here yet the host didn't pass them as context_files, the council would opine on
-# the host's paraphrase, not the code. So the tool returns a structured request for the specific
-# files instead of answering blind. Conservative (fires only on real, readable, un-provided file
-# paths) and overridable (allow_ungrounded=true).
-_FILE_TOKEN_RE = re.compile(r"(?<![\w/])([\w./-]+\.[A-Za-z][A-Za-z0-9]{0,4})\b")
-_CODE_EXTS = frozenset((
-    "py", "js", "ts", "tsx", "jsx", "go", "rs", "java", "rb", "php", "c", "h", "cpp", "cc",
-    "hpp", "cs", "swift", "kt", "scala", "sh", "bash", "sql", "html", "css", "json", "yaml",
-    "yml", "toml", "md", "txt", "cfg", "ini", "xml", "vue", "svelte", "lua", "jl", "ex", "exs"))
-
-
-def detect_referenced_files(question: str) -> list[str]:
-    """File-path-looking tokens in a brief (foo.py, src/bar.ts, a/b.json), dedup + order kept.
-    Filters non-files (version numbers like 1.0, ellipses) by requiring a known code extension OR
-    a path separator. Pure."""
-    out, seen = [], set()
-    for m in _FILE_TOKEN_RE.finditer(question or ""):
-        tok = m.group(1).strip(".")
-        ext = tok.rsplit(".", 1)[-1].lower() if "." in tok else ""
-        if ext not in _CODE_EXTS and "/" not in tok:
-            continue
-        if tok and tok not in seen:
-            seen.add(tok)
-            out.append(tok)
-    return out
-
-
-def files_required(question: str, context_files, cwd: str = "", *,
-                   allow_ungrounded: bool = False) -> str:
-    """If the brief names readable files here that weren't passed as context_files, return a
-    'files_required_to_continue' block asking for them; else "" (proceed). Per-file: a brief that
-    named 3 files but passed 1 is asked for the other 2. Pure-ish (stat only)."""
-    if allow_ungrounded:
-        return ""
-    provided = {str(p).strip() for p in (context_files or []) if str(p).strip()}
-    provided_names = {os.path.basename(p) for p in provided}
-    missing = []
-    for tok in detect_referenced_files(question):
-        if tok in provided or os.path.basename(tok) in provided_names:
-            continue
-        full = tok if os.path.isabs(tok) else os.path.join(cwd or ".", tok)
-        if os.path.isfile(full):
-            missing.append(tok)
-    if not missing:
-        return ""
-    miss = missing[:CONTEXT_MAX_FILES]
-    arr = ", ".join(f'"{p}"' for p in miss)
-    return (
-        "[files_required_to_continue]\n"
-        f'{{"status": "files_required_to_continue", "files": [{arr}]}}\n\n'
-        f"The brief names {len(missing)} file(s) that exist here but weren't provided as "
-        "grounding, so the council would work from your paraphrase, not the real code. Re-run "
-        f"with:\n  context_files=[{arr}]\n"
-        "or pass allow_ungrounded=true to proceed without them (the council won't read the code).")
-
-
-# ── brief linter: thin brief → thin consensus, with the same look of authority ───────────
-_BRIEF_MIN_WORDS = 40
-_OPTIONS_RE = re.compile(r"(?im)(?:^|[\s:])[A-H][).]\s|(?:^|\s)\d+[).]\s|\boptions?\s*:")
-_CRITERIA_RE = re.compile(r"(?i)crit[eè]r|criteria|weigh|trade-?off|constraint|priorit")
-
-
-def brief_lint(task: str) -> list[str]:
-    """Non-blocking warnings when a debate brief looks too thin to anchor a council. The tool
-    can't fix a lazy brief, but it can refuse to let one masquerade as a solid one. Pure."""
-    warns: list[str] = []
-    words = len(task.split())
-    if words < _BRIEF_MIN_WORDS:
-        warns.append(f"short brief ({words} words) — add verified facts and constraints")
-    if not _OPTIONS_RE.search(task):
-        warns.append("no enumerated options (A) / B) / 1.) — debaters will invent the "
-                     "option space")
-    if not _CRITERIA_RE.search(task):
-        warns.append("no decision criteria — say how the options should be weighed")
-    return warns
-
+_UNSEEN_FILES_RULE = "If the brief names files you cannot see, say so and stop."
 
 # Provenance tags make the echo chamber VISIBLE: a council that only restates the brief now
 # says so in its own output.
@@ -504,26 +391,6 @@ _PROVENANCE_RULE = (
     "Tag each substantive claim with its provenance: [brief] (asserted by the brief), "
     "[context] (seen in the context pack), [own-knowledge] (from your training — may be "
     "stale), or [verified] (you actually checked it here).")
-
-
-def fact_check_prompt(verdict: str) -> str:
-    return (
-        "You are a fact-checker. From the verdict/plan below, extract every VERIFIABLE claim — "
-        "shell commands, model tags/ids, package/API names, version numbers, URLs, flags. For "
-        "each, mark it CONFIRMED (you know it exists and is correct) or UNVERIFIED (you cannot "
-        "confirm it). Never guess a confirmation — 'unverified' is a valid, useful answer. End "
-        "with a line 'UNVERIFIED:' listing everything not confirmed, or 'UNVERIFIED: none'.\n\n"
-        f"VERDICT/PLAN:\n{verdict}")
-
-
-def steelman_prompt(question: str, transcript: str, verdict: str) -> str:
-    return (
-        "This debate converged UNANIMOUSLY on the verdict below. Fast unanimity is suspect by "
-        "construction, so your job is to STEELMAN the rejected (or uncovered) option: make the "
-        "strongest honest case AGAINST the verdict — risks, conditions under which it is wrong, "
-        "what every debater may have missed. Do not manufacture objections; if the verdict "
-        "truly survives your best counter-case, concede that at the end.\n\n"
-        f"QUESTION:\n{question}\n\nDEBATE:\n{transcript}\n\nVERDICT:\n{verdict}")
 
 
 # ── debate: lanes answer, see each other, revise over bounded rounds, a judge concludes ──
@@ -546,7 +413,8 @@ def _stance_preamble(stance: str) -> str:
 
 
 def debate_open_prompt(question: str) -> str:
-    return f"Answer this question and argue your reasoning concisely:\n\n{question}"
+    return (f"Answer this question and argue your reasoning concisely. {_UNSEEN_FILES_RULE}"
+            f"\n\n{question}")
 
 
 def debate_revise_prompt(question: str, transcript: str) -> str:
@@ -561,7 +429,8 @@ def debate_judge_prompt(question: str, transcript: str) -> str:
     return (
         "Several AIs debated the question below, shown under neutral labels. Produce the best FINAL "
         "answer: state the consensus, flag any remaining disagreement (say which DEBATER by label), "
-        "and give the most reliable conclusion. Refer to debaters ONLY by their labels; do NOT "
+        "flag any claim you cannot verify, steelman the losing option before concluding, and give "
+        "the most reliable conclusion. Refer to debaters ONLY by their labels; do NOT "
         "guess or name the underlying vendor/model. Be precise. Start your reply with EXACTLY one "
         "line — 'UNANIMOUS: yes' if every debater reached the same conclusion, else 'UNANIMOUS: no' "
         f"— then the answer.\n\nQUESTION:\n{question}\n\nDEBATE:\n{transcript}")
@@ -647,20 +516,6 @@ def _vote_tally(positions: dict) -> dict:
     }
 
 
-def _convergence_state(sim: float | None) -> str:
-    """3-state convergence ladder from the latest round's answer similarity. COSMETIC label only —
-    the real early-stop threshold is DEBATE_CONVERGENCE; this just narrates where the debate landed.
-    Converged ≥0.85 · Refining 0.4–0.85 · Diverging <0.4 (Impasse dropped — a flat Diverging covers
-    it)."""
-    if sim is None:
-        return "n/a"
-    if sim >= 0.85:
-        return "converged"
-    if sim >= 0.4:
-        return "refining"
-    return "diverging"
-
-
 def _round_similarity(prev: dict, cur: dict) -> float | None:
     """Mean lexical similarity of each debater's answer vs the previous round (stdlib difflib).
     High = answers stabilised. None when there is no comparable prior answer."""
@@ -673,9 +528,8 @@ def _round_similarity(prev: dict, cur: dict) -> float | None:
 async def debate(targets: list[LaneSpec], args: dict, run_lane, progress=None) -> str:
     """Multi-lane debate: each lane answers, then sees the others and revises over a bounded
     number of rounds, then a judge writes the final conclusion. Hardened from field use:
-    grounding via context_files, an independent judge, a fact-check pass on the verdict, an
-    optional anti-unanimity steelman round, and provenance-tagged claims. `run_lane` injected
-    for tests."""
+    grounding via context_files, an independent judge, and provenance-tagged claims. `run_lane`
+    injected for tests."""
     question = (args.get("task") or args.get("question") or "").strip()
     if not question:
         return "[error] task (the debate question) is required"
@@ -690,17 +544,11 @@ async def debate(targets: list[LaneSpec], args: dict, run_lane, progress=None) -
     timeout = _timeout(args.get("timeout_s"))
     adversarial = bool(args.get("adversarial"))
     summary_only = bool(args.get("summary_only"))
-    steelman = bool(args.get("steelman"))
     cwd = (args.get("cwd") or "").strip()
     if bool(args.get("dry_run")):              # preflight: show what would be sent, spawn nothing
         return data_manifest(targets[:DEBATE_MAX_DEBATERS], question,
                              args.get("context_files"), cwd)
-    gate = files_required(question, args.get("context_files"), cwd,
-                          allow_ungrounded=bool(args.get("allow_ungrounded")))
-    if gate:                                    # brief names real local files but didn't ground them
-        return gate
     pack, pack_notes = build_context_pack(args.get("context_files"), cwd)
-    lint = brief_lint(question)
     _stance_cycle = ("for", "against", "neutral")
 
     # Judge ∉ debaters whenever the pool allows it (a judge grading a debate it argued in is
@@ -751,7 +599,6 @@ async def debate(targets: list[LaneSpec], args: dict, run_lane, progress=None) -
     # debaters vote to stop or answers converge — the round count is a ceiling, not a quota.
     rounds_run = 0
     early_stop = ""
-    last_sim: float | None = None
     for _ in range(rounds):
         if len(positions) < 2:
             break                         # nothing to debate against
@@ -773,8 +620,6 @@ async def debate(targets: list[LaneSpec], args: dict, run_lane, progress=None) -
             early_stop = "all debaters voted to stop"
             break
         sim = _round_similarity(prev, positions)
-        if sim is not None:
-            last_sim = sim
         if sim is not None and sim >= DEBATE_CONVERGENCE:
             early_stop = f"answers converged ({sim:.0%} similar to prior round)"
             break
@@ -795,18 +640,14 @@ async def debate(targets: list[LaneSpec], args: dict, run_lane, progress=None) -
         meta["votes"] = f"{tally['continue_yes']} continue / {tally['continue_no']} stop"
         if tally["mean_confidence"] is not None:
             meta["mean_confidence"] = tally["mean_confidence"]
-    if rounds_run:
-        meta["convergence"] = _convergence_state(last_sim)   # 3-state ladder (cosmetic label)
     if early_stop:
         meta["early_stop"] = early_stop
     if pack_notes:
         meta["context_notes"] = pack_notes
 
-    judged_ok = False
     if len(final_positions) >= 2:
         jr = await run_lane(judge, {"task": debate_judge_prompt(question, transcript),
                                     "timeout_s": timeout}, tool="debate")
-        judged_ok = jr.ok
         final = jr.output if jr.ok else transcript
         meta["judge"] = judge.display if jr.ok else f"FAILED ({jr.kind}) — showing raw positions"
         if self_judged and jr.ok:
@@ -815,50 +656,15 @@ async def debate(targets: list[LaneSpec], args: dict, run_lane, progress=None) -
         final = final_positions[0][1]
         meta["judge"] = "n/a (single debater)"
 
-    # Anti-unanimity: parse the judge's marker; on unanimity (opt-in steelman) ONE lane argues
-    # the strongest case AGAINST the verdict and the judge re-concludes. Fast 4-0s get pushback.
+    # The judge's UNANIMOUS marker is trace metadata; it is stripped from the displayed answer.
     m = re.search(r"(?im)^\s*UNANIMOUS:\s*(yes|no)\b", final)
     meta["unanimous"] = (m.group(1).lower() == "yes") if m else None
-    if judged_ok and steelman and meta["unanimous"]:
-        contrarian = debaters[-1]
-        sr = await run_lane(contrarian, {
-            "task": steelman_prompt(question, transcript, final), "timeout_s": timeout},
-            tool="debate")
-        if sr.ok:
-            sm_label = labels.get(contrarian.display, contrarian.display)
-            transcript += f"\n\n### STEELMAN — {sm_label} (bonus round)\n{sr.output}"
-            jr2 = await run_lane(judge, {"task": debate_judge_prompt(question, transcript),
-                                         "timeout_s": timeout}, tool="debate")
-            if jr2.ok:
-                final = jr2.output
-            meta["steelman_round"] = contrarian.display + ("" if jr2.ok else
-                                                           " (re-judge failed — verdict kept)")
     final_display = re.sub(r"(?im)^\s*UNANIMOUS:\s*(yes|no)\s*\n?", "", final, count=1)
 
-    # Fact-check pass: the verdict's verifiable claims (commands, model tags, versions, APIs)
-    # go to a free lane with licence to say "cannot confirm" — catches a judge-approved
-    # hallucination before the host copy-pastes it. Default ON when a free lane exists.
-    fact_section = ""
-    fc_arg = args.get("fact_check")
-    free_pool = [ln for ln in targets if not ln.is_paid and not ln.is_limited]
-    if (bool(fc_arg) if fc_arg is not None else bool(free_pool)) and judged_ok:
-        checker = next((ln for ln in free_pool if ln.key != judge.key),
-                       free_pool[0] if free_pool else targets[0])
-        fr = await run_lane(checker, {"task": fact_check_prompt(final_display),
-                                      "timeout_s": timeout}, tool="debate")
-        if fr.ok:
-            fact_section = f"\n## ⚠️ Fact-check ({checker.display})\n\n{fr.output.strip()}"
-            meta["fact_check"] = checker.display
-        else:
-            meta["fact_check"] = f"FAILED ({fr.kind})"
-    else:
-        meta["fact_check"] = "off"
     if progress:
         await progress(2, 2, "final")
 
     lines = ["# Debate", ""]
-    if lint:
-        lines.append("> ⚠️ _Thin brief → thin consensus:_ " + "; ".join(lint) + "\n")
     lines.append(f"_Debaters: {', '.join(meta['debaters'])} · rounds: {rounds_run} · "
                  f"judge: {meta['judge']}_\n")
     # The judge/peers saw neutral labels (anti prestige-bias); the legend lets the reader decode any
@@ -867,10 +673,9 @@ async def debate(targets: list[LaneSpec], args: dict, run_lane, progress=None) -
         legend = ", ".join(f"{labels[d]} = {d}" for d, _ in final_positions if d in labels)
         if legend:
             lines.append(f"_Labels (judge saw these, not vendor names): {legend}_\n")
-    if "votes" in meta or early_stop or "convergence" in meta:
+    if "votes" in meta or early_stop:
         bits = ([f"vote: {meta['votes']}"] if "votes" in meta else []) \
             + ([f"mean confidence {meta['mean_confidence']}"] if "mean_confidence" in meta else []) \
-            + ([f"convergence: {meta['convergence']}"] if "convergence" in meta else []) \
             + ([f"early stop: {early_stop}"] if early_stop else [])
         lines.append("_" + " · ".join(bits) + "_\n")
     lines.append(council_recap([(d, True, 0, t) for d, t in clean_positions],
@@ -878,8 +683,6 @@ async def debate(targets: list[LaneSpec], args: dict, run_lane, progress=None) -
     lines.append("")
     lines.append("## Final answer\n")
     lines.append(final_display.strip() or "_(judge produced no output)_")
-    if fact_section:
-        lines.append(fact_section)
     if not summary_only:
         lines.append("\n## Full positions\n")
         for display, text in clean_positions:
@@ -940,7 +743,8 @@ _LABELS = "ABCDEFGH"
 
 
 def consensus_answer_prompt(question: str) -> str:
-    return f"Answer the question as well as you can — concise, concrete, self-contained:\n\n{question}"
+    return (f"Answer the question as well as you can — concise, concrete, self-contained. "
+            f"{_UNSEEN_FILES_RULE}\n\n{question}")
 
 
 def consensus_rank_prompt(question: str, labeled: list[tuple[str, str]]) -> str:
@@ -1010,10 +814,6 @@ async def consensus(targets: list[LaneSpec], args: dict, run_lane, progress=None
     cwd = (args.get("cwd") or "").strip()
     if bool(args.get("dry_run")):              # preflight manifest — spawn nothing
         return data_manifest(panel, question, args.get("context_files"), cwd)
-    gate = files_required(question, args.get("context_files"), cwd,
-                          allow_ungrounded=bool(args.get("allow_ungrounded")))
-    if gate:                                    # brief names real local files but didn't ground them
-        return gate
     # Selection beats synthesis: judge-SELECTING the single best answer wins; blending it away
     # ("chairman synthesis") destroys the variance that makes a council useful (arXiv 2603.20324,
     # g=3.86). So the DEFAULT returns the Borda winner verbatim + the vote table; the chairman
