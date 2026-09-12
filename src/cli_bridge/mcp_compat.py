@@ -81,7 +81,7 @@ def register(
         server.add_request_handler(method, params_type, handler)
 
 
-def from_wire[M](model: Callable[..., _M], **fields: Any) -> _M:
+def from_wire[M](model: Callable[..., M], **fields: Any) -> M:
     """Build an SDK model from its WIRE field names (`inputSchema`, `mimeType`, `isError`, …).
 
     Both majors accept those at runtime — 1.x because they ARE the field names, 2.x because they
