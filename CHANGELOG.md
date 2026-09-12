@@ -4,7 +4,9 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project aims for
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## 0.3.0 — unreleased
+## 0.3.0 — 2026-09-12
+
+0.2.0 was never tagged or published: everything since 0.1.5 ships here.
 
 - Requires Python 3.12+ (was 3.10; 3.10 reaches end of life in October 2026). CI runs 3.12, 3.13 and 3.14.
 - Marketing copy removed: banner, badges wall, `docs/COMPARISON.md`, and the MCP instructions text is now a plain tool list.
