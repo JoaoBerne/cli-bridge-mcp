@@ -104,12 +104,17 @@ def test_cancel_unknown_and_finished():
 # ── persistence / restart ──────────────────────────────────────────────────────────────────
 
 def test_restart_marks_running_interrupted():
-    # simulate a previous process that left a running row, then "restart" (clear memory)
+    # a dead process left a running row; a live one (this process) still owns another
     telemetry.job_put("job_stale", "ask_all", jobs.RUNNING, "old task")
+    conn = telemetry._connect()
+    conn.execute("UPDATE jobs SET pid=? WHERE id='job_stale'", (2 ** 30,))   # no such pid
+    conn.commit()
+    telemetry.job_put("job_live", "ask_all", jobs.RUNNING, "still running elsewhere")
     jobs._reset_for_tests()                           # memory gone, like a fresh process
     n = jobs.mark_interrupted_on_startup()
     assert n == 1
     assert jobs.status("job_stale")["status"] == jobs.INTERRUPTED
+    assert jobs.status("job_live")["status"] == jobs.RUNNING   # the CLI / a 2nd server must not lie
 
 
 def test_unknown_job():

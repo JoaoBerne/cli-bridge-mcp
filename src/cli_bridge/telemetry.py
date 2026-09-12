@@ -15,6 +15,7 @@ import contextlib
 import json
 import os
 import sqlite3
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -142,6 +143,7 @@ CREATE INDEX IF NOT EXISTS idx_lane_ratings ON lane_ratings(lane, mode);
 _MIGRATIONS = (
     ("runs", "input_chars", "INTEGER NOT NULL DEFAULT 0"),
     ("lane_state", "consecutive_empties", "INTEGER NOT NULL DEFAULT 0"),
+    ("jobs", "pid", "INTEGER NOT NULL DEFAULT 0"),   # owning process, so a restart only flips ITS dead rows
 )
 
 
@@ -531,11 +533,11 @@ def job_put(job_id: str, kind: str, status: str, task_preview: str,
         with _LOCK:
             conn.execute(
                 "INSERT INTO jobs (id, kind, status, task_preview, result_path, error, "
-                "created_at, updated_at) VALUES (?,?,?,?,?,?,?,?) "
+                "created_at, updated_at, pid) VALUES (?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT(id) DO UPDATE SET status=excluded.status, "
                 "result_path=excluded.result_path, error=excluded.error, "
                 "updated_at=excluded.updated_at",
-                (job_id, kind, status, task_preview, result_path, error, _now(), _now()))
+                (job_id, kind, status, task_preview, result_path, error, _now(), _now(), os.getpid()))
             conn.commit()
     except sqlite3.Error:
         pass
@@ -610,19 +612,37 @@ def jobs_recent(limit: int = 20) -> list[dict]:
             for r in rows]
 
 
+def _pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if pid == os.getpid() or sys.platform == "win32":
+        return True   # ponytail: no liveness probe on Windows -> never flip a row there
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 def jobs_mark_running_interrupted() -> int:
-    """On server start, any row still 'running' is from a dead process — its spawned CLIs are
-    gone, so flip it to 'interrupted' (v1 does not resume work across restarts)."""
+    """Flip 'running' rows whose OWNING process is gone to 'interrupted' (v1 does not resume
+    work across restarts). Rows owned by a live process are left alone: the CLI and a second
+    server share this DB with a running server and must not lie about its jobs."""
     conn = _connect()
     if conn is None:
         return 0
     try:
         with _LOCK:
-            cur = conn.execute(
-                "UPDATE jobs SET status='interrupted', updated_at=? WHERE status='running'",
-                (_now(),))
-            conn.commit()
-            return cur.rowcount
+            rows = conn.execute("SELECT id, pid FROM jobs WHERE status='running'").fetchall()
+            dead = [jid for jid, pid in rows if not _pid_alive(int(pid or 0))]
+            if dead:
+                now = _now()
+                conn.executemany("UPDATE jobs SET status='interrupted', updated_at=? WHERE id=?",
+                                 [(now, jid) for jid in dead])
+                conn.commit()
+            return len(dead)
     except sqlite3.Error:
         return 0
 
