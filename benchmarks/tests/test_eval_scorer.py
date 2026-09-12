@@ -12,14 +12,14 @@ import asyncio
 import json
 
 import pytest
-
-from cli_bridge import eval as ev
 from cli_bridge import findings, lanes, runner
+
+import eval as ev  # benchmarks/eval.py (conftest puts benchmarks/ on sys.path)
 
 
 def _fixtures():
     fx = ev.load_evalset(ev.evalset_dir())
-    assert fx, "eval corpus is empty — tests/fixtures/evalset is missing"
+    assert fx, "eval corpus is empty — benchmarks/fixtures/evalset is missing"
     return fx
 
 

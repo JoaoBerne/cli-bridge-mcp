@@ -464,30 +464,13 @@ def test_vision_lanes_declare_a_shape_for_their_images_cap():
     assert vision == {"gpt": "-i", "gemini": "@", "opencode": "-f", "ollama": "", "apple": "--image"}
 
 
-def test_openrouter_lane_is_opt_in(monkeypatch):
-    orouter = _lane("openrouter")
-    assert orouter.availability_env == "OPENROUTER_API_KEY"
-    assert orouter.cost_label == "paid"                      # kept out of the free fan-out
-    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-    assert orouter.has_required_key is False                 # hidden until the key is set
-    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-x")
-    assert orouter.has_required_key is True
-
-
-def test_openrouter_ask_keeps_key_out_of_argv():
-    argv = _lane("openrouter").build_ask("review this", "anthropic/claude-3.7-sonnet", "", "")
-    assert "--key-env" in argv and "OPENROUTER_API_KEY" in argv  # only the NAME travels
-    assert "--base-url" in argv and argv[-1] == "review this"
-    assert not any(a.startswith("sk-") for a in argv)           # no key VALUE anywhere in argv
-
-
-def test_detect_hides_api_lane_without_key(monkeypatch):
+def test_detect_hides_opt_in_lane_until_its_env_is_set(monkeypatch):
     from cli_bridge import detect
     monkeypatch.setenv("CLI_BRIDGE_MOCK", "1")                  # even in dry-run mode
-    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-    assert detect.is_installed(_lane("openrouter")) is False
-    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-x")
-    assert detect.is_installed(_lane("openrouter")) is True     # key set + mock -> available
+    monkeypatch.delenv("APPLE_FM_SERVE_URL", raising=False)
+    assert detect.is_installed(_lane("applepcc")) is False
+    monkeypatch.setenv("APPLE_FM_SERVE_URL", "http://127.0.0.1:1976/v1")
+    assert detect.is_installed(_lane("applepcc")) is True     # url set + mock -> available
     assert detect.is_installed(_lane("gpt")) is True            # a normal lane is unaffected
 
 

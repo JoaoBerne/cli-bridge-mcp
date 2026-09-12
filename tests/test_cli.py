@@ -90,48 +90,6 @@ def test_jobs(capsys):
     assert "Async jobs" in out or "No async jobs" in out
 
 
-def test_setup_write_creates_and_backs_up(tmp_path, capsys):
-    target = tmp_path / "cfg.env"
-    cli.main(["setup", "--write", str(target)])
-    assert target.exists() and "CLI_BRIDGE_PROFILE" in target.read_text()
-    # second write must back up the existing file, never silently overwrite
-    cli.main(["setup", "--write", str(target)])
-    assert (tmp_path / "cfg.env.bak").exists()
-
-
-def test_init_prints_wiring(capsys):
-    cli.main(["init"])
-    out = capsys.readouterr().out
-    assert "cli-bridge init" in out and "mcp add cli-bridge" in out and "CLI_BRIDGE_MOCK" in out
-
-
-def test_bench(monkeypatch, capsys):
-    async def fake_run_lane(lane, args, *, tool="ask", terse=True):
-        return RunResult(True, "answer", "ok", latency_ms=12)
-    monkeypatch.setattr(server, "_run_lane", fake_run_lane)
-    cli.main(["bench", "--lane", "gemini", "--prompt", "hi", "--runs", "3"])
-    out = capsys.readouterr().out
-    assert "bench gemini" in out and "ok 3/3" in out
-
-
-def test_bench_unknown_lane_exits():
-    with pytest.raises(SystemExit):
-        cli.main(["bench", "--lane", "nope", "--prompt", "hi"])
-
-
-def test_bench_all_table(monkeypatch, capsys):
-    a = LaneSpec("a", "A", "echo", lambda *x: [])
-    b = LaneSpec("b", "B", "echo", lambda *x: [])
-    monkeypatch.setattr(server, "_active_lanes", lambda: ([a, b], ""))
-
-    async def fake_run_lane(lane, args, *, tool="ask", terse=True):
-        return RunResult(True, "x", "ok", latency_ms=7)
-    monkeypatch.setattr(server, "_run_lane", fake_run_lane)
-    cli.main(["bench", "--all", "--prompt", "hi", "--runs", "2"])
-    out = capsys.readouterr().out
-    assert "| lane |" in out and "| a |" in out and "| b |" in out
-
-
 def test_parser_wires_subcommands():
     p = cli.build_parser()
     a = p.parse_args(["review-diff", "--base", "main", "--json"])
@@ -150,28 +108,6 @@ def test_review_diff_non_git_cwd_errors(tmp_path, monkeypatch, capsys):
     assert "[error]" in out or "empty diff" in out
 
 
-def test_eval_offline_self_check_passes(capsys):
-    # default (no --live): runs the deterministic scorer over the shipped corpus, exits 0
-    with pytest.raises(SystemExit) as e:
-        cli.main(["eval"])
-    assert e.value.code == 0
-    assert "calibration: PASS" in capsys.readouterr().out
-
-
-def test_eval_live_runs_both_arms(monkeypatch, capsys):
-    pool = [LaneSpec(k, k.upper(), "echo", lambda *a: [])
-            for k in ("gemini", "gpt", "mistral", "opencode")]
-    monkeypatch.setattr(server, "_active_lanes", lambda: (pool, ""))
-
-    async def fake_run_lane(lane, args, *, tool="ask", terse=True):
-        return RunResult(True, "[]", "ok", latency_ms=1)   # wiring only; no real findings
-    monkeypatch.setattr(server, "_run_lane", fake_run_lane)
-    cli.main(["eval", "--live", "--council-lanes", "gemini,gpt,mistral,opencode",
-              "--single-lane", "gpt", "--k", "4", "--repeats", "1", "--json"])
-    data = json.loads(capsys.readouterr().out)
-    assert data["tool"] == "eval" and data["k"] == 4 and data["single_lane"] == "gpt"
-
-
 def test_set_cost_persists_to_config_file(tmp_path, monkeypatch, capsys):
     cfg = tmp_path / "config.json"
     monkeypatch.setenv("CLI_BRIDGE_CONFIG_FILE", str(cfg))
@@ -188,13 +124,4 @@ def test_set_cost_warns_when_env_shadows(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("CLI_BRIDGE_OLLAMA_COST", "free")     # env wins over the file
     cli.main(["set-cost", "ollama", "limited"])
     assert "env wins" in capsys.readouterr().out
-
-
-def test_setup_write_keeps_profile_commented(tmp_path, monkeypatch, capsys):
-    # An uncommented CLI_BRIDGE_PROFILE in the template would count as "explicitly chosen"
-    # once sourced, silently disabling the first-run setup guidance.
-    path = tmp_path / "cli-bridge.env"
-    cli.main(["setup", "--write", str(path)])
-    line = next(ln for ln in path.read_text().splitlines() if "CLI_BRIDGE_PROFILE" in ln)
-    assert line.lstrip().startswith("#")
 

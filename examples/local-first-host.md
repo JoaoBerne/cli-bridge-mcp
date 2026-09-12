@@ -83,3 +83,15 @@ list: `CLI_BRIDGE_OLLAMA_ENABLED=false`.
 - **Decorrelation note.** Escalating to a *different vendor* (cloud) is what buys you a real second
   opinion; a second *local runtime of the same open weights* (lms/mlx/llama.cpp) would just agree
   with itself. See the local lane recipes in this folder.
+
+## Local runtimes as lanes
+
+[`local-runtime.lane.json`](local-runtime.lane.json) ships all three as zero-code lanes
+(`CLI_BRIDGE_LANES_FILE=examples/local-runtime.lane.json`); a lane auto-hides when its binary is
+missing. The decorrelation note above applies to every one of them.
+
+| runtime | bin | ask argv | gotcha |
+|---|---|---|---|
+| LM Studio | `lms` | `chat <model> -p <task> -y` | model is POSITIONAL: set `default_model` / `CLI_BRIDGE_LMSTUDIO_MODEL` to a chat model you pulled (`lms get <model>`); first call may print "Waking up LM Studio service…" |
+| MLX | `mlx_lm.generate` | `--model <repo-or-path> --prompt <task>` | Apple Silicon only (`pip install mlx-lm`); model = HF repo (auto-downloaded) or local path, passable per call |
+| llama.cpp | `llama-cli` | `-m <model.gguf> -p <task> -no-cnv -n 512` | model = path to a .gguf (`-hf <user/repo>` pulls from HF instead; edit the template); stdout re-echoes the prompt, perf stats land on stderr (`--simple-io` helps) |

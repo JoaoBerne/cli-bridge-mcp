@@ -1,0 +1,49 @@
+[
+  {
+    "//": "Local open-weight runtimes as lanes — point CLI_BRIDGE_LANES_FILE at this file (or merge it).",
+    "//1": "ban-safe like every lane: cli-bridge just spawns the local CLI; no keys, no network. $0, private,",
+    "//2": "offline, read-only. A lane auto-hides when its binary isn't on PATH, so unused entries are harmless.",
+    "//3": "Per-runtime bin / argv / gotchas: the table at the end of examples/local-first-host.md.",
+    "//4": "JURY CAVEAT: a local runtime of open weights correlates with OTHER local runtimes of the same",
+    "//5": "weights (ollama, lms, mlx, llama.cpp) — real jury decorrelation comes from distinct VENDORS, not a",
+    "//6": "second runtime of the same model. Use these for $0/offline, not diversity.",
+
+    "key": "lmstudio",
+    "display": "LM Studio (local)",
+    "bin": "lms",
+    "cost": "free",
+    "default_model": "qwen2.5-7b-instruct",
+    "model_flag": "",
+    "ask": ["chat", "{model}", "-p", "{task}", "-y"],
+    "help": ["chat", "--help"],
+    "client_ids": ["lmstudio", "lm-studio"],
+    "install_hint": "https://lmstudio.ai — then `lms get <chat-model>` to pull a chat model",
+    "note": "Local via LM Studio (`lms chat -p`). $0, private, offline. Read-only. Set the model in default_model or CLI_BRIDGE_LMSTUDIO_MODEL."
+  },
+  {
+    "key": "mlx",
+    "display": "MLX (Apple Silicon, local)",
+    "bin": "mlx_lm.generate",
+    "cost": "free",
+    "default_model": "mlx-community/Qwen2.5-7B-Instruct-4bit",
+    "model_flag": "--model",
+    "ask": ["--prompt", "{task}"],
+    "help": ["--help"],
+    "client_ids": ["mlx", "mlx-lm"],
+    "install_hint": "pip install mlx-lm  (Apple Silicon only) — then ensure mlx_lm.generate is on PATH",
+    "note": "Local via MLX (`mlx_lm.generate`). $0, private, offline, Apple-Silicon only. Read-only. model=<HF repo or local path>."
+  },
+  {
+    "key": "llamacpp",
+    "display": "llama.cpp (local, GGUF)",
+    "bin": "llama-cli",
+    "cost": "free",
+    "default_model": "",
+    "model_flag": "-m",
+    "ask": ["-p", "{task}", "-no-cnv", "-n", "512"],
+    "help": ["--help"],
+    "client_ids": ["llama.cpp", "llamacpp"],
+    "install_hint": "brew install llama.cpp  (or build from ggml-org/llama.cpp) — then point model= at a .gguf",
+    "note": "Local via llama.cpp (`llama-cli`). $0, private, offline, cross-platform. Read-only. model = a path to a .gguf file. Note: stdout re-echoes the prompt + perf stats on stderr."
+  }
+]

@@ -39,11 +39,10 @@ build-backend = "hatchling.build"
 packages = ["src/cli_bridge"]
 
 # Ship a lean source dist: the importable package + license/readme/changelog only. Excludes the
-# test suite (its identity-guard test lists the very banned-name tokens it forbids — keeping it out
-# of the published artifact avoids re-publishing them), plus docs/site/assets/examples that aren't
-# needed to build or install. CI runs the tests from the checkout, not from the sdist.
+# test suite, plus docs/benchmarks/assets/examples that aren't needed to build or install. CI runs
+# the tests from the checkout, not from the sdist.
 [tool.hatch.build.targets.sdist]
-exclude = ["/tests", "/docs", "/site", "/assets", "/examples", "/.github"]
+exclude = ["/tests", "/docs", "/benchmarks", "/assets", "/examples", "/.github"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
