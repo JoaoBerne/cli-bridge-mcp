@@ -4,6 +4,11 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project aims for
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+- `doctor --deep` remembers each probe (lane state, CLI version, model list) and reports what
+  drifted since the previous one; plain `doctor` nudges when no probe ran in 14 days.
+
 ## 0.3.0 — 2026-09-12
 
 0.2.0 was never tagged or published: everything since 0.1.5 ships here.

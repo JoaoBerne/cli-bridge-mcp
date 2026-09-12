@@ -97,6 +97,10 @@ CLI_BRIDGE_TRACE_FOOTER=off            # hide the JSON trace footer in reports
 CLI_BRIDGE_TOOLS=all                   # tool surface (see above)
 ```
 
+`doctor --deep` (or `doctor(deep=true)`) live-checks every free lane, its CLI version and its
+model list, and reports what changed since the previous deep probe: run it weekly and you learn
+about a renamed flag or a new model before a delegation fails.
+
 `set_lane_cost` (or `cli-bridge set-cost`) records what a lane costs *you*, persisted to the
 config file. Cost tiers are sourced defaults, never read from your account
 ([`docs/COSTS.md`](docs/COSTS.md)); the full spend model is in [`docs/BUDGET.md`](docs/BUDGET.md).

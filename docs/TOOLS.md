@@ -57,7 +57,7 @@ then revise-or-converge. It converges only when the peers approve and no blocker
 | `job` | Manage background jobs (`ask_all` / `workflow` / `batch_run` / `ask_build` with `async=true`). | `action=status\|result\|cancel\|list\|tail\|steer`, `job_id` (all but list), `offset` (tail), `instruction` + `interrupt` (steer) |
 | `rate_lane` | Score a lane 1–5 for a `mode` so `ask_best` prefers what wins on this machine; the note is shown as a past lesson at pick time. | `lane`, `score`, `mode`, `note` |
 | `set_lane_cost` | Record what a lane costs *you*; effective now, persisted to the config file. | `lane`, `cost=free\|limited\|paid`, `note` (required) |
-| `doctor` | Installed CLIs, resolved paths, host, cost tiers and their source, per-lane runs today. | `deep=true` live-probes each free lane |
+| `doctor` | Installed CLIs, resolved paths, host, cost tiers and their source, per-lane runs today. | `deep=true` live-probes each free lane, records its CLI version and model list, and reports what changed since the previous deep probe |
 | `setup` | The cost-profile choice (saver / balanced / max) to walk the user through. | — |
 | `batch_run` (hidden by default) | Durable journaled fan-out over many independent tasks. | `tasks`, `max_concurrency`, `max_calls`, `max_credits`, `dry_run`, `resume_id`, `async` |
 | `reset_lane_state` (hidden by default) | Clear a lane's cooldown and failure counters. | `lane` |

@@ -88,22 +88,76 @@ def _setup_recommendation(lanes: list[LaneSpec]) -> str:
 
 
 async def doctor_deep(host: str, lanes: list[LaneSpec], *, is_host, run_lane) -> str:
-    """doctor + a tiny live probe of each free, exposed lane to check auth/quota for real."""
+    """doctor + a tiny live probe of each free, exposed lane (auth/quota for real), its CLI
+    version and its live model list — all compared with the previous deep probe and remembered,
+    so a lane that stopped answering, a CLI that bumped or a model that appeared is reported as
+    drift instead of being noticed the day it breaks a delegation."""
     base = doctor(host, is_host=is_host)
     probes = [ln for ln in lanes if not ln.is_paid and not ln.is_limited]
     if not probes:
         return base + "\n\n_(deep probe: no free lanes to test)_"
+    prev = telemetry.probes_get()
+
     async def _probe(ln):
         # terse=False: the probe wants the literal string "OK"; a style preamble would only
         # tempt the model to reformat it. (Also dodges the preamble's per-call overhead here.)
         res = await run_lane(ln, {"task": "Reply with exactly: OK", "timeout_s": 60}, terse=False)
-        mark = "✅ responds" if res.ok else f"❌ {res.kind}"
-        ver = await _lane_version(ln)
-        return f"- **{ln.key}**: {mark}{f' · v: {ver}' if ver else ''}"
-    results = await asyncio.gather(*[_probe(ln) for ln in probes])
-    return (base + "\n\n## Deep probe (live auth check + CLI version, free lanes)\n\n"
-            + "\n".join(results)
-            + "\n\n_Versions help spot drift: if a CLI bumped and a lane breaks, file a `[drift]` issue._")
+        return ln.key, {"ok": bool(res.ok), "kind": res.kind, "version": await _lane_version(ln),
+                        "models": await _lane_models_live(ln)}
+    rows = dict(await asyncio.gather(*[_probe(ln) for ln in probes]))
+    lines = [f"- **{key}**: {'✅ responds' if r['ok'] else '❌ ' + r['kind']}"
+             f"{' · v: ' + r['version'] if r['version'] else ''}" for key, r in rows.items()]
+    out = (base + "\n\n## Deep probe (live auth check + CLI version, free lanes)\n\n"
+           + "\n".join(lines))
+    if prev:
+        when = time.strftime("%Y-%m-%d", time.localtime(max(p["at"] for p in prev.values())))
+        changes = _probe_changes(prev, rows)
+        out += (f"\n\n## Changed since last deep probe ({when})\n\n"
+                + ("\n".join(changes) if changes else "_nothing changed_"))
+    telemetry.probes_put(rows)
+    return out + ("\n\n_Each deep probe is compared with the previous one: a lane that stops "
+                  "answering or a CLI that bumped is drift to fix in lanes.py; a new model is "
+                  "yours to pick with `model=`._")
+
+
+async def _lane_models_live(lane: LaneSpec) -> list[str]:
+    """This lane's model ids right now: the CLI-maintained file, else a live listing (remembered
+    for the tool schemas too). [] when the lane can't list."""
+    if lane.models_file:
+        return [mid for mid, _ in lanes_mod.models_from_file(lane.models_file)]
+    if lane.models_args is None:
+        return []
+    res = await runner.arun([lane.bin, *lane.models_args], 30)
+    ids = lanes_mod.parse_model_ids(res.output) if res.ok else []
+    telemetry.lane_models_set(lane.key, ids)
+    return ids
+
+
+def _probe_changes(prev: dict[str, dict], now: dict[str, dict]) -> list[str]:
+    """One line per lane whose state, CLI version or model list differs from the previous probe."""
+    out = []
+    for key, r in now.items():
+        p = prev.get(key)
+        if p is None:
+            out.append(f"- **{key}**: first probe")
+            continue
+        bits = []
+        if p["ok"] != r["ok"]:
+            bits.append("✅ → ❌ " + r["kind"] if p["ok"] else "❌ → ✅ responds again")
+        if p["version"] != r["version"] and (p["version"] or r["version"]):
+            bits.append(f"v: {p['version'] or '?'} → {r['version'] or '?'}")
+        added = [m for m in r["models"] if m not in p["models"]]
+        gone = [m for m in p["models"] if m not in r["models"]]
+        if added:
+            bits.append("models +" + ", +".join(added[:8]) + (" …" if len(added) > 8 else ""))
+        if gone:
+            bits.append("models -" + ", -".join(gone[:8]) + (" …" if len(gone) > 8 else ""))
+        if bits:
+            out.append(f"- **{key}**: " + " · ".join(bits))
+    for key in prev:
+        if key not in now:
+            out.append(f"- **{key}**: not probed this time (gone from the free set?)")
+    return out
 
 
 async def _lane_version(lane: LaneSpec) -> str:
@@ -235,6 +289,15 @@ def doctor(host: str, *, is_host) -> str:
         lines.append(f"⚠️ _Cost facts last verified {lanes_mod.COST_FACTS_VERIFIED} "
                      f"({lanes_mod.cost_facts_age_days()} days ago) — plans/quotas churn fast; "
                      "re-check docs/COSTS.md against the vendor pages before trusting defaults._")
+    probed = telemetry.probes_get()
+    if not probed:
+        lines.append("_No deep probe yet — `doctor --deep` live-checks each lane and remembers "
+                     "CLI versions and model lists, so the next one reports what drifted._")
+    else:
+        age = int((time.time() - max(p["at"] for p in probed.values())) // 86400)
+        if age >= 14:
+            lines.append(f"⚠️ _Last deep probe {age} days ago — run `doctor --deep` to catch "
+                         "CLI/model drift._")
     lines.append("")
     for lane in all_lanes():
         installed = is_installed(lane)

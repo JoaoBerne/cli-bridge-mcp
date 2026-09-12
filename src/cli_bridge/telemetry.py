@@ -82,6 +82,14 @@ CREATE TABLE IF NOT EXISTS lane_models (
   ids TEXT NOT NULL,
   fetched_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS deep_probes (
+  lane TEXT PRIMARY KEY,
+  ok INTEGER NOT NULL,
+  kind TEXT NOT NULL DEFAULT '',
+  version TEXT NOT NULL DEFAULT '',
+  models TEXT NOT NULL DEFAULT '[]',
+  at REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS response_cache (
   key TEXT PRIMARY KEY,
   ok INTEGER NOT NULL,
@@ -720,6 +728,40 @@ def lane_models_set(lane: str, ids: list[str]) -> None:
             conn.execute("INSERT INTO lane_models (lane, ids, fetched_at) VALUES (?,?,?) "
                          "ON CONFLICT(lane) DO UPDATE SET ids=excluded.ids, "
                          "fetched_at=excluded.fetched_at", (lane, json.dumps(ids), _now()))
+            conn.commit()
+    except (sqlite3.Error, ValueError):
+        pass
+
+
+def probes_get() -> dict[str, dict]:
+    """Last deep-probe result per lane: {lane: {ok, kind, version, models, at}}. {} when unknown
+    or the DB is off — doctor then reports the probe without a "changed since" section."""
+    conn = _connect()
+    if conn is None:
+        return {}
+    try:
+        with _LOCK:
+            rows = conn.execute("SELECT lane, ok, kind, version, models, at FROM deep_probes").fetchall()
+        return {lane: {"ok": bool(ok), "kind": kind, "version": ver, "models": json.loads(models),
+                       "at": float(at)} for lane, ok, kind, ver, models, at in rows}
+    except (sqlite3.Error, ValueError):
+        return {}
+
+
+def probes_put(rows: dict[str, dict]) -> None:
+    """Remember this deep probe's per-lane result, replacing the previous one. Best-effort."""
+    conn = _connect()
+    if conn is None or not rows:
+        return
+    now = _now()
+    try:
+        with _LOCK:
+            conn.executemany(
+                "INSERT INTO deep_probes (lane, ok, kind, version, models, at) VALUES (?,?,?,?,?,?) "
+                "ON CONFLICT(lane) DO UPDATE SET ok=excluded.ok, kind=excluded.kind, "
+                "version=excluded.version, models=excluded.models, at=excluded.at",
+                [(lane, int(r["ok"]), r.get("kind", ""), r.get("version", ""),
+                  json.dumps(r.get("models", [])), now) for lane, r in rows.items()])
             conn.commit()
     except (sqlite3.Error, ValueError):
         pass
