@@ -4,10 +4,21 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project aims for
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 0.3.1 — 2026-09-13
+
+Fixes found by an end-to-end drive of the real MCP server (every tool, every installed lane,
+mcp 1.x and 2.x) plus drift reporting.
 
 - `doctor --deep` remembers each probe (lane state, CLI version, model list) and reports what
   drifted since the previous one; plain `doctor` nudges when no probe ran in 14 days.
+- The claude lane passes `--strict-mcp-config`: a delegate no longer boots the host's MCP servers.
+- A steerable build rejected for a zone violation now settles as `failed`, not `succeeded`.
+- `cli-bridge jobs` no longer marks a live server's running jobs `interrupted`: only rows whose
+  owning process is dead are flipped, with a real liveness probe on Windows too.
+- A headless CLI's tool auto-deny (`agy`: "no output produced … auto-denied") is a soft
+  failure of kind `denied`, not the lane's answer.
+- A direct build accepts an existing file as its zone (it raised `FileExistsError`).
+- Docs: `async=true` steers a direct build only.
 
 ## 0.3.0 — 2026-09-12
 

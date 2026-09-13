@@ -1,6 +1,6 @@
 [project]
 name = "cli-bridge-mcp"
-version = "0.3.0"
+version = "0.3.1"
 description = "Expose the other AI CLIs installed on your machine (Gemini, Codex, Claude Code, Mistral, opencode, Ollama…) as MCP tools. Spawns the official CLI; no API keys."
 readme = "README.md"
 license = { text = "Apache-2.0" }
