@@ -24,3 +24,12 @@ def test_plugin_manifest_launches_the_published_package():
     server = pj["mcpServers"]["cli-bridge"]
     assert server["command"] == "uvx"
     assert server["args"] == ["cli-bridge-mcp"], "must launch the PyPI package, not a local path"
+
+
+def test_registry_server_json_passes_the_publish_checks():
+    import tomllib
+
+    sj = json.loads((ROOT / "server.json").read_text(encoding="utf-8"))
+    version = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    assert len(sj["description"]) <= 100, "the MCP registry rejects a longer description (422)"
+    assert sj["version"] == sj["packages"][0]["version"] == version

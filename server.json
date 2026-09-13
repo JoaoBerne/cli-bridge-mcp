@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.JoaoBerne/cli-bridge-mcp",
-  "description": "Expose the other AI CLIs installed on your machine (Gemini, Codex, Claude Code, Mistral, opencode, Ollama…) as MCP tools. Spawns the official CLI; no API keys.",
+  "description": "Other AI CLIs on your machine (Gemini, Codex, Claude Code, opencode…) as MCP tools. No API keys.",
   "version": "0.3.1",
   "websiteUrl": "https://github.com/JoaoBerne/cli-bridge-mcp",
   "repository": {
