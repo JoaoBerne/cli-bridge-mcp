@@ -103,6 +103,7 @@ def test_mistral_arg_order():
 def test_claude_plan_is_readonly_build_edits():
     plan = _lane("claude").build_ask("t", "", "", "")
     assert "--permission-mode" in plan and "plan" in plan and "acceptEdits" not in plan
+    assert "--strict-mcp-config" in plan            # a delegate never boots the host's MCP servers
     build = _lane("claude").build_ask("t", "", "", "build")
     assert "acceptEdits" in build and "plan" not in build
 

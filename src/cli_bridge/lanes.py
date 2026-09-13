@@ -285,7 +285,10 @@ def _is_build(agent) -> bool:
 def _claude_ask(task, model, effort, agent, bin=""):
     # plan = read-only; build = acceptEdits (auto-applies file edits, no per-edit prompt).
     mode = "acceptEdits" if _is_build(agent) else "plan"
-    cmd = ["--print", "--permission-mode", mode]
+    # --strict-mcp-config with no --mcp-config: the delegate loads NONE of the host's MCP servers.
+    # Without it every call boots the user's whole MCP config (personal data servers, and a nested
+    # cli-bridge that the depth cap then refuses anyway).
+    cmd = ["--print", "--permission-mode", mode, "--strict-mcp-config"]
     if model:
         cmd += ["--model", model]
     return cmd + [task]
