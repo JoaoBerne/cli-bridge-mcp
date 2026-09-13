@@ -101,6 +101,25 @@ def test_cancel_unknown_and_finished():
     assert jobs.cancel(job_id) == jobs.SUCCEEDED      # already done
 
 
+def test_predicate_marks_a_finished_job_failed_and_keeps_its_report():
+    # A build rejected for a zone violation returns its report without raising: the caller's
+    # predicate marks it failed, and job(action=result) still returns the whole report.
+    report = "# Direct build (steered) — ⛔ rejected — zone violation\nbackend/evil.txt"
+
+    async def scenario():
+        async def work():
+            return report
+        ok_id = jobs.start_job("build", work, preview="x", failed=lambda r: False)
+        bad_id = jobs.start_job("build", work, preview="x", failed=lambda r: "rejected" in r)
+        await _drain()
+        return ok_id, bad_id
+    ok_id, bad_id = asyncio.run(scenario())
+    assert jobs.status(ok_id)["status"] == jobs.SUCCEEDED
+    assert jobs.status(bad_id)["status"] == jobs.FAILED
+    assert jobs.result(bad_id) == (jobs.FAILED, report)
+    assert telemetry.job_row(bad_id)["status"] == jobs.FAILED     # persisted, not just in memory
+
+
 # ── persistence / restart ──────────────────────────────────────────────────────────────────
 
 def test_restart_marks_running_interrupted():

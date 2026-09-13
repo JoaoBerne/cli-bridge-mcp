@@ -75,14 +75,17 @@ def _read(path: str | None) -> str | None:
         return None
 
 
-async def _run(job: Job, make_coro: Callable[[], Awaitable[str]]) -> None:
+async def _run(job: Job, make_coro: Callable[[], Awaitable[str]],
+               failed: Callable[[str], bool] | None = None) -> None:
     try:
         result = await make_coro()
         job.result_path = _spill(job.id, result)
         if job.result_path is None:
             job.result = result             # spill failed: keep it in memory
-        job.status = SUCCEEDED
-        telemetry.job_put(job.id, job.kind, SUCCEEDED, job.preview, result_path=job.result_path)
+        # A job can end without raising and still have failed (a build rejected for a zone
+        # violation): the caller's predicate says so, and the full report stays the result.
+        job.status = FAILED if failed is not None and failed(result) else SUCCEEDED
+        telemetry.job_put(job.id, job.kind, job.status, job.preview, result_path=job.result_path)
     except asyncio.CancelledError:
         job.status = CANCELLED
         telemetry.job_put(job.id, job.kind, CANCELLED, job.preview, error="cancelled")
@@ -93,14 +96,15 @@ async def _run(job: Job, make_coro: Callable[[], Awaitable[str]]) -> None:
         telemetry.job_put(job.id, job.kind, FAILED, job.preview, error=job.error)
 
 
-def start_job(kind: str, make_coro: Callable[[], Awaitable[str]], preview: str) -> str:
+def start_job(kind: str, make_coro: Callable[[], Awaitable[str]], preview: str, *,
+              failed: Callable[[str], bool] | None = None) -> str:
     """Schedule `make_coro()` as a background task and return its id immediately (<<1s).
     Must be called from within the running event loop (it is — from a tool dispatch)."""
     job = Job(id=_new_id(), kind=kind, preview=(preview or "").strip()[:120].replace("\n", " "),
               created_at=time.time())
     _JOBS[job.id] = job
     telemetry.job_put(job.id, kind, RUNNING, job.preview)
-    job.task = asyncio.create_task(_run(job, make_coro))
+    job.task = asyncio.create_task(_run(job, make_coro, failed))
     return job.id
 
 

@@ -155,10 +155,12 @@ def test_turn_zone_violation_aborts(repo, tmp_path):
             os.makedirs(os.path.dirname(p), exist_ok=True)
             open(p, "w").write("x")
         return RunResult(True, "wrote", "ok", 10)
+    state = _state(tmp_path)
     report = asyncio.run(buildloop.run_build(
-        _state(tmp_path), run_lane=escaping, lane=_lane(),
+        state, run_lane=escaping, lane=_lane(),
         args={"task": "t", "target_dir": str(repo), "zone": "frontend"}, steer_grace_s=0))
     assert "zone violation" in report and "backend/evil.txt" in report
+    assert state.outcome == "zone_violation"                  # what marks the async job failed
     assert not (repo / "frontend" / "ok.txt").exists()        # in-zone work reverted
     assert (repo / "backend" / "evil.txt").exists()           # escape left for inspection
 

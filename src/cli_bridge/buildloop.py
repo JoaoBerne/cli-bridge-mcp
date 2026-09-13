@@ -57,6 +57,7 @@ class BuildState:
     turn: int = 0
     files_changed: int = 0
     note: str = "starting"
+    outcome: str = ""       # set by _report: done|built|dod_failed|max_turns|zone_violation
     steer_q: list[str] = field(default_factory=list)
     interrupt_requested: bool = False
     steer_evt: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
@@ -369,6 +370,7 @@ async def _wait_for_steer(state: BuildState, grace_s: float) -> bool:
 
 def _report(state: BuildState, res, outcome: str, scaffold_note: str, *,
             dod_out: str = "", violations: list[str] | None = None) -> str:
+    state.outcome = outcome
     titles = {"done": "✅ done (Definition of Done passed)",
               "built": "✅ built",
               "dod_failed": "⚠️ stopped — Definition of Done kept failing",

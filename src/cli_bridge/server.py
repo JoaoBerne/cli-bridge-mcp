@@ -828,7 +828,8 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
                 _args = dict(args)
                 job_id = jobs.start_job(
                     "build", lambda: buildloop.run_build(state, run_lane=_run_lane, lane=lane,
-                                                         args=_args), preview=_str(args, "task"))
+                                                         args=_args), preview=_str(args, "task"),
+                    failed=lambda _report: state.outcome == "zone_violation")
                 state.log_path = jobs.log_path_for(job_id)
                 buildloop.register(job_id, state)
                 return [TextContent(type="text", text=(
